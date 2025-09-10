@@ -40,7 +40,7 @@ public class AuthService {
         if (!passwordEncoder.matches(pin, user.getPinHash())) {
             throw new BadCredentialsException("Invalid username or PIN");
         }
-        return jwtUtil.generateAccessToken(user.getUsername(), user.getRole().name());
+        return jwtUtil.generateAccessToken(user);
     }
 
     public void registerNewUser(RegisterRequest request) {
@@ -68,6 +68,19 @@ public class AuthService {
         resetTokenService.deleteToken(token);
     }
 
+    @Transactional
+    public void changeUserPin(String username, String currentPin, String newPin) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+
+        if (!passwordEncoder.matches(currentPin, user.getPinHash())) {
+            throw new BadCredentialsException("Incorrect current PIN provided.");
+        }
+
+        user.setPinHash(passwordEncoder.encode(newPin));
+        userRepository.save(user);
+    }
+
     // Call this on login to issue refresh token
     public String createRefreshToken(String username) {
         User user = userRepository.findByUsername(username)
@@ -82,7 +95,7 @@ public class AuthService {
             throw new RuntimeException("Refresh token expired");
         }
         User user = getUserByUsername(token.getUsername());
-        String newAccessToken = jwtUtil.generateAccessToken(user.getUsername(), user.getRole().name());
+        String newAccessToken = jwtUtil.generateAccessToken(user);
         return new AuthResponse(newAccessToken, refreshToken, user.getRole().name());
     }
 

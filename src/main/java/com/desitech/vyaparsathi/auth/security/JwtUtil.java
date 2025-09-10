@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.auth.security;
 
+import com.desitech.vyaparsathi.auth.entity.User;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;
@@ -33,6 +34,18 @@ public class JwtUtil {
         byte[] keyBytes = Base64.getDecoder().decode(secret);
         logger.info("JWT secret key length (bytes): " + keyBytes.length);
         this.secretKey = Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    public String generateAccessToken(User user) {
+        return Jwts.builder()
+                .setSubject(user.getUsername())
+                .claim("role", user.getRole().name())
+                .claim("firstName", user.getFirstName())
+                .claim("lastName", user.getLastName())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
+                .signWith(secretKey, SignatureAlgorithm.HS512)
+                .compact();
     }
     public String generateAccessToken(String username, String role) {
         return Jwts.builder()

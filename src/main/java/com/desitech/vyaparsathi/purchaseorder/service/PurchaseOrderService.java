@@ -6,7 +6,9 @@ import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderDto;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrder;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrderItem;
 import com.desitech.vyaparsathi.inventory.entity.Supplier;
+import com.desitech.vyaparsathi.purchaseorder.enums.EventType;
 import com.desitech.vyaparsathi.purchaseorder.enums.PurchaseOrderStatus;
+import com.desitech.vyaparsathi.purchaseorder.events.dto.PurchaseOrderEventDto;
 import com.desitech.vyaparsathi.purchaseorder.mapper.PurchaseOrderMapper;
 import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderItemRepository;
 import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderRepository;
@@ -82,7 +84,8 @@ public class PurchaseOrderService {
         savedPurchaseOrder.setItems(items);
 
         // Emit Kafka event after save (eventType = "CREATED")
-        purchaseOrderProducer.sendMessage(new PurchaseOrderEvent("CREATED", savedPurchaseOrder));
+        PurchaseOrderEventDto eventDto = PurchaseOrderEventDto.fromEntity(savedPurchaseOrder);
+        purchaseOrderProducer.sendMessage(new PurchaseOrderEvent(EventType.CREATED, eventDto));
 
         return mapper.toDto(savedPurchaseOrder);
     }
@@ -144,7 +147,8 @@ public class PurchaseOrderService {
         PurchaseOrder saved = purchaseOrderRepository.save(purchaseOrder);
 
         // Emit Kafka event after update (eventType = "UPDATED")
-        purchaseOrderProducer.sendMessage(new PurchaseOrderEvent("UPDATED", saved));
+        PurchaseOrderEventDto eventDto = PurchaseOrderEventDto.fromEntity(saved);
+        purchaseOrderProducer.sendMessage(new PurchaseOrderEvent(EventType.UPDATED, eventDto));
 
         return mapper.toDto(saved);
     }
@@ -159,10 +163,11 @@ public class PurchaseOrderService {
         }
         purchaseOrder.setStatus(PurchaseOrderStatus.SUBMITTED);
 
-        PurchaseOrder saved = purchaseOrderRepository.save(purchaseOrder);
+        PurchaseOrder savedPO = purchaseOrderRepository.save(purchaseOrder);
+        PurchaseOrderEventDto eventDto = PurchaseOrderEventDto.fromEntity(savedPO);
         // Emit Kafka event after submit (eventType = "SUBMITTED")
-        purchaseOrderProducer.sendMessage(new PurchaseOrderEvent("SUBMITTED", saved));
-        return mapper.toDto(saved);
+        purchaseOrderProducer.sendMessage(new PurchaseOrderEvent(EventType.SUBMITTED, eventDto));
+        return mapper.toDto(savedPO);
     }
 
     @Transactional
@@ -174,6 +179,7 @@ public class PurchaseOrderService {
         purchaseOrderRepository.deleteById(id);
 
         // Emit Kafka event after delete (eventType = "DELETED")
-        purchaseOrderProducer.sendMessage(new PurchaseOrderEvent("DELETED", po));
+        PurchaseOrderEventDto eventDto = PurchaseOrderEventDto.fromEntity(po);
+        purchaseOrderProducer.sendMessage(new PurchaseOrderEvent(EventType.DELETED, eventDto));
     }
 }

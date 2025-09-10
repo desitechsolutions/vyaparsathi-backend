@@ -11,6 +11,7 @@ import com.desitech.vyaparsathi.auth.service.ResetTokenService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -38,7 +39,7 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token, refreshToken, user.getRole().name()));
     }
 
-    @PostMapping("/register")
+/*    @PostMapping("/register")
     public ResponseEntity<String> register(@Valid @RequestBody RegisterRequest request) {
         try {
             authService.registerNewUser(request);
@@ -47,6 +48,20 @@ public class AuthController {
         } catch (Exception e) {
             logger.error("Registration failed for user {}: {}", request.getUsername(), e.getMessage(), e);
             throw new ApplicationException("Registration failed", e);
+        }
+    }*/
+
+    @PostMapping("/change-pin")
+    public ResponseEntity<String> changePin(@Valid @RequestBody ChangePinRequest request, Authentication authentication) {
+        try {
+            // Get the username from the current security context to ensure users can only change their own PIN.
+            String username = authentication.getName();
+            authService.changeUserPin(username, request.getCurrentPin(), request.getNewPin());
+            logger.info("PIN changed successfully for user {}", username);
+            return ResponseEntity.ok("PIN changed successfully. Please log in again.");
+        } catch (Exception e) {
+            logger.error("Failed to change PIN: {}", e.getMessage(), e);
+            throw new ApplicationException("Failed to change PIN", e);
         }
     }
 

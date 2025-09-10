@@ -23,28 +23,30 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler({EntityNotFoundException.class, UsernameNotFoundException.class})
-    public ResponseEntity<String> handleEntityNotFoundException(EntityNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+    public ResponseEntity<Map<String, String>> handleEntityNotFoundException(EntityNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(getErrorMap(ex));
     }
 
     @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<String> handleIllegalStateException(IllegalStateException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
+    public ResponseEntity<Map<String, String>> handleIllegalStateException(IllegalStateException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(getErrorMap(ex));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<String> handleIllegalArgumentException(IllegalArgumentException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
+    public ResponseEntity<Map<String, String>> handleIllegalArgumentException(IllegalArgumentException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(getErrorMap(ex));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<String> handleValidationExceptions(MethodArgumentNotValidException ex) {
+    public ResponseEntity<Map<String, String>> handleValidationExceptions(MethodArgumentNotValidException ex) {
+        Map<String, String> error = new HashMap<>();
         String errors = ex.getBindingResult()
                 .getAllErrors()
                 .stream()
                 .map(ObjectError::getDefaultMessage)
                 .collect(Collectors.joining(", "));
-        return ResponseEntity.badRequest().body(errors);
+        error.put("message", errors);
+        return ResponseEntity.badRequest().body(error);
     }
 
     @ExceptionHandler(InvalidFormatException.class)
@@ -74,10 +76,18 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public ResponseEntity<String> handleMaxSizeException(MaxUploadSizeExceededException ex) {
+    public ResponseEntity<Map<String, String>> handleMaxSizeException(MaxUploadSizeExceededException ex) {
+        Map<String, String> error = new HashMap<>();
+        error.put("message", "File too large! Please upload a smaller file.");
         return ResponseEntity
                 .badRequest()
-                .body("File too large! Please upload a smaller file.");
+                .body(error);
     }
     // Add other exception handlers as needed
+
+    private Map<String, String> getErrorMap(Exception ex){
+        Map<String, String> error = new HashMap<>();
+        error.put("message", ex.getMessage());
+        return error;
+    }
 }

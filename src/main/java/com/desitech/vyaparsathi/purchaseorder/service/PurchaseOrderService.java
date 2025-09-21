@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -181,5 +182,14 @@ public class PurchaseOrderService {
         // Emit Kafka event after delete (eventType = "DELETED")
         PurchaseOrderEventDto eventDto = PurchaseOrderEventDto.fromEntity(po);
         purchaseOrderProducer.sendMessage(new PurchaseOrderEvent(EventType.DELETED, eventDto));
+    }
+
+    public List<PurchaseOrderDto> getPendingPurchaseOrders() {
+        List<PurchaseOrderStatus> includedStatuses = Arrays.asList(
+                PurchaseOrderStatus.SUBMITTED,
+                PurchaseOrderStatus.PENDING
+        );
+        List<PurchaseOrder> pos = purchaseOrderRepository.findAllByStatusIn(includedStatuses);
+        return pos.stream().map(mapper::toDto).collect(Collectors.toList());
     }
 }

@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.notification.entity;
 
+import com.desitech.vyaparsathi.shop.entity.Shop;
 import jakarta.persistence.*;
 import lombok.Data;
 
@@ -19,4 +20,8 @@ public class Notification {
     private boolean read;
     private String link;
     private LocalDateTime timestamp;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shop_id", nullable = false)
+    private Shop shop;
 }

@@ -1,7 +1,9 @@
 package com.desitech.vyaparsathi.inventory.entity;
 
+import com.desitech.vyaparsathi.inventory.StockMovementType;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
+import com.desitech.vyaparsathi.shop.entity.Shop;
 import jakarta.persistence.*;
 import lombok.Data;
 
@@ -17,11 +19,16 @@ public class StockMovement {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shop_id", nullable = false)
+    private Shop shop;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_variant_id", nullable = false)
     private ItemVariant itemVariant;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "movement_type", nullable = false)
-    private String movementType; // ADD, DEDUCT, ADJUST
+    private StockMovementType movementType; // ADD, DEDUCT, ADJUST
 
     @Column(nullable = false)
     private BigDecimal quantity;

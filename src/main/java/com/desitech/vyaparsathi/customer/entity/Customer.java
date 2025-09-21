@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.customer.entity;
 
 import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
+import com.desitech.vyaparsathi.shop.entity.Shop;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -15,6 +16,10 @@ public class Customer {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shop_id", nullable = false)
+    private Shop shop;
 
     @Column(nullable = false)
     private String name;

@@ -1,12 +1,60 @@
 package com.desitech.vyaparsathi.receiving.repository;
 
+import com.desitech.vyaparsathi.receiving.dto.ReceivingQtySummary;
 import com.desitech.vyaparsathi.receiving.entity.Receiving;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrder;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface ReceivingRepository extends JpaRepository<Receiving, Long> {
     boolean existsByPurchaseOrder(PurchaseOrder po);
-    Optional<Receiving> findByPurchaseOrderId(Long poId);
+
+    @Query("SELECT new com.desitech.vyaparsathi.receiving.dto.ReceivingQtySummary(" +
+            "COALESCE(SUM(ri.receivedQty),0), " +
+            "COALESCE(SUM(ri.damagedQty),0), " +
+            "COALESCE(SUM(ri.rejectedQty),0)) " +
+            "FROM Receiving r JOIN r.items ri " +
+            "WHERE ri.purchaseOrderItem.id = :poItemId")
+    ReceivingQtySummary getQtySummaryForPOItem(@Param("poItemId") Long poItemId);
+   /* @Query("SELECT COALESCE(SUM(ri.receivedQty),0) FROM Receiving r JOIN r.items ri WHERE ri.purchaseOrderItem.id = :poItemId")
+    int sumReceivedQtyForPOItem(Long poItemId);
+
+    @Query("SELECT COALESCE(SUM(ri.damagedQty),0) FROM Receiving r JOIN r.items ri WHERE ri.purchaseOrderItem.id = :poItemId")
+    int sumDamagedQtyForPOItem(Long poItemId);
+
+    @Query("SELECT COALESCE(SUM(ri.rejectedQty),0) FROM Receiving r JOIN r.items ri WHERE ri.purchaseOrderItem.id = :poItemId")
+    int sumRejectedQtyForPOItem(Long poItemId);
+*/
+    // Added for pagination in service/controller
+    @EntityGraph(attributePaths = {
+            "purchaseOrder",
+            "purchaseOrder.supplier",
+            "items",
+            "items.purchaseOrderItem"
+    })
+    Page<Receiving> findAll(Pageable pageable);
+
+    @EntityGraph(attributePaths = {
+            "purchaseOrder",
+            "purchaseOrder.supplier",
+            "items",
+            "items.purchaseOrderItem"
+    })
+    List<Receiving> findAllByPurchaseOrderId(Long poItemId);
+
+    @EntityGraph(attributePaths = {
+            "purchaseOrder",
+            "purchaseOrder.supplier",
+            "items",
+            "items.purchaseOrderItem"
+    })
+    @Query("SELECT r FROM Receiving r WHERE r.purchaseOrder.poNumber = :poNumber")
+    List<Receiving> findAllByPoNumber(@Param("poNumber") String poNumber);
 }

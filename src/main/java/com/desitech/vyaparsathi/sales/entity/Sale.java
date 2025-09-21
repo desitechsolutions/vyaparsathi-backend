@@ -28,7 +28,7 @@ public class Sale {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(unique = true, nullable = false)
+    @Column(name = "invoice_no", nullable = false, unique = true)
     private String invoiceNo;
 
     @Column(nullable = false)
@@ -43,11 +43,13 @@ public class Sale {
     private Customer customer;
 
 
-    @Column(nullable = false)
+    @Column(name = "total_amount", nullable = false)
     private BigDecimal totalAmount;
 
+    @Column(name = "round_off")
     private BigDecimal roundOff;
 
+    @Column(name = "synced_flag")
     private boolean syncedFlag;
 
     @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true)

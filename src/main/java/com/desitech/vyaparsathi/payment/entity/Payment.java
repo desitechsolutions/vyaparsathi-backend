@@ -3,6 +3,7 @@ package com.desitech.vyaparsathi.payment.entity;
 import com.desitech.vyaparsathi.payment.enums.PaymentMethod;
 import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
+import com.desitech.vyaparsathi.shop.entity.Shop;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -37,6 +38,9 @@ public class Payment {
     @Enumerated(EnumType.STRING)
     private PaymentStatus status;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shop_id", nullable = false)
+    private Shop shop;
     @PrePersist
     public void onCreate() {
         if (paymentDate == null) {

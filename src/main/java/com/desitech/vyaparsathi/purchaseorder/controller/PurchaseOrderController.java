@@ -55,4 +55,9 @@ public class PurchaseOrderController {
         purchaseOrderService.deletePurchaseOrder(id);
         return ResponseEntity.noContent().build();
     }
+
+    @GetMapping("/pending")
+    public List<PurchaseOrderDto> getPendingPurchaseOrders() {
+        return purchaseOrderService.getPendingPurchaseOrders();
+    }
 }

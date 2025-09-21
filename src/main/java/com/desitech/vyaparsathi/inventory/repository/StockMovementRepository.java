@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.inventory.repository;
 
+import com.desitech.vyaparsathi.inventory.StockMovementType;
 import com.desitech.vyaparsathi.inventory.entity.StockMovement;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -17,7 +18,7 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, Lo
             Long itemVariantId, LocalDateTime startDate, LocalDateTime endDate);
     List<StockMovement> findByTimestampBetweenOrderByTimestampDesc(
             LocalDateTime startDate, LocalDateTime endDate);
-    List<StockMovement> findByItemVariantIdAndMovementType(Long itemVariantId, String movementType);
+    List<StockMovement> findByItemVariantIdAndMovementType(Long itemVariantId, StockMovementType movementType);
 
     // NEW: Method to get current stock for one item
     @Query("SELECT SUM(m.quantity) FROM StockMovement m WHERE m.itemVariant.id = :itemVariantId")

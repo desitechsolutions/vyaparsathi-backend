@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.reports.service;
 
+import com.desitech.vyaparsathi.inventory.StockMovementType;
 import com.desitech.vyaparsathi.inventory.entity.Item;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.entity.StockMovement;
@@ -71,7 +72,7 @@ class COGSCalculationServiceTest {
         StockMovement movement1 = createAddStockMovement(new BigDecimal("60.00"), new BigDecimal("10"));
         StockMovement movement2 = createAddStockMovement(new BigDecimal("80.00"), new BigDecimal("20"));
 
-        when(stockMovementRepository.findByItemVariantIdAndMovementType(1L, "ADD"))
+        when(stockMovementRepository.findByItemVariantIdAndMovementType(1L, StockMovementType.ADD))
                 .thenReturn(Arrays.asList(movement1, movement2));
 
         // Expected Average Cost: (60*10 + 80*20) / (10+20) = (600 + 1600) / 30 = 73.33
@@ -86,11 +87,11 @@ class COGSCalculationServiceTest {
     @Test
     @DisplayName("Should return zero COGS when no purchase data (stock movements) is available")
     void shouldReturnZeroCOGSWhenNoPurchaseData() {
-        when(stockMovementRepository.findByItemVariantIdAndMovementType(anyLong(), eq("ADD")))
+        when(stockMovementRepository.findByItemVariantIdAndMovementType(anyLong(), eq(StockMovementType.ADD)))
                 .thenReturn(Collections.emptyList());
 
         BigDecimal totalCOGS = cogsCalculationService.calculateCOGS(Collections.singletonList(sale));
-        assertEquals(BigDecimal.ZERO, totalCOGS);
+        assertEquals(0, totalCOGS.compareTo(BigDecimal.ZERO));
     }
 
     @Test
@@ -98,7 +99,7 @@ class COGSCalculationServiceTest {
     void shouldCalculateItemCOGSCorrectly() {
         StockMovement movement = createAddStockMovement(new BigDecimal("70.00"), new BigDecimal("50"));
 
-        when(stockMovementRepository.findByItemVariantIdAndMovementType(1L, "ADD"))
+        when(stockMovementRepository.findByItemVariantIdAndMovementType(1L, StockMovementType.ADD))
                 .thenReturn(Collections.singletonList(movement));
 
         // Expected: quantity sold (5) * average cost (70) = 350
@@ -123,7 +124,7 @@ class COGSCalculationServiceTest {
 
         StockMovement movement = createAddStockMovement(new BigDecimal("50.00"), new BigDecimal("100"));
 
-        when(stockMovementRepository.findByItemVariantIdAndMovementType(1L, "ADD"))
+        when(stockMovementRepository.findByItemVariantIdAndMovementType(1L, StockMovementType.ADD))
                 .thenReturn(Collections.singletonList(movement));
 
         BigDecimal totalCOGS = cogsCalculationService.calculateCOGS(Collections.singletonList(sale));
@@ -138,7 +139,7 @@ class COGSCalculationServiceTest {
         StockMovement movement1 = createAddStockMovement(new BigDecimal("50.00"), new BigDecimal("0"));
         StockMovement movement2 = createAddStockMovement(new BigDecimal("60.00"), new BigDecimal("10"));
 
-        when(stockMovementRepository.findByItemVariantIdAndMovementType(1L, "ADD"))
+        when(stockMovementRepository.findByItemVariantIdAndMovementType(1L, StockMovementType.ADD))
                 .thenReturn(Arrays.asList(movement1, movement2));
 
         // Expected average cost is 60, as the zero-quantity movement should be ignored.
@@ -153,7 +154,7 @@ class COGSCalculationServiceTest {
         movement.setItemVariant(itemVariant);
         movement.setCostPerUnit(unitCost);
         movement.setQuantity(quantity);
-        movement.setMovementType("ADD");
+        movement.setMovementType(StockMovementType.ADD);
         movement.setTimestamp(LocalDateTime.now());
         return movement;
     }

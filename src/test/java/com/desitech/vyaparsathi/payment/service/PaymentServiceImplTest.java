@@ -1,5 +1,8 @@
 package com.desitech.vyaparsathi.payment.service;
 
+import com.desitech.vyaparsathi.customer.dto.CustomerLedgerDto;
+import com.desitech.vyaparsathi.customer.entity.CustomerLedgerType;
+import com.desitech.vyaparsathi.customer.service.CustomerLedgerService;
 import com.desitech.vyaparsathi.payment.dto.PaymentDto;
 import com.desitech.vyaparsathi.payment.dto.PaymentReceivedRequest;
 import com.desitech.vyaparsathi.payment.entity.Payment;
@@ -13,12 +16,14 @@ import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderRepository
 import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.validation.constraints.NotNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.*;
 import org.springframework.cache.CacheManager;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -31,6 +36,8 @@ class PaymentServiceImplTest {
     @InjectMocks
     PaymentServiceImpl paymentService;
 
+    @Mock
+    CustomerLedgerService ledgerService;
     @Mock
     PaymentRepository paymentRepository;
     @Mock
@@ -329,6 +336,13 @@ class PaymentServiceImplTest {
         req.setSourceId(11L);
         req.setSourceType(PaymentSourceType.SALE);
         req.setPaymentMethod(PaymentMethod.CASH);
+        req.setCustomerId(101L);
+
+        CustomerLedgerDto dto = new CustomerLedgerDto();
+        dto.setId(101L);
+        dto.setCustomerId(101L);
+        dto.setAmount(new BigDecimal("500"));
+        dto.setType(CustomerLedgerType.DEBIT);
 
         Sale sale = new Sale();
         sale.setId(11L);
@@ -337,10 +351,17 @@ class PaymentServiceImplTest {
         when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 11L)).thenReturn(Collections.emptyList());
         when(saleRepository.findById(11L)).thenReturn(Optional.of(sale));
         when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(ledgerService.addEntry(eq(101L), any(CustomerLedgerDto.class))).thenReturn(dto);
 
         Payment payment = new Payment();
+        payment.setSourceType(PaymentSourceType.SALE); // <-- FIXED
+        payment.setSourceId(11L);                      // <-- FIXED
+        payment.setAmount(new BigDecimal("500"));
+        payment.setPaymentMethod(PaymentMethod.CASH);
+
         PaymentDto paymentDto = new PaymentDto();
         when(paymentMapper.toDto(any(Payment.class))).thenReturn(paymentDto);
+        when(paymentMapper.toEntityFromPayRequest(eq(req))).thenReturn(payment);
 
         PaymentDto result = paymentService.recordDuePayment(req);
 

@@ -3,9 +3,12 @@ package com.desitech.vyaparsathi.receiving.entity;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrderItem;
 import com.desitech.vyaparsathi.receiving.enums.ReceivingItemStatus;
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.*;
 
-@Data
+@Setter
+@Getter
+@AllArgsConstructor
+@NoArgsConstructor
 @Entity
 public class ReceivingItem {
     @Id
@@ -26,12 +29,22 @@ public class ReceivingItem {
     @Column(nullable = false)
     private Integer expectedQty;
 
-    @Column(name = "received_qty", nullable = false)
+    @Column(nullable = false)
     private Integer receivedQty;
+
     private Integer damagedQty;
+
     private String damageReason;
+
+    private Integer rejectedQty;
+
+    private String rejectReason;
+
     private String notes;
 
+    @Column(name = "putaway_qty")
+    private Integer putawayQty;
+
     @Column(name = "put_away_status")
-    private String putAwayStatus; // e.g., "Accepted", "Rejected - Fabric Issue", "Rejected - Stitching Issue"
+    private String putAwayStatus;
 }

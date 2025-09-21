@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.delivery.entity;
 
 import com.desitech.vyaparsathi.delivery.enums.DeliveryPaidBy;
 import com.desitech.vyaparsathi.delivery.enums.DeliveryStatus;
+import com.desitech.vyaparsathi.shop.entity.Shop;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -21,6 +22,10 @@ public class Delivery {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long deliveryId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shop_id", nullable = false)
+    private Shop shop;
 
     @Column(nullable = false)
     private Long saleId;

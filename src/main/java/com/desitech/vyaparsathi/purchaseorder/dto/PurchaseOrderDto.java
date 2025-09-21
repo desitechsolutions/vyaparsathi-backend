@@ -1,6 +1,8 @@
 package com.desitech.vyaparsathi.purchaseorder.dto;
 
 import com.desitech.vyaparsathi.common.util.CustomLocalDateTimeDeserializer;
+import com.desitech.vyaparsathi.inventory.dto.SupplierDto;
+import com.desitech.vyaparsathi.inventory.entity.Supplier;
 import com.desitech.vyaparsathi.purchaseorder.enums.PurchaseOrderStatus;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import lombok.Data;
@@ -21,4 +23,5 @@ public class PurchaseOrderDto {
     private PurchaseOrderStatus status;
     private String notes;
     private List<PurchaseOrderItemDto> items;
+    private SupplierDto supplier;
 }

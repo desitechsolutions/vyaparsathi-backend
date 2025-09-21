@@ -1,8 +1,9 @@
 package com.desitech.vyaparsathi.inventory.service;
 
+import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.common.exception.EntityNotFoundAppException;
 import com.desitech.vyaparsathi.common.exception.InsufficientStockException;
-import com.desitech.vyaparsathi.common.exception.ValidationAppException;
+import com.desitech.vyaparsathi.inventory.StockMovementType;
 import com.desitech.vyaparsathi.inventory.dto.*;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.entity.StockMovement;
@@ -49,7 +50,7 @@ public class StockService {
         BigDecimal costPerUnit = dto.getCostPerUnit() != null ? dto.getCostPerUnit() : BigDecimal.ZERO;
         BigDecimal quantity = dto.getQuantity();
 
-        StockMovement movement = recordStockMovement(dto.getItemVariantId(), "ADD", quantity, costPerUnit, dto.getBatch(), "Manual Stock Addition", "Manual Entry");
+        StockMovement movement = recordStockMovement(dto.getItemVariantId(), StockMovementType.ADD, quantity, costPerUnit, dto.getBatch(), "Manual Stock Addition", "Manual Entry");
         return mapToStockMovementDto(movement);
     }
 
@@ -89,7 +90,7 @@ public class StockService {
     @Transactional
     public void deductStock(Long itemVariantId, BigDecimal quantityToDeduct, String reason, String reference) {
         if (quantityToDeduct.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new ValidationAppException("Quantity to deduct must be positive.");
+            throw new BusinessValidationException("Quantity to deduct must be positive.");
         }
 
         BigDecimal currentStock = getCurrentStock(itemVariantId);
@@ -99,7 +100,7 @@ public class StockService {
         }
 
         // The entire complex FIFO logic is replaced by this single line.
-        recordStockMovement(itemVariantId, "DEDUCT", quantityToDeduct.negate(), null, null, reason, reference);
+        recordStockMovement(itemVariantId, StockMovementType.DEDUCT, quantityToDeduct.negate(), null, null, reason, reference);
     }
 
     public boolean isStockAvailable(Long itemVariantId, BigDecimal quantity) {
@@ -138,7 +139,7 @@ public class StockService {
     @Transactional
     public StockMovementDto adjustStock(StockAdjustmentDto dto) {
         if (dto.getReason() == null || dto.getReason().trim().isEmpty()) {
-            throw new ValidationAppException("Reason is required for stock adjustment");
+            throw new BusinessValidationException("Reason is required for stock adjustment");
         }
 
         itemVariantRepository.findById(dto.getItemVariantId())
@@ -153,7 +154,7 @@ public class StockService {
             }
         }
 
-        StockMovement movement = recordStockMovement(dto.getItemVariantId(), "ADJUST", dto.getAdjustmentQuantity(),
+        StockMovement movement = recordStockMovement(dto.getItemVariantId(), StockMovementType.ADJUST, dto.getAdjustmentQuantity(),
                 dto.getCostPerUnit(), dto.getBatch(), dto.getReason(), "Manual Adjustment");
 
         return mapToStockMovementDto(movement);
@@ -161,7 +162,7 @@ public class StockService {
 
     // --- Helper and Passthrough Methods ---
 
-    private StockMovement recordStockMovement(Long itemVariantId, String movementType, BigDecimal quantity,
+    private StockMovement recordStockMovement(Long itemVariantId, StockMovementType movementType, BigDecimal quantity,
                                               BigDecimal costPerUnit, String batch, String reason, String reference) {
         ItemVariant itemVariant = itemVariantRepository.findById(itemVariantId)
                 .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemVariantId));

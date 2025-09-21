@@ -73,7 +73,7 @@ public class StockExportService {
                 row.createCell(0).setCellValue(dto.getId());
                 row.createCell(1).setCellValue(dto.getItemName());
                 row.createCell(2).setCellValue(dto.getSku());
-                row.createCell(3).setCellValue(dto.getMovementType());
+                row.createCell(3).setCellValue(dto.getMovementType().name());
                 row.createCell(4).setCellValue(dto.getQuantity().doubleValue());
                 row.createCell(5).setCellValue(dto.getCostPerUnit() != null ? dto.getCostPerUnit().doubleValue() : 0);
                 row.createCell(6).setCellValue(dto.getBatch());
@@ -105,7 +105,7 @@ public class StockExportService {
                 table.addCell(String.valueOf(dto.getId()));
                 table.addCell(dto.getItemName());
                 table.addCell(dto.getSku());
-                table.addCell(dto.getMovementType());
+                table.addCell(dto.getMovementType().name());
                 table.addCell(dto.getQuantity().toString());
                 table.addCell(dto.getCostPerUnit() != null ? dto.getCostPerUnit().toString() : "");
                 table.addCell(dto.getBatch());

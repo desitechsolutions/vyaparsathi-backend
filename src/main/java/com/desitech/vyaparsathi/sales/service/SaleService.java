@@ -1,9 +1,9 @@
 package com.desitech.vyaparsathi.sales.service;
 
 import com.desitech.vyaparsathi.changelog.service.ChangeLogService;
+import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.common.exception.EntityNotFoundAppException;
 import com.desitech.vyaparsathi.common.exception.InsufficientStockException;
-import com.desitech.vyaparsathi.common.exception.ValidationAppException;
 import com.desitech.vyaparsathi.customer.dto.CustomerLedgerDto;
 import com.desitech.vyaparsathi.customer.entity.Customer;
 import com.desitech.vyaparsathi.customer.entity.CustomerLedgerType;
@@ -196,7 +196,7 @@ public class SaleService {
             for (PaymentDto paymentDTO : dto.getPaymentDetails()) {
                 if (paymentDTO.getAmount() == null) {
                     logger.error("Payment amount cannot be null for sale DTO: {}", dto);
-                    throw new ValidationAppException("Payment amount cannot be null");
+                    throw new BusinessValidationException("Payment amount cannot be null");
                 }
                 paymentDTO.setSourceId(sale.getId());
                 paymentDTO.setSourceType(PaymentSourceType.SALE);
@@ -217,7 +217,7 @@ public class SaleService {
             BigDecimal unpaidAmount = finalTotalAmount.subtract(totalPaid);
             if (unpaidAmount.compareTo(BigDecimal.ZERO) < 0) {
                 logger.error("Total paid ({}) exceeds sale amount ({})", totalPaid, finalTotalAmount);
-                throw new ValidationAppException("Total paid cannot exceed sale amount");
+                throw new BusinessValidationException("Total paid cannot exceed sale amount");
             }
         }
 
@@ -241,7 +241,7 @@ public class SaleService {
 
             if (returnItem.getReturnQuantity().compareTo(saleItem.getQty()) > 0) {
                 logger.error("Return quantity ({}) exceeds original quantity ({}) for sale item {}", returnItem.getReturnQuantity(), saleItem.getQty(), saleItem.getId());
-                throw new ValidationAppException("Return quantity cannot exceed original quantity");
+                throw new BusinessValidationException("Return quantity cannot exceed original quantity");
             }
 
             BigDecimal itemReturnAmount = saleItem.getUnitPrice().multiply(returnItem.getReturnQuantity());

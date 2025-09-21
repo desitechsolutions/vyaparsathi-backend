@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.inventory.entity;
 
+import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import lombok.Data;
@@ -15,6 +16,10 @@ public class ItemVariant {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shop_id", nullable = false)
+    private Shop shop;
 
     @Column(nullable = false, unique = true)
     private String sku;

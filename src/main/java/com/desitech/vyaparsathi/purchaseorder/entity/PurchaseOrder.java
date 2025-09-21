@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.purchaseorder.entity;
 
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
 import com.desitech.vyaparsathi.purchaseorder.enums.PurchaseOrderStatus;
+import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
@@ -54,5 +55,9 @@ public class PurchaseOrder {
     @JsonManagedReference
     @OneToMany(mappedBy = "purchaseOrder", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<PurchaseOrderItem> items;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shop_id", nullable = false)
+    private Shop shop;
 
 }

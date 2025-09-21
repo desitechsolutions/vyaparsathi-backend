@@ -1,74 +1,66 @@
 package com.desitech.vyaparsathi.receiving.mapper;
 
-import com.desitech.vyaparsathi.inventory.mapper.SupplierMapper;
 import com.desitech.vyaparsathi.receiving.dto.ReceivingDto;
 import com.desitech.vyaparsathi.receiving.entity.Receiving;
 import com.desitech.vyaparsathi.receiving.dto.ReceivingItemDto;
 import com.desitech.vyaparsathi.receiving.entity.ReceivingItem;
-import com.desitech.vyaparsathi.receiving.enums.ReceivingItemStatus;
-import com.desitech.vyaparsathi.receiving.enums.ReceivingStatus;
-import org.springframework.stereotype.Component;
-
+import com.desitech.vyaparsathi.inventory.dto.SupplierDto;
+import com.desitech.vyaparsathi.inventory.entity.Supplier;
+import com.desitech.vyaparsathi.inventory.mapper.SupplierMapper;
+import org.mapstruct.*;
 import java.util.List;
 import java.util.stream.Collectors;
 
-@Component
-public class ReceivingMapper {
+@Mapper(componentModel = "spring", uses = {SupplierMapper.class})
+public interface ReceivingMapper {
 
-    private final SupplierMapper supplierMapper;
+    // Receiving -> ReceivingDto
+    @Mapping(target = "supplier", source = "purchaseOrder.supplier")
+    @Mapping(target = "receivingItems", source = "items", qualifiedByName = "receivingItemsToDtos")  // Key fix: Qualify to use element mapper
+    @Mapping(target = "purchaseOrderId", source = "purchaseOrder.id")
+    @Mapping(target = "poNumber", source = "purchaseOrder.poNumber")
+    @Mapping(target = "shopId", source = "shop.id")
+    ReceivingDto toDto(Receiving entity);
 
-    public ReceivingMapper(SupplierMapper supplierMapper) {
-        this.supplierMapper = supplierMapper;
-    }
+    List<ReceivingDto> toDtoList(List<Receiving> entities);
 
-    public ReceivingDto toDTO(Receiving entity) {
-        if (entity == null) return null;
+    // ReceivingDto -> Receiving (reverse mapping)
+    @Mapping(target = "items", source = "receivingItems", qualifiedByName = "dtosToReceivingItems")  // Symmetric for reverse
+    @Mapping(target = "purchaseOrder.id", source = "purchaseOrderId")
+    @Mapping(target = "shop.id", source = "shopId")
+    Receiving toEntity(ReceivingDto dto);
 
-        ReceivingDto dto = new ReceivingDto();
-        dto.setId(entity.getId());
-        dto.setPurchaseOrderId(entity.getPurchaseOrder() != null ? entity.getPurchaseOrder().getId() : null);
-        dto.setStatus(entity.getStatus() != null ? entity.getStatus() : ReceivingStatus.DEFAULT);
-        dto.setReceivedAt(entity.getReceivedAt());
-        dto.setReceivedBy(entity.getReceivedBy());
-        dto.setNotes(entity.getNotes());
-        dto.setShopId(entity.getShop() != null ? entity.getShop().getId() : null);
+    // Renamed for clarity; maps single ReceivingItem to DTO
+    @Named("toItemDto")  // Qualifier name for element mapping
+    @Mapping(target = "purchaseOrderItemId", source = "purchaseOrderItem.id")
+    @Mapping(target = "expectedQty", source = "purchaseOrderItem.quantity")  // Nested mapping from PO item
+    ReceivingItemDto toItemDto(ReceivingItem entity);  // Renamed from toDto
 
-        // Use supplierMapper here (via PO)
-        if (entity.getPurchaseOrder() != null && entity.getPurchaseOrder().getSupplier() != null) {
-            dto.setSupplier(supplierMapper.toDto(entity.getPurchaseOrder().getSupplier()));
+    // Explicit collection mapper for ReceivingItem -> ReceivingItemDto (uses toItemDto)
+    @Named("receivingItemsToDtos")
+    default List<ReceivingItemDto> receivingItemsToDtos(List<ReceivingItem> items) {
+        if (items == null) {
+            return null;
         }
+        return items.stream()
+                .map(this::toItemDto)
+                .collect(Collectors.toList());
+    }
 
-        if (entity.getItems() != null) {
-            dto.setReceivingItems(
-                    entity.getItems().stream()
-                            .map(this::toDTO)
-                            .collect(Collectors.toList())
-            );
+    // Reverse: Single ReceivingItemDto -> ReceivingItem
+    @Named("toItemEntity")
+    @Mapping(target = "purchaseOrderItem.id", source = "purchaseOrderItemId")
+    // Note: expectedQty maps back to purchaseOrderItem.quantity if needed; add more if required
+    ReceivingItem toItemEntity(ReceivingItemDto dto);
+
+    // Explicit collection mapper for reverse (uses toItemEntity)
+    @Named("dtosToReceivingItems")
+    default List<ReceivingItem> dtosToReceivingItems(List<ReceivingItemDto> dtos) {
+        if (dtos == null) {
+            return null;
         }
-
-        return dto;
-    }
-
-    public ReceivingItemDto toDTO(ReceivingItem entity) {
-        if (entity == null) return null;
-
-        ReceivingItemDto dto = new ReceivingItemDto();
-        dto.setId(entity.getId());
-        dto.setPurchaseOrderItemId(entity.getPurchaseOrderItem() != null ? entity.getPurchaseOrderItem().getId() : null);
-        dto.setStatus(entity.getStatus() != null ? entity.getStatus() : ReceivingItemStatus.DEFAULT);
-        dto.setExpectedQty(entity.getExpectedQty());
-        dto.setReceivedQty(entity.getReceivedQty());
-        dto.setDamagedQty(entity.getDamagedQty());
-        dto.setDamageReason(entity.getDamageReason());
-        dto.setNotes(entity.getNotes());
-        dto.setPutAwayStatus(entity.getPutAwayStatus());
-        return dto;
-    }
-
-    public List<ReceivingDto> toDTOList(List<Receiving> entities) {
-        if (entities == null) return null;
-        return entities.stream()
-                .map(this::toDTO)
+        return dtos.stream()
+                .map(this::toItemEntity)
                 .collect(Collectors.toList());
     }
 }

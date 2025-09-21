@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.reports.service;
 
+import com.desitech.vyaparsathi.inventory.StockMovementType;
 import com.desitech.vyaparsathi.inventory.entity.StockMovement;
 import com.desitech.vyaparsathi.inventory.repository.StockMovementRepository;
 import com.desitech.vyaparsathi.sales.entity.Sale;
@@ -74,7 +75,7 @@ public class COGSCalculationService {
      */
     private BigDecimal calculateWeightedAverageCost(Long itemVariantId) {
         // 1. Fetch all historical purchase ('ADD') movements for this item.
-        List<StockMovement> addMovements = stockMovementRepository.findByItemVariantIdAndMovementType(itemVariantId, "ADD");
+        List<StockMovement> addMovements = stockMovementRepository.findByItemVariantIdAndMovementType(itemVariantId, StockMovementType.ADD);
 
         if (addMovements.isEmpty()) {
             logger.warn("No 'ADD' stock movements found for itemVariantId: {}. Cannot calculate COGS. Returning ZERO.", itemVariantId);

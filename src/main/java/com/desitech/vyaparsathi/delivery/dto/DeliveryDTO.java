@@ -9,14 +9,14 @@ import java.util.List;
 
 @Data
 public class DeliveryDTO {
-    private Long deliveryId;
+    private Long id;
     private Long saleId;
     private String invoiceNumber;
     private String customerName;
     private String deliveryAddress;
     private Double deliveryCharge;
-    private DeliveryPaidBy deliveryPaidBy; // "CUSTOMER" or "SHOP"
-    private DeliveryStatus deliveryStatus; // "PENDING", etc.
+    private DeliveryPaidBy deliveryPaidBy;
+    private DeliveryStatus deliveryStatus;
     private DeliveryPersonDTO deliveryPerson;
     private String deliveryNotes;
     private LocalDateTime deliveredAt;

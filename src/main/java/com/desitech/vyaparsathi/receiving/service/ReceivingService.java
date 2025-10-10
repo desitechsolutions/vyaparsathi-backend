@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.receiving.service;
 
 import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.common.exception.ResourceNotFoundException;
+import com.desitech.vyaparsathi.common.util.TenantUtils;
 import com.desitech.vyaparsathi.inventory.StockMovementType;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.entity.StockMovement;
@@ -225,7 +226,7 @@ public class ReceivingService {
                         Optional.ofNullable(existingItem.getDamagedQty()).orElse(0) +
                         Optional.ofNullable(existingItem.getRejectedQty()).orElse(0)) : 0;
 
-        ReceivingQtySummary qtySummary = receivingRepository.getQtySummaryForPOItem(poItem.getId());
+        ReceivingQtySummary qtySummary = receivingRepository.getQtySummaryForPOItem(poItem.getId(), TenantUtils.getCurrentShopId());
         long previouslyReceived = qtySummary.received() + qtySummary.damaged() + qtySummary.rejected() - currentlyReceived;
 /*        int previouslyReceived = receivingRepository.sumReceivedQtyForPOItem(poItem.getId()) +
                 receivingRepository.sumDamagedQtyForPOItem(poItem.getId()) +
@@ -418,7 +419,7 @@ public class ReceivingService {
         // Optimized: Could batch sums if needed, but for now, per-item
         boolean allPoItemsReceived = po.getItems().stream()
                 .allMatch(poItem -> {
-                    ReceivingQtySummary qtySummary = receivingRepository.getQtySummaryForPOItem(poItem.getId());
+                    ReceivingQtySummary qtySummary = receivingRepository.getQtySummaryForPOItem(poItem.getId(), TenantUtils.getCurrentShopId());
                     return poItem.getQuantity().intValue() <= (qtySummary.received() + qtySummary.damaged() + qtySummary.rejected());
                 });
 
@@ -585,7 +586,7 @@ public class ReceivingService {
     }
 
     public List<ReceivingDto> getAllByPoNumber(String poNumber) {
-        List<Receiving> receivingList = receivingRepository.findAllByPoNumber(poNumber);
+        List<Receiving> receivingList = receivingRepository.findAllByPoNumber(poNumber, TenantUtils.getCurrentShopId());
         return receivingList.stream().map(receivingMapper::toDto).collect(Collectors.toList());
     }
 }

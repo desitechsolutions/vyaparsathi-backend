@@ -1,26 +1,24 @@
 package com.desitech.vyaparsathi.inventory.entity;
 
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.inventory.StockMovementType;
-import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
-import com.desitech.vyaparsathi.shop.entity.Shop;
 import jakarta.persistence.*;
-import lombok.Data;
+
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "stock_movement")
-@Data
-public class StockMovement {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "shop_id", nullable = false)
-    private Shop shop;
+@Getter
+@Setter
+@NoArgsConstructor
+public class StockMovement extends ShopAwareEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_variant_id", nullable = false)

@@ -1,15 +1,15 @@
-
 package com.desitech.vyaparsathi.customer.controller;
-import com.desitech.vyaparsathi.common.exception.ApplicationException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.customer.dto.CustomerDto;
 import com.desitech.vyaparsathi.customer.service.CustomerService;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.persistence.EntityNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+
 import java.util.List;
 
 @RestController
@@ -18,8 +18,11 @@ import java.util.List;
 public class CustomerController {
 
     private static final Logger logger = LoggerFactory.getLogger(CustomerController.class);
-    @Autowired
-    private CustomerService customerService;
+    private final CustomerService customerService;
+
+    public CustomerController(CustomerService customerService) {
+        this.customerService = customerService;
+    }
 
     @PostMapping
     public ResponseEntity<CustomerDto> addCustomer(@RequestBody CustomerDto dto) {
@@ -48,13 +51,14 @@ public class CustomerController {
     @GetMapping
     public ResponseEntity<List<CustomerDto>> listCustomers(@RequestParam(required = false) String name) {
         try {
+            List<CustomerDto> result;
             if (name != null && !name.isEmpty()) {
-                List<CustomerDto> result = customerService.searchCustomers(name);
+                result = customerService.searchCustomers(name);
                 logger.info("Searched customers by name={}", name);
-                return ResponseEntity.ok(result);
+            } else {
+                result = customerService.listCustomers();
+                logger.info("Listed all customers");
             }
-            List<CustomerDto> result = customerService.listCustomers();
-            logger.info("Listed all customers");
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error listing/searching customers: {}", e.getMessage(), e);
@@ -65,15 +69,12 @@ public class CustomerController {
     @GetMapping("/{id}")
     public ResponseEntity<CustomerDto> getCustomer(@PathVariable Long id) {
         try {
-            return customerService.getCustomer(id)
-                    .map(c -> {
-                        logger.info("Fetched customer id={}", id);
-                        return ResponseEntity.ok(c);
-                    })
-                    .orElseGet(() -> {
-                        logger.warn("Customer not found id={}", id);
-                        return ResponseEntity.notFound().build();
-                    });
+            CustomerDto customer = customerService.getCustomer(id);
+            logger.info("Fetched customer id={}", id);
+            return ResponseEntity.ok(customer);
+        } catch (EntityNotFoundException e) {
+            logger.warn("Customer not found id={}", id);
+            return ResponseEntity.notFound().build();
         } catch (Exception e) {
             logger.error("Error fetching customer id={}: {}", id, e.getMessage(), e);
             throw new ApplicationException("Failed to fetch customer", e);

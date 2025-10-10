@@ -6,6 +6,7 @@ import com.desitech.vyaparsathi.auth.dto.UserDto;
 import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.model.Role;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
+import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -33,8 +34,8 @@ public class UserManagementService {
 
     @Transactional
     public UserDto createUser(RegisterRequest request) {
-        if (userRepository.findByUsername(request.getUsername()).isPresent()) {
-            throw new IllegalArgumentException("Username already exists");
+        if (userRepository.findByUsernameAndShop_Id(request.getUsername(), TenantContext.getCurrentShopId()).isPresent()) {
+            throw new IllegalArgumentException("Username already exists in this shop");
         }
         // Security: Prevent Admin from creating an Owner
         if (request.getRole() == Role.OWNER) {
@@ -48,6 +49,11 @@ public class UserManagementService {
         user.setPinHash(passwordEncoder.encode(request.getPin()));
         user.setRole(request.getRole());
         user.setActive(true); // Default to active
+        if (TenantContext.getCurrentShopId() != null) {
+            Shop shop = shopRepository.findById(TenantContext.getCurrentShopId())
+                .orElseThrow(() -> new EntityNotFoundException("Shop not found with id: " + TenantContext.getCurrentShopId()));
+            user.setShop(shop);
+        }
         User savedUser = userRepository.save(user);
         return toUserDto(savedUser);
     }
@@ -86,7 +92,9 @@ public class UserManagementService {
         return toUserDto(updatedUser);
     }
     public List<UserDto> listAllUsers() {
+        Long shopId = TenantContext.getCurrentShopId();
         return userRepository.findAll().stream()
+                .filter(user -> user.getShop() != null && user.getShop().getId().equals(shopId))
                 .map(this::toUserDto)
                 .collect(Collectors.toList());
     }

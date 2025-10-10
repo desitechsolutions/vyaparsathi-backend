@@ -1,8 +1,9 @@
 package com.desitech.vyaparsathi.delivery.entity;
 
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.delivery.enums.DeliveryPaidBy;
 import com.desitech.vyaparsathi.delivery.enums.DeliveryStatus;
-import com.desitech.vyaparsathi.shop.entity.Shop;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -18,14 +19,7 @@ import java.util.List;
 @NoArgsConstructor
 @Entity
 @Table(name = "deliveries")
-public class Delivery {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long deliveryId;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "shop_id", nullable = false)
-    private Shop shop;
+public class Delivery extends ShopAwareEntity {
 
     @Column(nullable = false)
     private Long saleId;
@@ -53,8 +47,6 @@ public class Delivery {
     private String deliveryNotes;
 
     private LocalDateTime deliveredAt;
-    private LocalDateTime createdAt = LocalDateTime.now();
-    private LocalDateTime updatedAt = LocalDateTime.now();
 
     @OneToMany(mappedBy = "delivery", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<DeliveryStatusHistory> statusHistory;

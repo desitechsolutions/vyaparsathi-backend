@@ -1,12 +1,11 @@
 package com.desitech.vyaparsathi.purchaseorder.entity;
 
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
 import com.desitech.vyaparsathi.purchaseorder.enums.PurchaseOrderStatus;
-import com.desitech.vyaparsathi.shop.entity.Shop;
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
-import lombok.Data;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -20,10 +19,7 @@ import java.util.List;
 @NoArgsConstructor
 @Entity
 @Table(name = "purchase_order")
-public class PurchaseOrder {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+public class PurchaseOrder extends ShopAwareEntity {
 
     @Column(name = "po_number", nullable = false, unique = true)
     private String poNumber;
@@ -55,9 +51,5 @@ public class PurchaseOrder {
     @JsonManagedReference
     @OneToMany(mappedBy = "purchaseOrder", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<PurchaseOrderItem> items;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "shop_id", nullable = false)
-    private Shop shop;
 
 }

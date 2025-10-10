@@ -1,49 +1,52 @@
 package com.desitech.vyaparsathi.sales.entity;
 
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.sales.GSTType;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.math.BigDecimal;
 
 @Entity
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
-public class SaleItem {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+@Table(name = "sale_item")
+public class SaleItem extends ShopAwareEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "sale_id", nullable = false)
     @JsonBackReference
     private Sale sale;
 
-    @ManyToOne(fetch = FetchType.EAGER)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_variant_id", nullable = false)
     private ItemVariant itemVariant;
 
-    @Column(nullable = false)
+    @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal qty;
 
-    @Column(nullable = false)
+    @Column(name = "unit_price", nullable = false, precision = 12, scale = 2)
     private BigDecimal unitPrice;
 
-    @Column(nullable = false)
+    @Column(name = "taxable_value", nullable = false, precision = 12, scale = 2)
     private BigDecimal taxableValue;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "gst_type", nullable = false, length = 20)
     private GSTType gstType;
 
-    @Column(nullable = false)
+    @Column(name = "cgst_amt", nullable = false, precision = 12, scale = 2)
     private BigDecimal cgstAmt;
 
-    @Column(nullable = false)
+    @Column(name = "sgst_amt", nullable = false, precision = 12, scale = 2)
     private BigDecimal sgstAmt;
 
-    @Column(nullable = false)
+    @Column(name = "igst_amt", nullable = false, precision = 12, scale = 2)
     private BigDecimal igstAmt;
 }

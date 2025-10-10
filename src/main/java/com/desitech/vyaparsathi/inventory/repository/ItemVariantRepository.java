@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.inventory.repository;
 
+import com.desitech.vyaparsathi.common.repository.BaseRepository;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -10,7 +11,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface ItemVariantRepository extends JpaRepository<ItemVariant, Long> {
+public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long> {
 
     Optional<ItemVariant> findBySku(String sku);
 

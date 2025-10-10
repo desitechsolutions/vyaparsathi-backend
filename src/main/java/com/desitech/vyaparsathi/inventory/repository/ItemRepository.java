@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.inventory.repository;
 
+import com.desitech.vyaparsathi.common.repository.BaseRepository;
 import com.desitech.vyaparsathi.inventory.entity.Item;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -10,7 +11,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface ItemRepository extends JpaRepository<Item, Long> {
+public interface ItemRepository extends BaseRepository<Item, Long> {
 
     @EntityGraph(attributePaths = {"variants", "category"}, type = EntityGraph.EntityGraphType.LOAD)
     @Query("SELECT i FROM Item i")
@@ -26,6 +27,6 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
      * @param categoryId The ID of the category to check.
      * @return true if an item exists with that categoryId, false otherwise.
      */
-    boolean existsByCategoryId(Long categoryId);
+    boolean existsByCategory_Id(Long categoryId);
 
 }

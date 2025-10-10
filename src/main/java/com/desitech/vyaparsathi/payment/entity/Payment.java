@@ -1,22 +1,23 @@
 package com.desitech.vyaparsathi.payment.entity;
 
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.payment.enums.PaymentMethod;
 import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
-import com.desitech.vyaparsathi.shop.entity.Shop;
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
-public class Payment {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+public class Payment extends ShopAwareEntity {
 
     @Column(unique = true)
     private String transactionId;
@@ -37,10 +38,6 @@ public class Payment {
 
     @Enumerated(EnumType.STRING)
     private PaymentStatus status;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "shop_id", nullable = false)
-    private Shop shop;
     @PrePersist
     public void onCreate() {
         if (paymentDate == null) {

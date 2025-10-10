@@ -1,19 +1,20 @@
 package com.desitech.vyaparsathi.auth.entity;
 
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import jakarta.persistence.*;
 import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "reset_token")
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
-public class ResetToken {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+public class ResetToken extends ShopAwareEntity {
 
     @Column(nullable = false, unique = true)
     private String token;

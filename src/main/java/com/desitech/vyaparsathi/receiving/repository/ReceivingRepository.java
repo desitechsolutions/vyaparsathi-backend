@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.receiving.repository;
 
+import com.desitech.vyaparsathi.common.repository.BaseRepository;
 import com.desitech.vyaparsathi.receiving.dto.ReceivingQtySummary;
 import com.desitech.vyaparsathi.receiving.entity.Receiving;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrder;
@@ -13,7 +14,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.Optional;
 
-public interface ReceivingRepository extends JpaRepository<Receiving, Long> {
+public interface ReceivingRepository extends BaseRepository<Receiving, Long> {
     boolean existsByPurchaseOrder(PurchaseOrder po);
 
     @Query("SELECT new com.desitech.vyaparsathi.receiving.dto.ReceivingQtySummary(" +
@@ -21,8 +22,8 @@ public interface ReceivingRepository extends JpaRepository<Receiving, Long> {
             "COALESCE(SUM(ri.damagedQty),0), " +
             "COALESCE(SUM(ri.rejectedQty),0)) " +
             "FROM Receiving r JOIN r.items ri " +
-            "WHERE ri.purchaseOrderItem.id = :poItemId")
-    ReceivingQtySummary getQtySummaryForPOItem(@Param("poItemId") Long poItemId);
+            "WHERE ri.purchaseOrderItem.id = :poItemId AND r.shop.id = :shopId")
+    ReceivingQtySummary getQtySummaryForPOItem(@Param("poItemId") Long poItemId, @Param("shopId") Long shopId);
    /* @Query("SELECT COALESCE(SUM(ri.receivedQty),0) FROM Receiving r JOIN r.items ri WHERE ri.purchaseOrderItem.id = :poItemId")
     int sumReceivedQtyForPOItem(Long poItemId);
 
@@ -55,6 +56,6 @@ public interface ReceivingRepository extends JpaRepository<Receiving, Long> {
             "items",
             "items.purchaseOrderItem"
     })
-    @Query("SELECT r FROM Receiving r WHERE r.purchaseOrder.poNumber = :poNumber")
-    List<Receiving> findAllByPoNumber(@Param("poNumber") String poNumber);
+    @Query("SELECT r FROM Receiving r WHERE r.purchaseOrder.poNumber = :poNumber AND r.shop.id = :shopId")
+    List<Receiving> findAllByPoNumber(@Param("poNumber") String poNumber, @Param("shopId") Long shopId);
 }

@@ -1,18 +1,24 @@
 package com.desitech.vyaparsathi.customer.entity;
 
-import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import org.hibernate.annotations.Filter;
+import org.hibernate.annotations.FilterDef;
+import org.hibernate.annotations.ParamDef;
+
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "customer_ledger")
-@Data
-public class CustomerLedger {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+@Filter(name = "shopFilter", condition = "shop_id = :shopId")
+@Getter
+@Setter
+@NoArgsConstructor
+public class CustomerLedger extends ShopAwareEntity {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "customer_id")
@@ -27,12 +33,4 @@ public class CustomerLedger {
 
     private String description;
 
-    @Column(name = "created_at", nullable = false)
-    private LocalDateTime createdAt;
-
-    @PrePersist
-    @Convert(converter = LocalDateTimeAttributeConverter.class)
-    public void onCreate() {
-        createdAt = LocalDateTime.now();
-    }
 }

@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.inventory.repository;
 
+import com.desitech.vyaparsathi.common.repository.BaseRepository;
 import com.desitech.vyaparsathi.inventory.StockMovementType;
 import com.desitech.vyaparsathi.inventory.entity.StockMovement;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -12,7 +13,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Repository
-public interface StockMovementRepository extends JpaRepository<StockMovement, Long> {
+public interface StockMovementRepository extends BaseRepository<StockMovement, Long> {
     List<StockMovement> findByItemVariantIdOrderByTimestampDesc(Long itemVariantId);
     List<StockMovement> findByItemVariantIdAndTimestampBetweenOrderByTimestampDesc(
             Long itemVariantId, LocalDateTime startDate, LocalDateTime endDate);

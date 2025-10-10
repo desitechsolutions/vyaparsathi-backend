@@ -1,5 +1,7 @@
 package com.desitech.vyaparsathi.delivery.entity;
 
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.delivery.enums.DeliveryStatus;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -15,10 +17,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @Entity
 @Table(name = "delivery_status_history")
-public class DeliveryStatusHistory {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+public class DeliveryStatusHistory extends ShopAwareEntity {
     @ManyToOne
     @JoinColumn(name = "delivery_id")
     private Delivery delivery;
@@ -26,5 +25,5 @@ public class DeliveryStatusHistory {
     @Column(nullable = false)
     private DeliveryStatus status;
     private LocalDateTime changedAt = LocalDateTime.now();
-    private String changedBy; // username or staff id
+    private String changedBy;
 }

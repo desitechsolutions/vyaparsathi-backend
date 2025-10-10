@@ -1,56 +1,45 @@
 package com.desitech.vyaparsathi.sales.entity;
 
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
 import com.desitech.vyaparsathi.customer.entity.Customer;
-import com.desitech.vyaparsathi.payment.entity.Payment;
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
-import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import lombok.NoArgsConstructor;
-import lombok.ToString;
+import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 @Entity
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
-@ToString(exclude = {"saleItems", "customer", "shop"})
-@EqualsAndHashCode(exclude = {"saleItems"})
-public class Sale {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(name = "invoice_no", nullable = false, unique = true)
+@Table(name = "sale")
+public class Sale extends ShopAwareEntity {
+    @Column(name = "invoice_no", nullable = false, unique = true, length = 50)
     private String invoiceNo;
 
+    @Convert(converter = LocalDateTimeAttributeConverter.class)
     @Column(nullable = false)
     private LocalDateTime date;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "shop_id", nullable = false)
-    private Shop shop;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "customer_id")
     private Customer customer;
 
 
-    @Column(name = "total_amount", nullable = false)
+    @Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalAmount;
 
-    @Column(name = "round_off")
+    @Column(name = "round_off", precision = 10, scale = 2)
     private BigDecimal roundOff;
 
-    @Column(name = "synced_flag")
-    private boolean syncedFlag;
+    @Column(name = "synced_flag", nullable = false)
+    private boolean syncedFlag = false;
 
     @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference
@@ -61,7 +50,6 @@ public class Sale {
     private PaymentStatus paymentStatus = PaymentStatus.PENDING;
 
     @PrePersist
-    @Convert(converter = LocalDateTimeAttributeConverter.class)
     public void onCreate() {
         if (this.date == null) {
             this.date = LocalDateTime.now();

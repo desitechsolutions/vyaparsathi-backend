@@ -135,7 +135,7 @@ public class DeliveryService {
     }
 
     public List<DeliveryStatusHistoryDTO> getStatusHistory(Long deliveryId) {
-        return statusHistoryRepo.findByDelivery_DeliveryId(deliveryId).stream()
+        return statusHistoryRepo.findByDelivery_Id(deliveryId).stream()
                 .map(deliveryStatusHistoryMapper::toDto)
                 .collect(Collectors.toList());
     }

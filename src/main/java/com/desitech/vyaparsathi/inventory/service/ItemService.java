@@ -224,7 +224,6 @@ public class ItemService {
     }
 
     private String generateSku(ItemDto itemDto, ItemVariantDto variant) {
-        // **FIXED**: Use getCategoryName() instead of getCategory()
         String prefix = (itemDto.getCategoryName() != null ? itemDto.getCategoryName().replaceAll("\\s+", "").toUpperCase() : "ITEM")
                 + "-"
                 + (itemDto.getBrandName() != null ? itemDto.getBrandName().replaceAll("\\s+", "").toUpperCase() : "BRAND");

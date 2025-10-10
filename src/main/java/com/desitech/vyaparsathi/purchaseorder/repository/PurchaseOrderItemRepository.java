@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.purchaseorder.repository;
 
+import com.desitech.vyaparsathi.common.repository.BaseRepository;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrderItem;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -7,7 +8,7 @@ import org.springframework.data.repository.query.Param;
 import java.math.BigDecimal;
 import java.util.List;
 
-public interface PurchaseOrderItemRepository extends JpaRepository<PurchaseOrderItem, Long> {
+public interface PurchaseOrderItemRepository extends BaseRepository<PurchaseOrderItem, Long> {
 
     // This is your existing method
     @Query("SELECT poi FROM PurchaseOrderItem poi WHERE poi.itemVariant.id = :itemVariantId")

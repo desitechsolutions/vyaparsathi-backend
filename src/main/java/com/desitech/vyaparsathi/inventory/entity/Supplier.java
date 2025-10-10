@@ -1,21 +1,16 @@
 package com.desitech.vyaparsathi.inventory.entity;
 
-import com.desitech.vyaparsathi.shop.entity.Shop;
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.*;
 
 @Entity
 @Table(name = "supplier")
-@Data
-public class Supplier {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "shop_id", nullable = false)
-    private Shop shop;
+@Getter
+@Setter
+@NoArgsConstructor
+public class Supplier extends ShopAwareEntity {
 
     @Column(nullable = false)
     private String name;

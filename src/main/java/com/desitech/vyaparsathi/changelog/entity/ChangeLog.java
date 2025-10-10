@@ -2,7 +2,8 @@
 package com.desitech.vyaparsathi.changelog.entity;
 import com.desitech.vyaparsathi.changelog.model.ChangeLogOperation;
 
-import com.desitech.vyaparsathi.shop.entity.Shop;
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -13,14 +14,7 @@ import java.time.LocalDateTime;
 @Table(name = "change_log")
 @Data
 @NoArgsConstructor
-public class ChangeLog {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "shop_id", nullable = false)
-    private Shop shop;
+public class ChangeLog extends ShopAwareEntity {
 
     @Column(name = "entity_type", nullable = false)
     private String entityType;
@@ -41,14 +35,4 @@ public class ChangeLog {
 
     @Column(name = "seq_no", nullable = false)
     private Long seqNo;
-
-    @Column(name = "created_at", nullable = false)
-    private LocalDateTime createdAt;
-
-    @PrePersist
-    public void onCreate() {
-        if (this.createdAt == null) {
-            this.createdAt = LocalDateTime.now();
-        }
-    }
 }

@@ -9,11 +9,12 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
-import java.util.logging.Logger;
 import java.util.Base64;
+import java.util.logging.Logger;
 
 @Component
 public class JwtUtil {
+
     private static final Logger logger = Logger.getLogger(JwtUtil.class.getName());
 
     @Value("${jwt.secret}")
@@ -27,36 +28,34 @@ public class JwtUtil {
 
     private SecretKey secretKey;
 
-    // Initialize the SecretKey after secret is injected
     @PostConstruct
     public void init() {
-        // Decode Base64 encoded secret if stored as base64
         byte[] keyBytes = Base64.getDecoder().decode(secret);
-        logger.info("JWT secret key length (bytes): " + keyBytes.length);
         this.secretKey = Keys.hmacShaKeyFor(keyBytes);
+
+        if (keyBytes.length < 32) {
+            throw new IllegalArgumentException("JWT secret key is too weak! Must be at least 256 bits.");
+        }
     }
 
-    public String generateAccessToken(User user) {
-        return Jwts.builder()
+    // --- ACCESS TOKEN GENERATION ---
+    public String generateAccessToken(User user, Long shopId) {
+        JwtBuilder builder = Jwts.builder()
                 .setSubject(user.getUsername())
                 .claim("role", user.getRole().name())
                 .claim("firstName", user.getFirstName())
                 .claim("lastName", user.getLastName())
                 .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
-                .signWith(secretKey, SignatureAlgorithm.HS512)
-                .compact();
+                .setExpiration(new Date(System.currentTimeMillis() + jwtExpirationMs));
+
+        if (shopId != null) {
+            builder.claim("shopId", shopId);
+        }
+
+        return builder.signWith(secretKey, SignatureAlgorithm.HS512).compact();
     }
-    public String generateAccessToken(String username, String role) {
-        return Jwts.builder()
-                .setSubject(username)
-                .claim("role", role)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
-                .signWith(secretKey, SignatureAlgorithm.HS512)
-                .compact();
-    }
-    // Generate Refresh Token
+
+    // --- REFRESH TOKEN GENERATION ---
     public String generateRefreshToken(String username) {
         return Jwts.builder()
                 .setSubject(username)
@@ -65,19 +64,32 @@ public class JwtUtil {
                 .signWith(secretKey, SignatureAlgorithm.HS512)
                 .compact();
     }
+
+    // --- EXTRACTION METHODS ---
     public String extractUsername(String token) {
-    return Jwts.parser().verifyWith(secretKey).build().parseSignedClaims(token).getPayload().getSubject();
+        return parseClaims(token).getSubject();
     }
 
+    public Long extractShopId(String token) {
+        return parseClaims(token).get("shopId", Long.class);
+    }
+
+    // --- VALIDATION ---
     public boolean validateToken(String token) {
         try {
-            Jwts.parser().verifyWith(secretKey).build().parseSignedClaims(token);
+            parseClaims(token);
             return true;
-        } catch (JwtException e) {
+        } catch (JwtException | IllegalArgumentException e) {
             logger.warning("Invalid JWT: " + e.getMessage());
-        } catch (IllegalArgumentException e) {
-            logger.warning("JWT claims string is empty: " + e.getMessage());
+            return false;
         }
-        return false;
+    }
+
+    private Claims parseClaims(String token) {
+        return Jwts.parser()
+                .verifyWith(secretKey)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
     }
 }

@@ -63,7 +63,7 @@ public class CategoryService {
             throw new EntityNotFoundException("Category not found with id: " + id);
         }
 
-        if (itemRepository.existsByCategoryId(id)) {
+        if (itemRepository.existsByCategory_Id(id)) {
             throw new DataIntegrityViolationException("Cannot delete category: It is currently in use by one or more items.");
         }
 

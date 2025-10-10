@@ -1,25 +1,19 @@
 package com.desitech.vyaparsathi.inventory.entity;
 
-import com.desitech.vyaparsathi.shop.entity.Shop;
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
-import lombok.Data;
-import lombok.ToString;
+import lombok.*;
 
 import java.math.BigDecimal;
 
 @Entity
 @Table(name = "item_variant")
-@Data
-public class ItemVariant {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "shop_id", nullable = false)
-    private Shop shop;
+@Getter
+@Setter
+@NoArgsConstructor
+public class ItemVariant extends ShopAwareEntity {
 
     @Column(nullable = false, unique = true)
     private String sku;
@@ -42,7 +36,6 @@ public class ItemVariant {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_id", nullable = false)
     @JsonBackReference
-    @ToString.Exclude
     private Item item;
 
     @Column

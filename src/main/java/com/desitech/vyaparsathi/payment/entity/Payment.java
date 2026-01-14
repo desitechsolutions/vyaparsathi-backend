@@ -39,7 +39,9 @@ public class Payment extends ShopAwareEntity {
     @Enumerated(EnumType.STRING)
     private PaymentStatus status;
     @PrePersist
+    @Override
     public void onCreate() {
+        super.onCreate();
         if (paymentDate == null) {
             paymentDate = LocalDateTime.now();
         }

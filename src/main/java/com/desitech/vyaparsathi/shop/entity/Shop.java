@@ -39,4 +39,8 @@ public class Shop {
     @Convert(converter = LocalDateTimeAttributeConverter.class)
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
+
+
+    @Column(nullable = true)
+    String logoPath;
 }

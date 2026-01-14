@@ -50,7 +50,9 @@ public class Sale extends ShopAwareEntity {
     private PaymentStatus paymentStatus = PaymentStatus.PENDING;
 
     @PrePersist
+    @Override
     public void onCreate() {
+        super.onCreate();
         if (this.date == null) {
             this.date = LocalDateTime.now();
         }

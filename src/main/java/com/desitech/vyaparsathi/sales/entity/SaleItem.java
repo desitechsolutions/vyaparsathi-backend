@@ -49,4 +49,7 @@ public class SaleItem extends ShopAwareEntity {
 
     @Column(name = "igst_amt", nullable = false, precision = 12, scale = 2)
     private BigDecimal igstAmt;
+
+    @Column(name = "discount", precision = 12, scale = 2)
+    private BigDecimal discount = BigDecimal.ZERO;
 }

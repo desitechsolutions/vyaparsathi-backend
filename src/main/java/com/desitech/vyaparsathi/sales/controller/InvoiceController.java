@@ -1,31 +1,123 @@
 package com.desitech.vyaparsathi.sales.controller;
 
-import com.desitech.vyaparsathi.sales.dto.InvoiceDto;
-import com.desitech.vyaparsathi.sales.service.InvoiceService;
-import com.desitech.vyaparsathi.sales.repository.SaleRepository;
-import com.desitech.vyaparsathi.sales.entity.Sale;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
+import com.desitech.vyaparsathi.auth.security.JwtUtil;
+import com.desitech.vyaparsathi.sales.dto.InvoiceTokenData;
+import com.desitech.vyaparsathi.sales.service.invoice.InvoiceService2;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/invoices")
 public class InvoiceController {
 
+    private static final Logger logger = LoggerFactory.getLogger(InvoiceController.class);
     @Autowired
-    private InvoiceService invoiceService;
+    private JwtUtil jwtUtil;
+    private final InvoiceService2 invoiceService;
 
+    public InvoiceController(InvoiceService2 invoiceService) {
+        this.invoiceService = invoiceService;
+    }
 
-    @GetMapping("/download")
-    public ResponseEntity<byte[]> downloadInvoicePdf(@RequestParam(required = false) Long saleId,
-                                                    @RequestParam(required = false) String invoiceNo) {
+    // ===============================
+    // PRINT / PREVIEW (INLINE)
+    // ===============================
+    @GetMapping(
+            value = "/print",
+            produces = MediaType.APPLICATION_PDF_VALUE
+    )
+    @Deprecated
+    public ResponseEntity<byte[]> printInvoice(
+            @RequestParam(required = false) Long saleId,
+            @RequestParam(required = false) String invoiceNo
+    ) {
+        logger.warn("Deprecated endpoint /print used - migrate to /signed");
+        if (saleId == null && invoiceNo == null) {
+            return ResponseEntity.badRequest().build();
+        }
+
         byte[] pdf = invoiceService.generatePdfBySaleIdOrInvoiceNo(saleId, invoiceNo);
-        String filename = "invoice_" + (invoiceNo != null ? invoiceNo : (saleId != null ? saleId : "")) + ".pdf";
+
+        String filename = "invoice_" +
+                (invoiceNo != null ? invoiceNo : saleId) + ".pdf";
+
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + filename)
+                .header(
+                        HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=\"" + filename + "\""
+                )
+                .header(HttpHeaders.CACHE_CONTROL, "no-store, no-cache, must-revalidate, max-age=0")
+                .header(HttpHeaders.PRAGMA, "no-cache")
+                .header(HttpHeaders.EXPIRES, "0")
                 .body(pdf);
+    }
+
+    // ===============================
+    // DOWNLOAD (ATTACHMENT)
+    //Deprecated - use /signed with temporary token instead
+    // ===============================
+    @GetMapping(
+            value = "/download",
+            produces = MediaType.APPLICATION_PDF_VALUE
+    )
+    @Deprecated
+    public ResponseEntity<byte[]> downloadInvoicePdf(
+            @RequestParam(required = false) Long saleId,
+            @RequestParam(required = false) String invoiceNo
+    ) {
+        logger.warn("Deprecated endpoint /download used - migrate to /signed");
+        if (saleId == null && invoiceNo == null) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        byte[] pdf = invoiceService.generatePdfBySaleIdOrInvoiceNo(saleId, invoiceNo);
+
+        String filename = "invoice_" +
+                (invoiceNo != null ? invoiceNo : saleId) + ".pdf";
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(
+                        HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + filename + "\""
+                )
+                .body(pdf);
+    }
+    @GetMapping(value = "/signed", produces = MediaType.APPLICATION_PDF_VALUE)
+    public ResponseEntity<byte[]> getSignedInvoice(
+            @RequestParam String token,
+            @RequestParam(defaultValue = "false") boolean download,
+            HttpServletResponse response) {
+
+        try {
+            InvoiceTokenData data = jwtUtil.validateInvoiceToken(token);
+
+            Long saleId = data.saleId;
+            String invoiceNo = data.invoiceNo;
+
+            byte[] pdf = invoiceService.generatePdfBySaleIdOrInvoiceNo(saleId, invoiceNo);
+
+            String filename = "invoice_" + (invoiceNo != null ? invoiceNo : saleId) + ".pdf";
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.set(HttpHeaders.CACHE_CONTROL, "no-store, no-cache, must-revalidate");
+
+            // Force download if ?download=true
+            String disposition = download ? "attachment" : "inline";
+            headers.set(HttpHeaders.CONTENT_DISPOSITION, disposition + "; filename=\"" + filename + "\"");
+
+            return new ResponseEntity<>(pdf, headers, HttpStatus.OK);
+
+        } catch (Exception e) {
+            logger.error("Invalid or expired signed invoice token", e);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("Invalid or expired access".getBytes());
+        }
     }
 }

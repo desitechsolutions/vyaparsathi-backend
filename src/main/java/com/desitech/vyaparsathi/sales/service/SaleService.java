@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.sales.service;
 
+import com.desitech.vyaparsathi.auth.security.JwtUtil;
 import com.desitech.vyaparsathi.changelog.service.ChangeLogService;
 import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.common.exception.EntityNotFoundAppException;
@@ -17,7 +18,6 @@ import com.desitech.vyaparsathi.inventory.repository.ItemVariantRepository;
 import com.desitech.vyaparsathi.inventory.service.StockService;
 import com.desitech.vyaparsathi.payment.dto.PaymentDto;
 import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
-import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
 import com.desitech.vyaparsathi.payment.service.PaymentService;
 import com.desitech.vyaparsathi.sales.GSTType;
 import com.desitech.vyaparsathi.sales.dto.SaleDto;
@@ -28,6 +28,7 @@ import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.entity.SaleItem;
 import com.desitech.vyaparsathi.sales.mapper.SaleMapper;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
+import com.desitech.vyaparsathi.sales.service.invoice.InvoiceService2;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import org.slf4j.Logger;
@@ -66,7 +67,7 @@ public class SaleService {
     @Autowired
     private ChangeLogService changeLogService;
     @Autowired
-    private InvoiceService invoiceService;
+    private InvoiceService2 invoiceService;
     @Autowired
     private SaleMapper mapper;
     @Autowired
@@ -77,9 +78,11 @@ public class SaleService {
     private CustomerLedgerService ledgerService;
     @Autowired
     private DeliveryService deliveryService;
+    @Autowired
+    private JwtUtil jwtUtil;
 
     @Transactional
-    public byte[] createSale(SaleDto dto) throws com.lowagie.text.BadElementException {
+    public SaleDto createSale(SaleDto dto) {
         Shop shop = shopRepository.findById(1L).orElseThrow(() -> new EntityNotFoundAppException("Shop", 1L));
         Optional<Customer> customerOpt = Optional.ofNullable(dto.getCustomerId()).flatMap(customerRepository::findById);
         Customer customer = customerOpt.orElse(null);
@@ -223,7 +226,13 @@ public class SaleService {
 
         changeLogService.append("SALE", sale.getId(), com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.CREATE, sale, "LOCAL_DEVICE");
 
-        return invoiceService.generatePdf(sale);
+        // Generate signed invoice URL
+        String signedToken = jwtUtil.generateInvoiceToken(sale.getId(), sale.getInvoiceNo());
+        String signedUrl = "/api/invoices/signed?token=" + signedToken;
+        SaleDto resultDto = mapper.toDto(sale);
+        resultDto.setSignedInvoiceUrl(signedUrl);
+        logger.info("Generated signed invoice URL for sale ID: {}, invoice: {}", sale.getId(), sale.getInvoiceNo());
+        return resultDto;
     }
 
     @Transactional

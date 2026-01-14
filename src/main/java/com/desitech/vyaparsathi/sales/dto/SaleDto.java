@@ -15,6 +15,7 @@ import java.util.List;
 
 @Data
 public class SaleDto {
+    private Long id;
     private Long customerId;
     @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
     private LocalDateTime date;
@@ -33,5 +34,6 @@ public class SaleDto {
     private BigDecimal totalAmount;
     private BigDecimal dueAmount;
     private DeliveryDTO delivery;
+    private String signedInvoiceUrl;
 
 }

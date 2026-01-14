@@ -1,6 +1,11 @@
 package com.desitech.vyaparsathi.sales.controller;
 
+import com.desitech.vyaparsathi.auth.security.JwtUtil;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
+import com.desitech.vyaparsathi.sales.dto.SaleCreateResponse;
+import com.desitech.vyaparsathi.sales.entity.Sale;
+import com.desitech.vyaparsathi.sales.repository.SaleRepository;
+import jakarta.persistence.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,20 +40,24 @@ public class SaleController {
     private static final Logger logger = LoggerFactory.getLogger(SaleController.class);
     @Autowired
     private SaleService service;
+    @Autowired
+    private SaleRepository saleRepository;
+
+    @Autowired
+    private JwtUtil jwtUtil;
 
     @PostMapping
-    public ResponseEntity<byte[]> create(@Valid @RequestBody SaleDto dto) {
-        try {
-            byte[] pdf = service.createSale(dto);
-            logger.info("Created sale and generated invoice for customerId={}", dto.getCustomerId());
-            return ResponseEntity.ok()
-                    .contentType(MediaType.APPLICATION_PDF)
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=invoice.pdf")
-                    .body(pdf);
-        } catch (Exception e) {
-            logger.error("Error creating sale for customerId={}: {}", dto.getCustomerId(), e.getMessage(), e);
-            throw new ApplicationException("Failed to create sale", e);
-        }
+    public ResponseEntity<SaleCreateResponse> create(@Valid @RequestBody SaleDto dto) {
+        logger.info("Creating sale for customerId={}", dto.getCustomerId());
+        SaleDto sale = service.createSale(dto); // NO PDF here
+        logger.info("Created sale for customerId={}", dto.getCustomerId());
+        SaleCreateResponse response = new SaleCreateResponse(
+                sale.getId(),
+                sale.getInvoiceNo(),
+                sale.getSignedInvoiceUrl()
+        );
+
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/{id}")
@@ -154,5 +163,15 @@ public class SaleController {
             logger.error("Error cancelling sale with id={}: {}", id, e.getMessage(), e);
             throw new ApplicationException("Failed to cancel sale", e);
         }
+    }
+    @GetMapping("/{saleId}/signed-url")
+    public ResponseEntity<String> getSignedUrlForSale(@PathVariable Long saleId) {
+        Sale sale = saleRepository.findById(saleId)
+                .orElseThrow(() -> new EntityNotFoundException("Sale not found"));
+
+        String token = jwtUtil.generateInvoiceToken(sale.getId(), sale.getInvoiceNo());
+        String url = "/api/invoices/signed?token=" + token;
+
+        return ResponseEntity.ok(url);
     }
 }

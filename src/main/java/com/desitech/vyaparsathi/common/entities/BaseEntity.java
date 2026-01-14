@@ -20,7 +20,7 @@ public abstract class BaseEntity {
     private LocalDateTime createdAt = LocalDateTime.now();
 
     @Convert(converter = LocalDateTimeAttributeConverter.class)
-    @Column(name = "updated_at")
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
     @PrePersist
     protected void onCreate() {

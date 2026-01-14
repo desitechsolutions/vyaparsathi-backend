@@ -33,7 +33,9 @@ public class Expense extends ShopAwareEntity {
 
     @PrePersist
     @Convert(converter = LocalDateTimeAttributeConverter.class)
+    @Override
     public void onCreate() {
+        super.onCreate();
         if (this.date == null) {
             this.date = LocalDateTime.now();
         }

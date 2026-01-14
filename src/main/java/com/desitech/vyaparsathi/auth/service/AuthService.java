@@ -8,6 +8,7 @@ import com.desitech.vyaparsathi.auth.repository.UserRepository;
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
+import com.desitech.vyaparsathi.common.exception.UserInactiveException;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -44,7 +45,7 @@ public class AuthService {
      */
     public String authenticateAndGenerateToken(User user, String pin) {
         if (!user.isActive()) {
-            throw new UsernameNotFoundException("User is inactive");
+            throw new UserInactiveException("User account is not active");
         }
         if (!passwordEncoder.matches(pin, user.getPinHash())) {
             throw new BadCredentialsException("Invalid username or PIN");
@@ -126,7 +127,7 @@ public class AuthService {
 
     public User getUserByUsername(String username) {
         User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ApplicationException("User not found"));
+                .orElseThrow(() -> new UsernameNotFoundException("Invalid username or password"));
 
         if (user.getShop() == null) {
             throw new ApplicationException("User is not assigned to any shop");

@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.auth.entity;
 
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
+import com.desitech.vyaparsathi.shop.entity.Shop;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.Getter;
@@ -26,4 +27,8 @@ public class RefreshToken extends ShopAwareEntity {
 
     @Column(nullable = false, columnDefinition = "BOOLEAN DEFAULT false")
     private boolean revoked;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shop_id", nullable = true)
+    private Shop shop;
 }

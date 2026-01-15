@@ -77,6 +77,10 @@ public class JwtUtil {
         return parseClaims(token).get("shopId", Long.class);
     }
 
+    public String extractRole(String token) {
+        return parseClaims(token).get("role", String.class);
+    }
+
     // --- VALIDATION ---
     public boolean validateToken(String token) {
         try {

@@ -7,18 +7,20 @@ import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.common.exception.TokenExpiredException;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class RefreshTokenService {
 
+    private static final Logger logger = LoggerFactory.getLogger(RefreshTokenService.class);
     @Value("${app.jwtRefreshExpirationMs:604800000}") // 7 days default
     private Long refreshTokenDurationMs;
 
@@ -36,17 +38,23 @@ public class RefreshTokenService {
      */
     @Transactional
     public RefreshToken createRefreshToken(String username) {
-        // Ensure only one token exists per user
         refreshTokenRepository.deleteByUsername(username);
 
         RefreshToken refreshToken = new RefreshToken();
         refreshToken.setUsername(username);
         refreshToken.setToken(UUID.randomUUID().toString());
         refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenDurationMs));
-        if (TenantContext.getCurrentShopId() != null) {
-            Shop shop = shopRepository.findById(TenantContext.getCurrentShopId())
-                    .orElseThrow(() -> new ApplicationException("Shop not found"));
+
+        Long currentShopId = TenantContext.getCurrentShopId();
+
+        if (currentShopId != null) {
+            Shop shop = shopRepository.findById(currentShopId)
+                    .orElseThrow(() -> new ApplicationException("Shop not found for id: " + currentShopId));
             refreshToken.setShop(shop);
+            logger.debug("Refresh token created with shop id: {}", currentShopId);
+        } else {
+            logger.debug("Refresh token created without shop (normal for PENDING_OWNER / onboarding)");
+            // refreshToken.setShop(null); // already default
         }
 
         return refreshTokenRepository.save(refreshToken);

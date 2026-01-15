@@ -8,7 +8,8 @@ import java.util.Arrays;
 public enum Role {
     OWNER,
     STAFF,
-    ADMIN;
+    ADMIN,
+    PENDING_OWNER;
 
     @JsonCreator
     public static Role fromString(String value) {

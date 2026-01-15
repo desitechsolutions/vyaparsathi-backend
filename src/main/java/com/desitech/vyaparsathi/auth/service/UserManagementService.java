@@ -166,4 +166,22 @@ public class UserManagementService {
         return dto;
     }
 
+    @Transactional
+    public User createInitialUser(RegisterRequest request) {
+        if (userRepository.findByUsername(request.getUsername()).isPresent()) {
+            throw new IllegalArgumentException("Username already exists");
+        }
+
+        User user = new User();
+        user.setUsername(request.getUsername());
+        user.setPinHash(passwordEncoder.encode(request.getPin()));
+        user.setFirstName(request.getFirstName());
+        user.setLastName(request.getLastName());
+        user.setEmail(request.getEmail());
+        user.setRole(Role.PENDING_OWNER); // new temporary role
+        user.setActive(true);
+        // shop = null here - allowed now
+
+        return userRepository.save(user);
+    }
 }

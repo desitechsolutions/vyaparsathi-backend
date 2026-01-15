@@ -27,6 +27,6 @@ public interface ItemRepository extends BaseRepository<Item, Long> {
      * @param categoryId The ID of the category to check.
      * @return true if an item exists with that categoryId, false otherwise.
      */
-    boolean existsByCategory_Id(Long categoryId);
+    boolean existsByCategoryId(Long categoryId);
 
 }

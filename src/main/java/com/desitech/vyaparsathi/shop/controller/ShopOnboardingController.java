@@ -1,5 +1,7 @@
 
 package com.desitech.vyaparsathi.shop.controller;
+import com.desitech.vyaparsathi.auth.entity.User;
+import com.desitech.vyaparsathi.auth.security.CustomUserDetails;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,16 +12,17 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/shop")
-public class ShopController {
+public class ShopOnboardingController {
 
-    private static final Logger logger = LoggerFactory.getLogger(ShopController.class);
+    private static final Logger logger = LoggerFactory.getLogger(ShopOnboardingController.class);
 
     @Autowired
-    private ShopService service;
+    private ShopService shopService;
 
     /**
      * Endpoint to set up the initial shop.
@@ -27,17 +30,23 @@ public class ShopController {
      * @param dto The DTO containing shop details.
      * @return The created ShopDto.
      */
-    @PostMapping
-    @PreAuthorize("hasRole('OWNER')")
-    public ResponseEntity<ShopDto> createInitialShop(@Valid @RequestBody ShopDto dto) {
-        try {
-            ShopDto result = service.createInitialShop(dto);
-            logger.info("Created initial shop with name={}", dto.getName());
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            logger.error("Error creating initial shop with name={}: {}", dto.getName(), e.getMessage(), e);
-            throw new ApplicationException("Failed to create initial shop", e);
+    @PostMapping("/onboarding")
+    @PreAuthorize("hasRole('PENDING_OWNER')")
+    public ResponseEntity<ShopDto> completeOnboarding(
+            @Valid @RequestBody ShopDto dto,
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+
+        User currentUser = userDetails.getUser(); // from security context
+        logger.info("current user from security context: {},{}"+ currentUser.getUsername(), currentUser.getShop().getId(),currentUser.getShop());
+        if (currentUser.getShop() != null) {
+            throw new IllegalStateException("Shop already exists");
         }
+        ShopDto createdShop = shopService.completeOnboarding(dto, currentUser);
+
+        logger.info("Onboarding completed for user={}, shopId={}",
+                currentUser.getUsername(), createdShop.getId());
+
+        return ResponseEntity.ok(createdShop);
     }
 
     /**
@@ -50,7 +59,7 @@ public class ShopController {
     @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<ShopDto> updateShop(@Valid @RequestBody ShopDto dto) {
         try {
-            ShopDto result = service.updateShop(dto);
+            ShopDto result = shopService.updateShop(dto);
             logger.info("Updated shop with name={}", dto.getName());
             return ResponseEntity.ok(result);
         } catch (Exception e) {
@@ -65,9 +74,10 @@ public class ShopController {
      * @return The ShopDto for the current shop.
      */
     @GetMapping
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ShopDto> getShop() {
         try {
-            ShopDto result = service.getShop();
+            ShopDto result = shopService.getShop();
             logger.info("Fetched shop details");
             return ResponseEntity.ok(result);
         } catch (Exception e) {

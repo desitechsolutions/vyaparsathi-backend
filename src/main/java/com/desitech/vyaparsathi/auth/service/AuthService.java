@@ -4,6 +4,7 @@ import com.desitech.vyaparsathi.auth.dto.AuthResponse;
 import com.desitech.vyaparsathi.auth.dto.RegisterRequest;
 import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.entity.RefreshToken;
+import com.desitech.vyaparsathi.auth.model.Role;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
@@ -11,7 +12,8 @@ import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.common.exception.UserInactiveException;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
-import jakarta.persistence.EntityNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -22,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AuthService {
 
+    private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
     @Autowired
     private UserRepository userRepository;
 
@@ -129,12 +132,18 @@ public class AuthService {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("Invalid username or password"));
 
+        // Allow PENDING_OWNER without shop – they will be forced to onboarding
         if (user.getShop() == null) {
-            throw new ApplicationException("User is not assigned to any shop");
+            if (user.getRole() != Role.PENDING_OWNER) {
+                throw new ApplicationException("User is not assigned to any shop");
+            }
+            // PENDING_OWNER is allowed → continue
+            logger.info("Login allowed for PENDING_OWNER without shop: {}", username);
         }
 
-        // Set shopId in TenantContext for multi-tenancy
-        TenantContext.setCurrentShopId(user.getShop().getId());
+        if (user.getShop() != null) {
+            TenantContext.setCurrentShopId(user.getShop().getId());
+        }
 
         return user;
     }

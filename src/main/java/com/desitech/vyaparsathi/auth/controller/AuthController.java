@@ -2,6 +2,9 @@
 package com.desitech.vyaparsathi.auth.controller;
 import com.desitech.vyaparsathi.auth.dto.*;
 import com.desitech.vyaparsathi.auth.entity.User;
+import com.desitech.vyaparsathi.auth.security.JwtUtil;
+import com.desitech.vyaparsathi.auth.service.RefreshTokenService;
+import com.desitech.vyaparsathi.auth.service.UserManagementService;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +31,12 @@ public class AuthController {
 
     @Autowired
     private ResetTokenService resetTokenService;
+    @Autowired
+    private UserManagementService userManagementService;
+    @Autowired
+    private JwtUtil jwtUtil;
+    @Autowired
+    private RefreshTokenService refreshTokenService;
 
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody AuthRequest request) {
@@ -39,18 +48,27 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token, refreshToken, user.getRole().name()));
     }
 
-/*    @PostMapping("/register")
-    public ResponseEntity<String> register(@Valid @RequestBody RegisterRequest request) {
+    @PostMapping("/register")
+    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
         try {
-            authService.registerNewUser(request);
-            logger.info("User registered: {}", request.getUsername());
-            return ResponseEntity.ok("User registered successfully.");
+            // 1. Create user (no shop yet)
+            User user = userManagementService.createInitialUser(request); // new method, see below
+
+            // 2. Auto-login (limited token - no tenant context yet)
+            String accessToken = jwtUtil.generateAccessToken(user, null); // no shopId
+            String refreshToken = refreshTokenService.createRefreshToken(user.getUsername()).getToken();
+            logger.info("New user registered: username={}",
+                    request.getUsername());
+
+            // 3. Return token + flag that onboarding is pending
+            AuthResponse response = new AuthResponse(accessToken, refreshToken, user.getRole().name());
+            response.setOnboardingRequired(true);
+
+            return ResponseEntity.ok(response);
         } catch (Exception e) {
-            logger.error("Registration failed for user {}: {}", request.getUsername(), e.getMessage(), e);
             throw new ApplicationException("Registration failed", e);
         }
-    }*/
-
+    }
     @PostMapping("/change-pin")
     public ResponseEntity<String> changePin(@Valid @RequestBody ChangePinRequest request, Authentication authentication) {
         try {

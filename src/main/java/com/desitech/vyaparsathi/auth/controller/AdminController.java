@@ -1,17 +1,8 @@
 package com.desitech.vyaparsathi.auth.controller;
 
-import com.desitech.vyaparsathi.auth.dto.RegisterRequest;
-import com.desitech.vyaparsathi.auth.dto.TenantSetupRequest;
 import com.desitech.vyaparsathi.auth.service.UserManagementService;
-import com.desitech.vyaparsathi.common.configs.TenantContext;
-import com.desitech.vyaparsathi.common.exception.ApplicationException;
-import com.desitech.vyaparsathi.shop.dto.ShopDto;
 import com.desitech.vyaparsathi.shop.service.ShopService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -25,7 +16,7 @@ public class AdminController {
     @Autowired
     private UserManagementService userManagementService;
 
-    @PostMapping
+    /*@PostMapping
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<String> setupTenant(@RequestBody TenantSetupRequest request) {
         try {
@@ -44,5 +35,5 @@ public class AdminController {
         } catch (Exception e) {
             throw new ApplicationException("Failed to setup tenant: " + e.getMessage(), e);
         }
-    }
+    }*/
 }

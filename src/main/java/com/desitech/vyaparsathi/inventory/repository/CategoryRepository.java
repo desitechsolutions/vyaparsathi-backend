@@ -19,4 +19,8 @@ public interface CategoryRepository extends BaseRepository<Category, Long> {
 
     // Useful for finding a specific category by name under a parent
     Optional<Category> findByNameAndParentId(String name, Long parentId);
+
+    boolean existsByNameAndShopId(String name, Long shopId);
+    Optional<Category> findByNameAndShopId(String name, Long shopId);
+
 }

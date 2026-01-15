@@ -41,6 +41,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String username = null;
         String jwt = null;
         Long shopId = null;
+        String roleFromToken = null;
 
         try {
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
@@ -49,12 +50,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 if (jwtUtil.validateToken(jwt)) {
                     username = jwtUtil.extractUsername(jwt);
                     shopId = jwtUtil.extractShopId(jwt);
+                    roleFromToken = jwtUtil.extractRole(jwt);
                     logger.info("Extracted username: {}, shopId: {} from JWT", username, shopId);
                     if (shopId == null) {
-                        logger.error("No shopId found in JWT for username: {}", username);
-                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                        response.getWriter().write("Missing shopId in token");
-                        return;
+                        if ("PENDING_OWNER".equals(roleFromToken)) {
+                            logger.info("Allowing login without shopId for PENDING_OWNER: {}", username);
+                            // Proceed — do not return 401
+                        }
+                        else{
+                            logger.error("No shopId found in JWT for username: {}", username);
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            response.getWriter().write("Missing shopId in token");
+                            return;
+                        }
+
                     }
                     TenantContext.setCurrentShopId(shopId);
                     logger.info("Set shopId {} in TenantContext", shopId);

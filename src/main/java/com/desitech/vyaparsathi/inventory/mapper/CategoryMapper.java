@@ -1,29 +1,34 @@
 package com.desitech.vyaparsathi.inventory.mapper;
 
+import com.desitech.vyaparsathi.inventory.dto.CategoryCreateDto;
 import com.desitech.vyaparsathi.inventory.dto.CategoryDto;
+import com.desitech.vyaparsathi.inventory.dto.CategoryUpdateDto;
 import com.desitech.vyaparsathi.inventory.entity.Category;
-import org.mapstruct.Mapper;
-import org.mapstruct.Mapping;
-import org.mapstruct.factory.Mappers;
+import org.mapstruct.*;
 
-@Mapper(componentModel = "spring")
+@Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.IGNORE)
 public interface CategoryMapper {
 
-    CategoryMapper INSTANCE = Mappers.getMapper(CategoryMapper.class);
+    @Mapping(target = "parentId", source = "parent.id")
+    @Mapping(target = "parentName", source = "parent.name")
+    @Mapping(target = "shopId", source = "shop.id")
+    @Mapping(target = "children", source = "children")
+    CategoryDto toDto(Category entity);
 
-    /**
-     * Converts a Category entity to a CategoryDto.
-     * @param category The entity to convert.
-     * @return The resulting DTO.
-     */
-    CategoryDto toDto(Category category);
+    @Mapping(target = "parent", ignore = true)
+    @Mapping(target = "shop", ignore = true)
+    @Mapping(target = "children", ignore = true)
+    Category toEntity(CategoryCreateDto dto);
 
-    /**
-     * Converts a CategoryDto to a Category entity.
-     * The 'id' is ignored during this mapping to prevent issues when creating new entities.
-     * @param categoryDto The DTO to convert.
-     * @return The resulting entity.
-     */
+    @Mapping(target = "parent", ignore = true)
+    @Mapping(target = "shop", ignore = true)
+    @Mapping(target = "children", ignore = true)
     @Mapping(target = "id", ignore = true)
-    Category toEntity(CategoryDto categoryDto);
+    void updateFromDto(CategoryUpdateDto dto, @MappingTarget Category entity);
+
+    @Mapping(target = "parent", ignore = true)      // Usually already set
+    @Mapping(target = "shop", ignore = true)        // Usually already set
+    @Mapping(target = "children", ignore = true)    // Avoid recursion
+    @Mapping(target = "id", source = "id")          // Keep the existing ID
+    Category toEntity(CategoryDto dto);
 }

@@ -3,6 +3,7 @@ package com.desitech.vyaparsathi.shop.controller;
 import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.security.CustomUserDetails;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
+import jakarta.persistence.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,11 +37,22 @@ public class ShopOnboardingController {
             @Valid @RequestBody ShopDto dto,
             @AuthenticationPrincipal CustomUserDetails userDetails) {
 
-        User currentUser = userDetails.getUser(); // from security context
-        logger.info("current user from security context: {},{}"+ currentUser.getUsername(), currentUser.getShop().getId(),currentUser.getShop());
+        User currentUser = userDetails.getUser();
+
+        // Null-safe logging — avoid NPE
+        String shopInfo = (currentUser.getShop() != null)
+                ? "shopId=" + currentUser.getShop().getId()
+                : "no shop yet";
+
+        logger.info("current user from security context: {}, {}",
+                currentUser.getUsername(), shopInfo);
+
+        // This check is already good — prevents re-onboarding
         if (currentUser.getShop() != null) {
             throw new IllegalStateException("Shop already exists");
         }
+
+        // Delegate to service
         ShopDto createdShop = shopService.completeOnboarding(dto, currentUser);
 
         logger.info("Onboarding completed for user={}, shopId={}",
@@ -78,10 +90,22 @@ public class ShopOnboardingController {
     public ResponseEntity<ShopDto> getShop() {
         try {
             ShopDto result = shopService.getShop();
+
+            // If service returns null → means no shop yet (onboarding case)
+            if (result == null) {
+                logger.debug("No shop found for current user – returning 204 No Content");
+                return ResponseEntity.noContent().build();  // 204 No Content
+            }
+
             logger.info("Fetched shop details");
             return ResponseEntity.ok(result);
+
+        } catch (EntityNotFoundException e) {
+            // If shop ID was set but not found (rare edge case)
+            logger.warn("Shop not found in DB for current context", e);
+            return ResponseEntity.noContent().build();
         } catch (Exception e) {
-            logger.error("Error fetching shop details: {}", e.getMessage(), e);
+            logger.error("Unexpected error fetching shop details", e);
             throw new ApplicationException("Failed to fetch shop details", e);
         }
     }

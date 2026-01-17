@@ -18,6 +18,8 @@ import jakarta.persistence.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,12 +48,23 @@ public class ShopService {
 
         // 1. Create shop
         Shop shop = shopMapper.toEntity(dto);
-        shop = shopRepository.save(shop);
+        shop = shopRepository.saveAndFlush(shop);
 
+        TenantContext.setCurrentShopId(shop.getId());
         // 2. Assign shop to user & upgrade role
-        currentUser.setShop(shop);
-        currentUser.setRole(Role.OWNER);
-        userRepository.save(currentUser);
+        try {
+            // Assign to user
+            currentUser.setShop(shop);
+            currentUser.setRole(Role.OWNER);
+            userRepository.save(currentUser);
+
+            // Seed categories (listener will now auto-set shop if needed)
+            seedDefaultClothingCategories(shop);
+        }
+        finally {
+            // Always clear after seeding
+            TenantContext.clear();
+        }
 
         // 3. Seed default clothing categories
         seedDefaultClothingCategories(shop);
@@ -78,66 +91,95 @@ public class ShopService {
 
     public ShopDto getShop() {
         Long currentShopId = TenantContext.getCurrentShopId();
+
+        // ────────────────────────────────────────────────────────────────
+        // Allow onboarding users (PENDING_OWNER) to have no shop context
+        // ────────────────────────────────────────────────────────────────
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (currentShopId == null) {
+            if (auth != null && auth.getAuthorities().stream()
+                    .anyMatch(a -> "ROLE_PENDING_OWNER".equals(a.getAuthority()))) {
+
+                logger.info("No shop context for PENDING_OWNER – returning null (onboarding flow)");
+                return null;  // ← Return null instead of throwing
+            }
+
+            // For all other users: strict enforcement
             throw new IllegalStateException("No active shop context");
         }
 
+        // Normal case: shop exists
         return shopRepository.findById(currentShopId)
                 .map(shopMapper::toDto)
                 .orElseThrow(() -> new EntityNotFoundException("Shop not found"));
     }
 
     private void seedDefaultClothingCategories(Shop shop) {
-        Long shopId = shop.getId();
-
-        // Skip if already seeded (idempotent)
-        if (categoryService.getAllCategories().stream().anyMatch(c -> c.getShopId().equals(shopId))) {
-            logger.info("Categories already seeded for shop: {}", shopId);
-            return;
+        if (shop.getId() == null) {
+            throw new IllegalStateException("Shop has no ID during seeding");
         }
 
+        logger.info("Seeding default categories for shop {}", shop.getId());
+
         // Root categories
-        Category men = createCategory("MEN", null, shop);
-        Category women = createCategory("WOMEN", null, shop);
-        Category kids = createCategory("KIDS", null, shop);
-        Category unisex = createCategory("UNISEX / ACCESSORIES", null, shop);
+        Category men = createCategoryManually("MEN", null, shop);
+        Category women = createCategoryManually("WOMEN", null, shop);
+        Category kids = createCategoryManually("KIDS", null, shop);
+        Category unisex = createCategoryManually("UNISEX / ACCESSORIES", null, shop);
 
         // MEN sub-categories
-        createCategory("CASUAL", men, shop);
-        createCategory("FORMAL", men, shop);
-        createCategory("ETHNIC / FESTIVE", men, shop);
-        createCategory("ACTIVEWEAR / SPORTS", men, shop);
-        createCategory("INNERWEAR", men, shop);
+        createCategoryManually("CASUAL", men, shop);
+        createCategoryManually("FORMAL", men, shop);
+        createCategoryManually("ETHNIC / FESTIVE", men, shop);
+        createCategoryManually("ACTIVEWEAR / SPORTS", men, shop);
+        createCategoryManually("INNERWEAR", men, shop);
 
         // WOMEN sub-categories
-        createCategory("ETHNIC / SAREES", women, shop);
-        createCategory("WESTERN / FUSION", women, shop);
-        createCategory("KURTIS & TOPS", women, shop);
-        createCategory("LEGGINGS & BOTTOMS", women, shop);
+        createCategoryManually("ETHNIC / SAREES", women, shop);
+        createCategoryManually("WESTERN / FUSION", women, shop);
+        createCategoryManually("KURTIS & TOPS", women, shop);
+        createCategoryManually("LEGGINGS & BOTTOMS", women, shop);
 
         // KIDS sub-categories
-        createCategory("BOYS", kids, shop);
-        createCategory("GIRLS", kids, shop);
-        createCategory("INFANT / TODDLER", kids, shop);
+        createCategoryManually("BOYS", kids, shop);
+        createCategoryManually("GIRLS", kids, shop);
+        createCategoryManually("INFANT / TODDLER", kids, shop);
 
         // Unisex / Accessories
-        createCategory("FOOTWEAR", unisex, shop);
-        createCategory("BAGS & WALLETS", unisex, shop);
-        createCategory("JEWELLERY & WATCHES", unisex, shop);
+        createCategoryManually("FOOTWEAR", unisex, shop);
+        createCategoryManually("BAGS & WALLETS", unisex, shop);
+        createCategoryManually("JEWELLERY & WATCHES", unisex, shop);
 
-        logger.info("Seeded {} default clothing categories for shop: {}",
-                categoryService.getAllCategories().stream().filter(c -> c.getShopId().equals(shopId)).count(),
-                shopId);
+        logger.info("Seeded default categories for shop {}", shop.getId());
     }
 
-    private Category createCategory(String name, Category parent, Shop shop) {
+    private Category createCategoryManually(String name, Category parent, Shop shop) {
+        Long shopId = shop.getId();
+
+        // Optional idempotent check (can be skipped during onboarding if you want, but it's fine)
+        if (categoryRepository.existsByNameAndShopId(name, shopId)) {
+            logger.debug("Category '{}' already exists for shop {}", name, shopId);
+            return categoryRepository.findByNameAndShopId(name, shopId).orElseThrow();
+        }
+
+        Category category = new Category();
+        category.setName(name);
+        category.setShop(shop);  // Explicitly set shop to avoid NULL
+        if (parent != null) {
+            category.setParent(parent);
+        }
+
+        return categoryRepository.save(category);
+    }
+
+/*    private Category createCategory(String name, Category parent, Shop shop) {
         Long shopId = shop.getId();
 
         // 1. Idempotent check (fast existence check)
-        if (categoryRepository.existsByNameAndShopId(name, shopId)) {
+        if (categoryRepository.existsByNameAndShop(name, shop)) {
             logger.debug("Category '{}' already exists for shop {}", name, shopId);
             // Return existing (fetch only when needed)
-            return categoryRepository.findByNameAndShopId(name, shopId)
+            return categoryRepository.findByNameAndShop(name, shop)
                     .orElseThrow(() -> new IllegalStateException("Category existence check failed after positive result"));
         }
 
@@ -158,5 +200,5 @@ public class ShopService {
                 name, savedEntity.getId(), parent != null ? parent.getId() : null, shopId);
 
         return savedEntity;
-    }
+    }*/
 }

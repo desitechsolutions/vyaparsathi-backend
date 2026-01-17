@@ -44,8 +44,15 @@ public class CategoryService {
         Category category = categoryMapper.toEntity(dto);
 
         // Set shop from tenant context
-        Shop shop = shopRepository.findById(TenantContext.getCurrentShopId())
-                .orElseThrow(() -> new EntityNotFoundException("Shop not found"));
+        Long shopId = TenantContext.getCurrentShopId();
+        Shop shop;
+        if (shopId != null) {
+            shop = shopRepository.findById(shopId)
+                    .orElseThrow(() -> new EntityNotFoundException("Shop not found"));
+        } else {
+            // During onboarding, TenantContext is null, so skip this step - the listener will handle it or it's set externally
+            shop = null;
+        }
         category.setShop(shop);
 
         // Set parent if provided

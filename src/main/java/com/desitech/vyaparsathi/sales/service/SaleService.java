@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.sales.service;
 
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
 import com.desitech.vyaparsathi.changelog.service.ChangeLogService;
+import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.common.exception.EntityNotFoundAppException;
 import com.desitech.vyaparsathi.common.exception.InsufficientStockException;
@@ -19,13 +20,14 @@ import com.desitech.vyaparsathi.inventory.service.StockService;
 import com.desitech.vyaparsathi.payment.dto.PaymentDto;
 import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
 import com.desitech.vyaparsathi.payment.service.PaymentService;
-import com.desitech.vyaparsathi.sales.GSTType;
+import com.desitech.vyaparsathi.sales.enums.GSTType;
 import com.desitech.vyaparsathi.sales.dto.SaleDto;
 import com.desitech.vyaparsathi.sales.dto.SaleDueDto;
 import com.desitech.vyaparsathi.sales.dto.SaleItemDto;
 import com.desitech.vyaparsathi.sales.dto.SaleReturnDto;
 import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.entity.SaleItem;
+import com.desitech.vyaparsathi.sales.enums.SaleStatus;
 import com.desitech.vyaparsathi.sales.mapper.SaleMapper;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
 import com.desitech.vyaparsathi.sales.service.invoice.InvoiceService2;
@@ -83,8 +85,8 @@ public class SaleService {
 
     @Transactional
     public SaleDto createSale(SaleDto dto) {
-        Shop shop = shopRepository.findById(1L).orElseThrow(() -> new EntityNotFoundAppException("Shop", 1L));
-        Optional<Customer> customerOpt = Optional.ofNullable(dto.getCustomerId()).flatMap(customerRepository::findById);
+        Shop shop = shopRepository.findById(TenantContext.getCurrentShopId()).orElseThrow(() -> new EntityNotFoundAppException("Shop", TenantContext.getCurrentShopId()));
+        Optional<Customer> customerOpt = Optional.ofNullable(dto.getCustomer().getId()).flatMap(customerRepository::findById);
         Customer customer = customerOpt.orElse(null);
 
         List<SaleItem> saleItems = new ArrayList<>();
@@ -383,7 +385,8 @@ public class SaleService {
                             sale.getCustomer().getAddressLine1(),
                             sale.getCustomer().getCity(),
                             sale.getCustomer().getState(),
-                            sale.getCustomer().getPostalCode()
+                            sale.getCustomer().getPostalCode(),
+                            sale.getStatus().name()
                     );
                 })
                 .collect(Collectors.toList());
@@ -423,7 +426,8 @@ public class SaleService {
                             sale.getCustomer().getAddressLine1(),
                             sale.getCustomer().getCity(),
                             sale.getCustomer().getState(),
-                            sale.getCustomer().getPostalCode()
+                            sale.getCustomer().getPostalCode(),
+                            sale.getStatus().name()
                     );
                 })
                 .filter(dto -> dto.getDueAmount().compareTo(BigDecimal.ZERO) > 0)
@@ -431,4 +435,263 @@ public class SaleService {
 
         return new PageImpl<>(filtered, pageable, sales.getTotalElements());
     }
+
+    @Transactional
+    public SaleDto saveOrUpdateDraft(SaleDto dto) {
+        Shop shop = shopRepository.findById(TenantContext.getCurrentShopId()).orElseThrow(() -> new EntityNotFoundAppException("Shop", TenantContext.getCurrentShopId()));
+        Optional<Customer> customerOpt = Optional.ofNullable(dto.getCustomer().getId()).flatMap(customerRepository::findById);
+        Customer customer = customerOpt.orElse(null);
+
+        String invoiceNo = null;
+
+        Sale sale;
+        boolean isUpdate = dto.getId() != null;
+
+        if (isUpdate) {
+            sale = saleRepository.findById(dto.getId())
+                    .orElseThrow(() -> new EntityNotFoundAppException("Sale", dto.getId()));
+            // Optional: Ensure we only update if current status is DRAFT
+            if (!"DRAFT".equals(sale.getStatus().name())) {
+                throw new BusinessValidationException("Only drafts can be updated via this endpoint.");
+            }
+            // Clear old items for replacement
+            sale.getSaleItems().clear();
+        } else {
+            sale = new Sale();
+            String seq = String.format("%03d", saleRepository.count() + 1);
+            invoiceNo = "DRF-" + shop.getCode() + "-" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMM")) + "-" + seq;
+            sale.setInvoiceNo(invoiceNo);
+        }
+
+        List<SaleItem> saleItems = new ArrayList<>();
+        BigDecimal totalTaxableValue = BigDecimal.ZERO;
+
+        for (SaleItemDto itemDto : dto.getItems()) {
+            ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
+                    .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+
+            SaleItem saleItem = new SaleItem();
+            saleItem.setItemVariant(itemVariant);
+            saleItem.setQty(itemDto.getQty());
+            saleItem.setUnitPrice(itemDto.getUnitPrice());
+            saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : BigDecimal.ZERO);
+
+            // Calculate taxable value (Simplified for Draft)
+            BigDecimal taxableValue = itemDto.getQty().multiply(itemDto.getUnitPrice())
+                    .subtract(saleItem.getDiscount());
+            saleItem.setTaxableValue(taxableValue);
+            totalTaxableValue = totalTaxableValue.add(taxableValue);
+
+            saleItem.setGstType(GSTType.GST_0); // Default to 0 for drafts
+            saleItem.setCgstAmt(BigDecimal.ZERO);
+            saleItem.setSgstAmt(BigDecimal.ZERO);
+            saleItem.setIgstAmt(BigDecimal.ZERO);
+
+            saleItem.setSale(sale);
+            saleItems.add(saleItem);
+        }
+
+        sale.setShop(shop);
+        sale.setCustomer(customer);
+        sale.setStatus(SaleStatus.DRAFT);
+        sale.setTotalAmount(totalTaxableValue.setScale(0, RoundingMode.HALF_UP));
+        sale.setRoundOff(totalTaxableValue.subtract(sale.getTotalAmount()));
+        sale.getSaleItems().addAll(saleItems);
+
+        saleRepository.save(sale);
+
+        if (dto.getDelivery() != null) {
+            DeliveryDTO deliveryDTO = dto.getDelivery();
+            deliveryDTO.setSaleId(sale.getId());
+            deliveryDTO.setInvoiceNumber(invoiceNo);
+            if (customer != null) {
+                deliveryDTO.setCustomerName(customer.getName());
+            }
+            deliveryService.createDelivery(deliveryDTO);
+        }
+
+
+        // --- WE SKIP STOCK DEDUCTION, LEDGER, AND PAYMENTS HERE ---
+
+        logger.info("Draft {} saved for customer {}", sale.getInvoiceNo(), customer != null ? customer.getName() : "Walk-in");
+        return mapper.toDto(sale);
+    }
+
+    @Transactional
+    public SaleDto completeDraft(SaleDto dto) {
+
+        if (dto.getId() == null) {
+            throw new BusinessValidationException("Sale ID is required to complete a draft");
+        }
+
+        Sale existing = saleRepository.findById(dto.getId())
+                .orElseThrow(() -> new EntityNotFoundAppException("Sale", dto.getId()));
+
+        if (existing.getStatus() != SaleStatus.DRAFT) {
+            throw new BusinessValidationException("Only DRAFT sales can be completed");
+        }
+
+        // Load real customer from DB (same pattern as createSale)
+        Customer customer = Optional.ofNullable(dto.getCustomer())
+                .map(c -> customerRepository.findById(c.getId())
+                        .orElseThrow(() -> new EntityNotFoundAppException("Customer", c.getId())))
+                .orElse(null);
+
+        // ===== 1) Replace items with fresh calculation (same logic as createSale but NO new invoice =====
+        existing.getSaleItems().clear();
+
+        BigDecimal totalTaxableValue = BigDecimal.ZERO;
+        BigDecimal totalGSTAmount = BigDecimal.ZERO;
+
+        for (SaleItemDto itemDto : dto.getItems()) {
+
+            if (!stockService.isStockAvailable(itemDto.getItemVariantId(), itemDto.getQty())) {
+                throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
+            }
+
+            ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
+                    .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+
+            SaleItem saleItem = new SaleItem();
+            saleItem.setSale(existing);
+            saleItem.setItemVariant(itemVariant);
+            saleItem.setQty(itemDto.getQty());
+            saleItem.setUnitPrice(itemDto.getUnitPrice());
+            saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : BigDecimal.ZERO);
+
+            if (Boolean.TRUE.equals(dto.getIsGstRequired()) && itemVariant.getGstRate() != null) {
+
+                GSTType gstType = GSTType.fromRate(itemVariant.getGstRate());
+
+                BigDecimal taxableValue = itemDto.getQty()
+                        .multiply(itemDto.getUnitPrice())
+                        .subtract(saleItem.getDiscount());
+
+                BigDecimal gstAmount = taxableValue
+                        .multiply(BigDecimal.valueOf(gstType.getRate()))
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+
+                saleItem.setTaxableValue(taxableValue);
+                saleItem.setGstType(gstType);
+
+                boolean sameState = customer != null &&
+                        existing.getShop().getState().equals(customer.getState());
+
+                if (sameState) {
+                    BigDecimal half = gstAmount.divide(BigDecimal.valueOf(2), RoundingMode.HALF_UP);
+                    saleItem.setCgstAmt(half);
+                    saleItem.setSgstAmt(half);
+                    saleItem.setIgstAmt(BigDecimal.ZERO);
+                } else {
+                    saleItem.setIgstAmt(gstAmount);
+                    saleItem.setCgstAmt(BigDecimal.ZERO);
+                    saleItem.setSgstAmt(BigDecimal.ZERO);
+                }
+
+                totalTaxableValue = totalTaxableValue.add(taxableValue);
+                totalGSTAmount = totalGSTAmount.add(gstAmount);
+            } else {
+                saleItem.setTaxableValue(BigDecimal.ZERO);
+                saleItem.setGstType(GSTType.GST_0);
+                saleItem.setCgstAmt(BigDecimal.ZERO);
+                saleItem.setSgstAmt(BigDecimal.ZERO);
+                saleItem.setIgstAmt(BigDecimal.ZERO);
+            }
+
+            existing.getSaleItems().add(saleItem);
+        }
+
+        // ===== 2) Deduct stock (THIS DID NOT HAPPEN IN DRAFT BEFORE) =====
+        for (SaleItemDto itemDto : dto.getItems()) {
+            stockService.deductStock(
+                    itemDto.getItemVariantId(),
+                    itemDto.getQty(),
+                    "Sale Transaction",
+                    "Sale #" + existing.getInvoiceNo()
+            );
+        }
+
+        // ===== 3) Calculate final amount =====
+        BigDecimal totalBeforeRoundOff =
+                Boolean.TRUE.equals(dto.getIsGstRequired())
+                        ? totalTaxableValue.add(totalGSTAmount)
+                        : dto.getItems().stream()
+                        .map(i -> i.getQty()
+                                .multiply(i.getUnitPrice())
+                                .subtract(i.getDiscount() != null ? i.getDiscount() : BigDecimal.ZERO))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal finalTotal = totalBeforeRoundOff.setScale(0, RoundingMode.HALF_UP);
+        BigDecimal roundOff = totalBeforeRoundOff.subtract(finalTotal);
+
+        existing.setTotalAmount(finalTotal);
+        existing.setRoundOff(roundOff);
+        existing.setCustomer(customer);
+
+        // ===== 4) Mark as COMPLETED (KEY LINE) =====
+        existing.setStatus(SaleStatus.COMPLETED);
+
+        Sale saved = saleRepository.save(existing);
+
+        // ===== 5) Create delivery if present =====
+        if (dto.getDelivery() != null) {
+            DeliveryDTO deliveryDTO = dto.getDelivery();
+            deliveryDTO.setSaleId(saved.getId());
+            deliveryDTO.setInvoiceNumber(saved.getInvoiceNo());
+            if (customer != null) {
+                deliveryDTO.setCustomerName(customer.getName());
+            }
+            deliveryService.createDelivery(deliveryDTO);
+        }
+
+        // ===== 6) Create customer ledger entry =====
+        if (customer != null) {
+            CustomerLedgerDto ledger = new CustomerLedgerDto();
+            ledger.setAmount(finalTotal);
+            ledger.setType(CustomerLedgerType.CREDIT);
+            ledger.setDescription("Sale #" + saved.getInvoiceNo());
+            ledgerService.addEntry(customer.getId(), ledger);
+        }
+
+        // ===== 7) Create payments =====
+        if (dto.getPaymentDetails() != null) {
+            BigDecimal totalPaid = BigDecimal.ZERO;
+
+            for (PaymentDto p : dto.getPaymentDetails()) {
+                p.setSourceId(saved.getId());
+                p.setSourceType(PaymentSourceType.SALE);
+                p.setCustomerId(customer != null ? customer.getId() : null);
+                p.setPaymentDate(LocalDateTime.now());
+
+                paymentService.createPayment(p);
+                totalPaid = totalPaid.add(p.getAmount());
+
+                if (customer != null) {
+                    CustomerLedgerDto payLedger = new CustomerLedgerDto();
+                    payLedger.setAmount(p.getAmount());
+                    payLedger.setType(CustomerLedgerType.DEBIT);
+                    payLedger.setDescription(
+                            "Payment for Sale #" + saved.getInvoiceNo()
+                                    + " (" + p.getPaymentMethod() + ")"
+                    );
+                    ledgerService.addEntry(customer.getId(), payLedger);
+                }
+            }
+
+            if (totalPaid.compareTo(finalTotal) > 0) {
+                throw new BusinessValidationException("Total paid cannot exceed sale amount");
+            }
+        }
+
+        // ===== 8) Generate signed invoice =====
+        String signedToken =
+                jwtUtil.generateInvoiceToken(saved.getId(), saved.getInvoiceNo());
+        String signedUrl = "/api/invoices/signed?token=" + signedToken;
+
+        SaleDto result = mapper.toDto(saved);
+        result.setSignedInvoiceUrl(signedUrl);
+
+        return result;
+    }
+
 }

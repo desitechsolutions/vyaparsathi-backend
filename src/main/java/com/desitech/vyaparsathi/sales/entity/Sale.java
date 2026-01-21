@@ -5,6 +5,7 @@ import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
 import com.desitech.vyaparsathi.customer.entity.Customer;
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
+import com.desitech.vyaparsathi.sales.enums.SaleStatus;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.*;
@@ -49,6 +50,9 @@ public class Sale extends ShopAwareEntity {
     @Enumerated(EnumType.STRING)
     private PaymentStatus paymentStatus = PaymentStatus.PENDING;
 
+    @Column(name = "status", nullable = false)
+    @Enumerated(EnumType.STRING)
+    private SaleStatus status = SaleStatus.COMPLETED;
     @PrePersist
     @Override
     public void onCreate() {

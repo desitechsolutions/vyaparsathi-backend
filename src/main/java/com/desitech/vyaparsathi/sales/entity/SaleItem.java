@@ -1,9 +1,8 @@
 package com.desitech.vyaparsathi.sales.entity;
 
-import com.desitech.vyaparsathi.common.entities.BaseEntity;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
-import com.desitech.vyaparsathi.sales.GSTType;
+import com.desitech.vyaparsathi.sales.enums.GSTType;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import lombok.Getter;

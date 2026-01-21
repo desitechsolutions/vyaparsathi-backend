@@ -23,6 +23,7 @@ public class SaleDueDto {
     private String city;
     private String state;
     private String postalCode;
+    private String status;
 
 
 }

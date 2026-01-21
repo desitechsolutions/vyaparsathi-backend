@@ -48,9 +48,9 @@ public class SaleController {
 
     @PostMapping
     public ResponseEntity<SaleCreateResponse> create(@Valid @RequestBody SaleDto dto) {
-        logger.info("Creating sale for customerId={}", dto.getCustomerId());
-        SaleDto sale = service.createSale(dto); // NO PDF here
-        logger.info("Created sale for customerId={}", dto.getCustomerId());
+        logger.info("Creating sale for customerId={}", dto.getCustomer().getId());
+        SaleDto sale = service.createSale(dto);
+        logger.info("Created sale for customerId={}", dto.getCustomer().getId());
         SaleCreateResponse response = new SaleCreateResponse(
                 sale.getId(),
                 sale.getInvoiceNo(),
@@ -60,6 +60,12 @@ public class SaleController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/drafts")
+    public ResponseEntity<SaleCreateResponse> saveDraft(@Valid @RequestBody SaleDto dto) {
+        logger.info("Saving draft for customerId={}, existingId={}", dto.getCustomer().getId(), dto.getId());
+        SaleDto draft = service.saveOrUpdateDraft(dto);
+        return ResponseEntity.ok(new SaleCreateResponse(draft.getId(), draft.getInvoiceNo(), null));
+    }
     @GetMapping("/{id}")
     public ResponseEntity<SaleDto> getSale(@PathVariable Long id) {
         try {
@@ -75,6 +81,26 @@ public class SaleController {
             logger.error("Error fetching sale with id={}: {}", id, e.getMessage(), e);
             throw new ApplicationException("Failed to fetch sale", e);
         }
+    }
+
+    @PutMapping("/{id}/complete")
+    public ResponseEntity<SaleCreateResponse> completeDraft(
+            @PathVariable Long id,
+            @Valid @RequestBody SaleDto dto) {
+
+        logger.info("Completing draft sale id={}", id);
+
+        dto.setId(id);   // ensure consistency
+
+        SaleDto completed = service.completeDraft(dto);
+
+        return ResponseEntity.ok(
+                new SaleCreateResponse(
+                        completed.getId(),
+                        completed.getInvoiceNo(),
+                        completed.getSignedInvoiceUrl()
+                )
+        );
     }
 
     @GetMapping

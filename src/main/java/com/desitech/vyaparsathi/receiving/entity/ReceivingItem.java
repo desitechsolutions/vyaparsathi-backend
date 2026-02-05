@@ -45,4 +45,13 @@ public class ReceivingItem extends ShopAwareEntity {
 
     @Column(name = "put_away_status")
     private String putAwayStatus;
+
+    @Column(name = "is_overaged")
+    private Boolean isOveraged = false;
+
+    @Column(name = "overage_reason")
+    private String overageReason; // E.g., VENDOR_MIS-SHIPMENT
+
+    @Column(name = "overage_notes", length = 500)
+    private String overageNotes;
 }

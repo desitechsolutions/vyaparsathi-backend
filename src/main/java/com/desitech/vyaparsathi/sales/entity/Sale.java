@@ -4,6 +4,8 @@ import com.desitech.vyaparsathi.common.entities.BaseEntity;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
 import com.desitech.vyaparsathi.customer.entity.Customer;
+import com.desitech.vyaparsathi.delivery.entity.Delivery;
+import com.desitech.vyaparsathi.delivery.enums.DeliveryStatus;
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
 import com.desitech.vyaparsathi.sales.enums.SaleStatus;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
@@ -32,6 +34,27 @@ public class Sale extends ShopAwareEntity {
     @JoinColumn(name = "customer_id")
     private Customer customer;
 
+    @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("createdAt DESC")
+    private List<Delivery> deliveries = new ArrayList<>();
+
+    // optional helper
+    public Delivery getLatestDelivery() {
+        return deliveries.isEmpty() ? null : deliveries.get(0);
+    }
+
+    public boolean hasDelivery() {
+        return deliveries != null && !deliveries.isEmpty();
+    }
+
+    /**
+     * Optional: Get current status without fetching full list
+     * (useful when you only need status, not the whole object)
+     */
+    public DeliveryStatus getCurrentDeliveryStatus() {
+        Delivery latest = getLatestDelivery();
+        return latest != null ? latest.getDeliveryStatus() : null;
+    }
 
     @Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalAmount;

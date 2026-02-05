@@ -17,6 +17,7 @@ public class CurrentStockDto {
     private String size;
     private String design;
     private BigDecimal pricePerUnit;
+    private BigDecimal costPerUnit;
     private BigDecimal totalQuantity;
     private String batch;         // Optional, can be null if not required
 }

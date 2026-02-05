@@ -18,7 +18,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/item-variants")
-@PreAuthorize("hasAnyRole('OWNER', 'STAFF')")
+@PreAuthorize("hasAnyRole('OWNER', 'STAFF','ADMIN')")
 public class ItemVariantController {
 
     private static final Logger logger = LoggerFactory.getLogger(ItemVariantController.class);

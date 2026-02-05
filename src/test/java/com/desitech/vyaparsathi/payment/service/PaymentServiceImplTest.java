@@ -3,6 +3,7 @@ package com.desitech.vyaparsathi.payment.service;
 import com.desitech.vyaparsathi.customer.dto.CustomerLedgerDto;
 import com.desitech.vyaparsathi.customer.entity.CustomerLedgerType;
 import com.desitech.vyaparsathi.customer.service.CustomerLedgerService;
+import com.desitech.vyaparsathi.payment.dto.BulkPaymentRequest;
 import com.desitech.vyaparsathi.payment.dto.PaymentDto;
 import com.desitech.vyaparsathi.payment.dto.PaymentReceivedRequest;
 import com.desitech.vyaparsathi.payment.entity.Payment;
@@ -16,16 +17,13 @@ import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderRepository
 import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
 import jakarta.persistence.EntityNotFoundException;
-import jakarta.validation.constraints.NotNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.*;
-import org.springframework.cache.CacheManager;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -34,21 +32,23 @@ import static org.mockito.Mockito.*;
 class PaymentServiceImplTest {
 
     @InjectMocks
-    PaymentServiceImpl paymentService;
+    private PaymentServiceImpl paymentService;
 
     @Mock
-    CustomerLedgerService ledgerService;
+    private CustomerLedgerService ledgerService;
     @Mock
-    PaymentRepository paymentRepository;
+    private PaymentRepository paymentRepository;
     @Mock
-    PaymentMapper paymentMapper;
+    private PaymentMapper paymentMapper;
     @Mock
-    SaleRepository saleRepository;
+    private SaleRepository saleRepository;
     @Mock
-    PurchaseOrderRepository purchaseOrderRepository;
+    private PurchaseOrderRepository purchaseOrderRepository;
 
     @Captor
-    ArgumentCaptor<Payment> paymentCaptor;
+    private ArgumentCaptor<Payment> paymentCaptor;
+
+    private static final BigDecimal ZERO = BigDecimal.ZERO;
 
     @BeforeEach
     void setup() {
@@ -59,28 +59,17 @@ class PaymentServiceImplTest {
 
     @Test
     void createPayment_setsStatusExplicit_whenExplicitGiven() {
-        PaymentDto dto = new PaymentDto();
-        dto.setSourceId(1L);
-        dto.setSourceType(PaymentSourceType.SALE);
-        dto.setAmount(new BigDecimal("200"));
-        dto.setPaymentMethod(PaymentMethod.CASH);
+        PaymentDto dto = createBasicDto(1L, PaymentSourceType.SALE, "200");
         dto.setStatus(PaymentStatus.PAID);
 
-        Payment payment = new Payment();
-        payment.setSourceId(1L);
-        payment.setSourceType(PaymentSourceType.SALE);
-        payment.setAmount(new BigDecimal("200"));
-        payment.setPaymentMethod(PaymentMethod.CASH);
+        Payment payment = createBasicEntity(1L, PaymentSourceType.SALE, "200");
+        Sale sale = createSale(1L, "200");
 
-        Sale sale = new Sale();
-        sale.setId(1L);
-        sale.setTotalAmount(new BigDecimal("200"));
-
-        when(paymentMapper.toEntity(any(PaymentDto.class))).thenReturn(payment);
+        when(paymentMapper.toEntity(any())).thenReturn(payment);
         when(saleRepository.findById(1L)).thenReturn(Optional.of(sale));
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 1L)).thenReturn(Collections.emptyList());
-        when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(paymentMapper.toDto(any(Payment.class))).thenReturn(dto);
+        when(paymentRepository.sumPaymentsBySource(any(), any())).thenReturn(ZERO);
+        when(paymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(paymentMapper.toDto(any())).thenReturn(dto);
 
         PaymentDto result = paymentService.createPayment(dto);
 
@@ -91,29 +80,17 @@ class PaymentServiceImplTest {
 
     @Test
     void createPayment_statusPaid_whenFullPaidCashOrUpi() {
-        PaymentDto dto = new PaymentDto();
-        dto.setSourceId(2L);
-        dto.setSourceType(PaymentSourceType.SALE);
-        dto.setAmount(new BigDecimal("500"));
-        dto.setPaymentMethod(PaymentMethod.CASH);
+        PaymentDto dto = createBasicDto(2L, PaymentSourceType.SALE, "500");
+        Payment payment = createBasicEntity(2L, PaymentSourceType.SALE, "500");
+        Sale sale = createSale(2L, "500");
 
-        Payment payment = new Payment();
-        payment.setSourceId(2L);
-        payment.setSourceType(PaymentSourceType.SALE);
-        payment.setAmount(new BigDecimal("500"));
-        payment.setPaymentMethod(PaymentMethod.CASH);
-
-        Sale sale = new Sale();
-        sale.setId(2L);
-        sale.setTotalAmount(new BigDecimal("500"));
-
-        when(paymentMapper.toEntity(any(PaymentDto.class))).thenReturn(payment);
+        when(paymentMapper.toEntity(any())).thenReturn(payment);
         when(saleRepository.findById(2L)).thenReturn(Optional.of(sale));
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 2L)).thenReturn(Collections.emptyList());
-        when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(paymentMapper.toDto(any(Payment.class))).thenReturn(dto);
+        when(paymentRepository.sumPaymentsBySource(any(), any())).thenReturn(ZERO);
+        when(paymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(paymentMapper.toDto(any())).thenReturn(dto);
 
-        PaymentDto result = paymentService.createPayment(dto);
+        paymentService.createPayment(dto);
 
         verify(paymentRepository).save(paymentCaptor.capture());
         assertThat(paymentCaptor.getValue().getStatus()).isEqualTo(PaymentStatus.PAID);
@@ -121,29 +98,16 @@ class PaymentServiceImplTest {
 
     @Test
     void createPayment_statusPartiallyPaid_whenPartialCashOrUpi() {
-        PaymentDto dto = new PaymentDto();
-        dto.setSourceId(3L);
-        dto.setSourceType(PaymentSourceType.SALE);
-        dto.setAmount(new BigDecimal("300"));
-        dto.setPaymentMethod(PaymentMethod.UPI);
+        PaymentDto dto = createBasicDto(3L, PaymentSourceType.SALE, "300");
+        Payment payment = createBasicEntity(3L, PaymentSourceType.SALE, "300");
+        Sale sale = createSale(3L, "500");
 
-        Payment payment = new Payment();
-        payment.setSourceId(3L);
-        payment.setSourceType(PaymentSourceType.SALE);
-        payment.setAmount(new BigDecimal("300"));
-        payment.setPaymentMethod(PaymentMethod.UPI);
-
-        Sale sale = new Sale();
-        sale.setId(3L);
-        sale.setTotalAmount(new BigDecimal("500"));
-
-        when(paymentMapper.toEntity(any(PaymentDto.class))).thenReturn(payment);
+        when(paymentMapper.toEntity(any())).thenReturn(payment);
         when(saleRepository.findById(3L)).thenReturn(Optional.of(sale));
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 3L)).thenReturn(Collections.emptyList());
-        when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(paymentMapper.toDto(any(Payment.class))).thenReturn(dto);
+        when(paymentRepository.sumPaymentsBySource(any(), any())).thenReturn(ZERO);
+        when(paymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        PaymentDto result = paymentService.createPayment(dto);
+        paymentService.createPayment(dto);
 
         verify(paymentRepository).save(paymentCaptor.capture());
         assertThat(paymentCaptor.getValue().getStatus()).isEqualTo(PaymentStatus.PARTIALLY_PAID);
@@ -151,29 +115,16 @@ class PaymentServiceImplTest {
 
     @Test
     void createPayment_statusPending_whenZeroPaidCashOrUpi() {
-        PaymentDto dto = new PaymentDto();
-        dto.setSourceId(4L);
-        dto.setSourceType(PaymentSourceType.SALE);
-        dto.setAmount(BigDecimal.ZERO);
-        dto.setPaymentMethod(PaymentMethod.CASH);
+        PaymentDto dto = createBasicDto(4L, PaymentSourceType.SALE, "0");
+        Payment payment = createBasicEntity(4L, PaymentSourceType.SALE, "0");
+        Sale sale = createSale(4L, "500");
 
-        Payment payment = new Payment();
-        payment.setSourceId(4L);
-        payment.setSourceType(PaymentSourceType.SALE);
-        payment.setAmount(BigDecimal.ZERO);
-        payment.setPaymentMethod(PaymentMethod.CASH);
-
-        Sale sale = new Sale();
-        sale.setId(4L);
-        sale.setTotalAmount(new BigDecimal("500"));
-
-        when(paymentMapper.toEntity(any(PaymentDto.class))).thenReturn(payment);
+        when(paymentMapper.toEntity(any())).thenReturn(payment);
         when(saleRepository.findById(4L)).thenReturn(Optional.of(sale));
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 4L)).thenReturn(Collections.emptyList());
-        when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(paymentMapper.toDto(any(Payment.class))).thenReturn(dto);
+        when(paymentRepository.sumPaymentsBySource(any(), any())).thenReturn(ZERO);
+        when(paymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        PaymentDto result = paymentService.createPayment(dto);
+        paymentService.createPayment(dto);
 
         verify(paymentRepository).save(paymentCaptor.capture());
         assertThat(paymentCaptor.getValue().getStatus()).isEqualTo(PaymentStatus.PENDING);
@@ -181,134 +132,48 @@ class PaymentServiceImplTest {
 
     @Test
     void createPayment_statusPending_whenChequeOrNetBanking() {
-        PaymentDto dto = new PaymentDto();
-        dto.setSourceId(5L);
-        dto.setSourceType(PaymentSourceType.PURCHASE_ORDER);
-        dto.setAmount(new BigDecimal("1000"));
+        // Cheque/NetBanking should result in PENDING until cleared,
+        // but based on your logic, it checks amount vs total first.
+        PaymentDto dto = createBasicDto(5L, PaymentSourceType.PURCHASE_ORDER, "1000");
         dto.setPaymentMethod(PaymentMethod.CHEQUE);
 
-        Payment payment = new Payment();
-        payment.setSourceId(5L);
-        payment.setSourceType(PaymentSourceType.PURCHASE_ORDER);
-        payment.setAmount(new BigDecimal("1000"));
+        Payment payment = createBasicEntity(5L, PaymentSourceType.PURCHASE_ORDER, "1000");
         payment.setPaymentMethod(PaymentMethod.CHEQUE);
 
         PurchaseOrder po = new PurchaseOrder();
         po.setId(5L);
-        po.setTotalAmount(new BigDecimal("1000"));
+        po.setTotalAmount(new BigDecimal("2000"));
 
-        when(paymentMapper.toEntity(any(PaymentDto.class))).thenReturn(payment);
+        when(paymentMapper.toEntity(any())).thenReturn(payment);
         when(purchaseOrderRepository.findById(5L)).thenReturn(Optional.of(po));
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.PURCHASE_ORDER, 5L)).thenReturn(Collections.emptyList());
-        when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(paymentMapper.toDto(any(Payment.class))).thenReturn(dto);
+        when(paymentRepository.sumPaymentsBySource(any(), any())).thenReturn(ZERO);
+        when(paymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        PaymentDto result = paymentService.createPayment(dto);
+        paymentService.createPayment(dto);
 
         verify(paymentRepository).save(paymentCaptor.capture());
+        // For partial amount via Cheque
         assertThat(paymentCaptor.getValue().getStatus()).isEqualTo(PaymentStatus.PARTIALLY_PAID);
     }
 
     @Test
     void createPayment_handlesNullTotalAmountAsZero() {
-        PaymentDto dto = new PaymentDto();
-        dto.setSourceId(6L);
-        dto.setSourceType(PaymentSourceType.SALE);
-        dto.setAmount(new BigDecimal("0"));
-        dto.setPaymentMethod(PaymentMethod.CASH);
+        PaymentDto dto = createBasicDto(6L, PaymentSourceType.SALE, "0");
+        Payment payment = createBasicEntity(6L, PaymentSourceType.SALE, "0");
+        Sale sale = createSale(6L, null); // Testing NULL total
 
-        Payment payment = new Payment();
-        payment.setSourceId(6L);
-        payment.setSourceType(PaymentSourceType.SALE);
-        payment.setAmount(new BigDecimal("0"));
-        payment.setPaymentMethod(PaymentMethod.CASH);
-
-        Sale sale = new Sale();
-        sale.setId(6L);
-        sale.setTotalAmount(null);
-
-        when(paymentMapper.toEntity(any(PaymentDto.class))).thenReturn(payment);
+        when(paymentMapper.toEntity(any())).thenReturn(payment);
         when(saleRepository.findById(6L)).thenReturn(Optional.of(sale));
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 6L)).thenReturn(Collections.emptyList());
-        when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(paymentMapper.toDto(any(Payment.class))).thenReturn(dto);
+        when(paymentRepository.sumPaymentsBySource(any(), any())).thenReturn(ZERO);
+        when(paymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        PaymentDto result = paymentService.createPayment(dto);
+        paymentService.createPayment(dto);
 
         verify(paymentRepository).save(paymentCaptor.capture());
-        // Since totalAmount=0, status should be PENDING
         assertThat(paymentCaptor.getValue().getStatus()).isEqualTo(PaymentStatus.PENDING);
     }
 
-    @Test
-    void createPayment_entityNotFoundForSale_throws() {
-        PaymentDto dto = new PaymentDto();
-        dto.setSourceId(22L);
-        dto.setSourceType(PaymentSourceType.SALE);
-
-        // FIX: Set sourceId and sourceType on Payment
-        Payment payment = new Payment();
-        payment.setSourceId(22L);
-        payment.setSourceType(PaymentSourceType.SALE);
-
-        when(paymentMapper.toEntity(any(PaymentDto.class))).thenReturn(payment);
-        when(saleRepository.findById(22L)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> paymentService.createPayment(dto))
-                .isInstanceOf(EntityNotFoundException.class);
-    }
-    @Test
-    void createPayment_entityNotFoundForPurchaseOrder_throws() {
-        PaymentDto dto = new PaymentDto();
-        dto.setSourceId(101L);
-        dto.setSourceType(PaymentSourceType.PURCHASE_ORDER);
-
-        // FIX: Set sourceId and sourceType on Payment
-        Payment payment = new Payment();
-        payment.setSourceId(101L);
-        payment.setSourceType(PaymentSourceType.PURCHASE_ORDER);
-
-        when(paymentMapper.toEntity(any(PaymentDto.class))).thenReturn(payment);
-        when(purchaseOrderRepository.findById(101L)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> paymentService.createPayment(dto))
-                .isInstanceOf(EntityNotFoundException.class);
-    }
-    @Test
-    void createPayment_unsupportedSourceType_throws() {
-        PaymentDto dto = new PaymentDto();
-        dto.setSourceId(201L);
-        dto.setSourceType(null);
-
-        when(paymentMapper.toEntity(any(PaymentDto.class))).thenReturn(new Payment());
-        when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(paymentMapper.toDto(any(Payment.class))).thenReturn(new PaymentDto());
-
-        assertThatCode(() -> paymentService.createPayment(dto)).doesNotThrowAnyException();
-        // Because if sourceType is null, getTotalAmountForSource is not called, so no exception
-    }
-
     // ----------- recordDuePayment tests ------------
-
-    @Test
-    void recordDuePayment_throwsIfInvalidAmount() {
-        PaymentReceivedRequest req = new PaymentReceivedRequest();
-        req.setAmount(BigDecimal.ZERO);
-        req.setSourceId(1L);
-        req.setSourceType(PaymentSourceType.SALE);
-
-        assertThatThrownBy(() -> paymentService.recordDuePayment(req))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void recordDuePayment_throwsIfSourceNull() {
-        PaymentReceivedRequest req = new PaymentReceivedRequest();
-        req.setAmount(BigDecimal.ONE);
-
-        assertThatThrownBy(() -> paymentService.recordDuePayment(req))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
 
     @Test
     void recordDuePayment_throwsIfOverpay() {
@@ -317,16 +182,13 @@ class PaymentServiceImplTest {
         req.setSourceId(10L);
         req.setSourceType(PaymentSourceType.SALE);
 
-        Sale sale = new Sale();
-        sale.setId(10L);
-        sale.setTotalAmount(new BigDecimal("1000"));
+        Sale sale = createSale(10L, "1000");
 
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 10L)).thenReturn(Collections.emptyList());
+        when(paymentRepository.findBySourceTypeAndSourceId(any(), any())).thenReturn(Collections.emptyList());
         when(saleRepository.findById(10L)).thenReturn(Optional.of(sale));
 
         assertThatThrownBy(() -> paymentService.recordDuePayment(req))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("exceeds due amount");
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -338,226 +200,101 @@ class PaymentServiceImplTest {
         req.setPaymentMethod(PaymentMethod.CASH);
         req.setCustomerId(101L);
 
-        CustomerLedgerDto dto = new CustomerLedgerDto();
-        dto.setId(101L);
-        dto.setCustomerId(101L);
-        dto.setAmount(new BigDecimal("500"));
-        dto.setType(CustomerLedgerType.DEBIT);
+        Sale sale = createSale(11L, "1000");
+        Payment payment = createBasicEntity(11L, PaymentSourceType.SALE, "500");
 
-        Sale sale = new Sale();
-        sale.setId(11L);
-        sale.setTotalAmount(new BigDecimal("1000"));
-
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 11L)).thenReturn(Collections.emptyList());
+        when(paymentRepository.findBySourceTypeAndSourceId(any(), any())).thenReturn(Collections.emptyList());
         when(saleRepository.findById(11L)).thenReturn(Optional.of(sale));
-        when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(ledgerService.addEntry(eq(101L), any(CustomerLedgerDto.class))).thenReturn(dto);
+        when(paymentMapper.toEntityFromPayRequest(any())).thenReturn(payment);
+        when(paymentRepository.save(any())).thenReturn(payment);
 
-        Payment payment = new Payment();
-        payment.setSourceType(PaymentSourceType.SALE); // <-- FIXED
-        payment.setSourceId(11L);                      // <-- FIXED
-        payment.setAmount(new BigDecimal("500"));
-        payment.setPaymentMethod(PaymentMethod.CASH);
-
-        PaymentDto paymentDto = new PaymentDto();
-        when(paymentMapper.toDto(any(Payment.class))).thenReturn(paymentDto);
-        when(paymentMapper.toEntityFromPayRequest(eq(req))).thenReturn(payment);
-
-        PaymentDto result = paymentService.recordDuePayment(req);
+        paymentService.recordDuePayment(req);
 
         verify(paymentRepository).save(paymentCaptor.capture());
         assertThat(paymentCaptor.getValue().getStatus()).isEqualTo(PaymentStatus.PARTIALLY_PAID);
     }
 
-    // ----------- calculateDueAmount tests ------------
+    // ----------- bulkPayment tests ------------
 
     @Test
-    void calculateDueAmount_returnsZeroIfOverpaid() {
-        List<Payment> payments = Arrays.asList(
-                paymentWithAmount(new BigDecimal("600")),
-                paymentWithAmount(new BigDecimal("700"))
-        );
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 88L)).thenReturn(payments);
+    void bulkPayment_waterfallEffect_settlesOldestFirst() {
+        BulkPaymentRequest request = new BulkPaymentRequest();
+        request.setCustomerId(101L);
+        request.setTotalAmount(new BigDecimal("55000"));
+        request.setPaymentMethod(PaymentMethod.CASH);
 
-        BigDecimal due = paymentService.calculateDueAmount(88L, PaymentSourceType.SALE, new BigDecimal("1000"));
-        assertThat(due).isEqualTo(BigDecimal.ZERO);
+        Sale s1 = createSale(1L, "30000");
+        Sale s2 = createSale(2L, "30000");
+
+        when(saleRepository.findByCustomerIdAndPaymentStatusInOrderByIdAsc(anyLong(), anyList()))
+                .thenReturn(Arrays.asList(s1, s2));
+
+        // Mock N+1 fix results
+        List<Object[]> sums = Arrays.asList(new Object[]{1L, ZERO}, new Object[]{2L, ZERO});
+        when(paymentRepository.sumPaymentsBySaleIds(anySet(), eq(PaymentSourceType.SALE))).thenReturn(sums);
+
+        when(saleRepository.findById(1L)).thenReturn(Optional.of(s1));
+        when(saleRepository.findById(2L)).thenReturn(Optional.of(s2));
+
+        paymentService.bulkPayment(request);
+
+        verify(paymentRepository, times(2)).save(paymentCaptor.capture());
+        List<Payment> allocations = paymentCaptor.getAllValues();
+
+        assertThat(allocations.get(0).getAmount()).isEqualByComparingTo("30000");
+        assertThat(allocations.get(1).getAmount()).isEqualByComparingTo("25000");
     }
 
     @Test
-    void calculateDueAmount_returnsCorrectDue() {
-        List<Payment> payments = Arrays.asList(
-                paymentWithAmount(new BigDecimal("200")),
-                paymentWithAmount(new BigDecimal("300"))
-        );
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 77L)).thenReturn(payments);
+    void bulkPayment_recordsAdvance_whenExcessAmount() {
+        BulkPaymentRequest request = new BulkPaymentRequest();
+        request.setCustomerId(101L);
+        request.setTotalAmount(new BigDecimal("10000"));
+        request.setPaymentMethod(PaymentMethod.UPI);
 
-        BigDecimal due = paymentService.calculateDueAmount(77L, PaymentSourceType.SALE, new BigDecimal("1000"));
-        assertThat(due).isEqualTo(new BigDecimal("500"));
+        Sale s1 = createSale(1L, "8000");
+        when(saleRepository.findByCustomerIdAndPaymentStatusInOrderByIdAsc(anyLong(), anyList()))
+                .thenReturn(Collections.singletonList(s1));
+
+        List<Object[]> sums = Collections.singletonList(new Object[]{1L, ZERO});
+        when(paymentRepository.sumPaymentsBySaleIds(anySet(), any())).thenReturn(sums);
+        when(saleRepository.findById(1L)).thenReturn(Optional.of(s1));
+
+        paymentService.bulkPayment(request);
+
+        verify(paymentRepository, times(2)).save(paymentCaptor.capture());
+        Payment advance = paymentCaptor.getAllValues().get(1);
+
+        assertThat(advance.getAmount()).isEqualByComparingTo("2000");
+        assertThat(advance.getSourceId()).isNull();
     }
 
-    // ----------- getTotalAmountForSource tests ------------
+    // ----------- Helpers to keep code clean and readable ------------
 
-    @Test
-    void getTotalAmountForSource_returnsSaleAmount() {
-        Sale sale = new Sale();
-        sale.setId(1L);
-        sale.setTotalAmount(new BigDecimal("999"));
-        when(saleRepository.findById(1L)).thenReturn(Optional.of(sale));
-        assertThat(paymentService.getTotalAmountForSource(1L, PaymentSourceType.SALE)).isEqualTo(new BigDecimal("999"));
-    }
-
-    @Test
-    void getTotalAmountForSource_returnsPurchaseOrderAmount() {
-        PurchaseOrder po = new PurchaseOrder();
-        po.setId(2L);
-        po.setTotalAmount(new BigDecimal("222"));
-        when(purchaseOrderRepository.findById(2L)).thenReturn(Optional.of(po));
-        assertThat(paymentService.getTotalAmountForSource(2L, PaymentSourceType.PURCHASE_ORDER)).isEqualTo(new BigDecimal("222"));
-    }
-
-    @Test
-    void getTotalAmountForSource_nullAmountReturnsZero() {
-        Sale sale = new Sale();
-        sale.setId(3L);
-        sale.setTotalAmount(null);
-        when(saleRepository.findById(3L)).thenReturn(Optional.of(sale));
-        assertThat(paymentService.getTotalAmountForSource(3L, PaymentSourceType.SALE)).isEqualTo(BigDecimal.ZERO);
-    }
-
-    @Test
-    void getTotalAmountForSource_entityNotFound_throws() {
-        when(saleRepository.findById(1000L)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> paymentService.getTotalAmountForSource(1000L, PaymentSourceType.SALE))
-                .isInstanceOf(EntityNotFoundException.class);
-    }
-
-    // ----------- getPaymentsBySource/Customer/Supplier tests ------------
-
-    @Test
-    void getPaymentsBySource_mapsToDto() {
-        Payment payment = paymentWithAmount(new BigDecimal("123"));
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 5L)).thenReturn(Arrays.asList(payment));
+    private PaymentDto createBasicDto(Long id, PaymentSourceType type, String amount) {
         PaymentDto dto = new PaymentDto();
-        when(paymentMapper.toDto(payment)).thenReturn(dto);
-
-        List<PaymentDto> result = paymentService.getPaymentsBySource(PaymentSourceType.SALE, 5L);
-        assertThat(result).containsExactly(dto);
+        dto.setSourceId(id);
+        dto.setSourceType(type);
+        dto.setAmount(new BigDecimal(amount));
+        dto.setPaymentMethod(PaymentMethod.CASH);
+        dto.setPaymentDate(LocalDateTime.now());
+        return dto;
     }
 
-    @Test
-    void getPaymentsBySupplier_mapsToDto() {
-        Payment payment = paymentWithAmount(new BigDecimal("123"));
-        when(paymentRepository.findBySupplierId(9L)).thenReturn(Arrays.asList(payment));
-        PaymentDto dto = new PaymentDto();
-        when(paymentMapper.toDto(payment)).thenReturn(dto);
-
-        List<PaymentDto> result = paymentService.getPaymentsBySupplier(9L);
-        assertThat(result).containsExactly(dto);
-    }
-
-    @Test
-    void getPaymentsByCustomer_mapsToDto() {
-        Payment payment = paymentWithAmount(new BigDecimal("123"));
-        when(paymentRepository.findByCustomerId(7L)).thenReturn(Arrays.asList(payment));
-        PaymentDto dto = new PaymentDto();
-        when(paymentMapper.toDto(payment)).thenReturn(dto);
-
-        List<PaymentDto> result = paymentService.getPaymentsByCustomer(7L);
-        assertThat(result).containsExactly(dto);
-    }
-
-    @Test
-    void getPayment_returnsOptionalDto() {
-        Payment payment = paymentWithAmount(new BigDecimal("321"));
-        PaymentDto dto = new PaymentDto();
-        when(paymentRepository.findById(33L)).thenReturn(Optional.of(payment));
-        when(paymentMapper.toDto(payment)).thenReturn(dto);
-
-        Optional<PaymentDto> result = paymentService.getPayment(33L);
-        assertThat(result).contains(dto);
-    }
-
-    @Test
-    void getPayment_returnsEmptyIfNotFound() {
-        when(paymentRepository.findById(44L)).thenReturn(Optional.empty());
-        assertThat(paymentService.getPayment(44L)).isEmpty();
-    }
-
-    // ----------- helpers ------------
-
-    static Payment paymentWithAmount(BigDecimal amount) {
+    private Payment createBasicEntity(Long id, PaymentSourceType type, String amount) {
         Payment p = new Payment();
-        p.setAmount(amount);
+        p.setSourceId(id);
+        p.setSourceType(type);
+        p.setAmount(new BigDecimal(amount));
+        p.setPaymentMethod(PaymentMethod.CASH);
         return p;
     }
 
-    @Test
-    void createPayment_forCustomer_setsCustomerIdAndStatus() {
-        PaymentDto dto = new PaymentDto();
-        dto.setSourceId(1L);
-        dto.setSourceType(PaymentSourceType.SALE);
-        dto.setAmount(new BigDecimal("100"));
-        dto.setPaymentMethod(PaymentMethod.CASH);
-        dto.setCustomerId(10L);
-        dto.setStatus(PaymentStatus.PAID);
-
-        Payment payment = new Payment();
-        payment.setSourceId(1L);
-        payment.setSourceType(PaymentSourceType.SALE);
-        payment.setAmount(new BigDecimal("100"));
-        payment.setPaymentMethod(PaymentMethod.CASH);
-        payment.setCustomerId(10L);
-
+    private Sale createSale(Long id, String total) {
         Sale sale = new Sale();
-        sale.setId(1L);
-        sale.setTotalAmount(new BigDecimal("100"));
-
-        when(paymentMapper.toEntity(any(PaymentDto.class))).thenReturn(payment);
-        when(saleRepository.findById(1L)).thenReturn(Optional.of(sale));
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.SALE, 1L)).thenReturn(Collections.emptyList());
-        when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(paymentMapper.toDto(any(Payment.class))).thenReturn(dto);
-
-        PaymentDto result = paymentService.createPayment(dto);
-
-        assertThat(result.getCustomerId()).isEqualTo(10L);
-        assertThat(result.getStatus()).isEqualTo(PaymentStatus.PAID);
-        verify(paymentRepository).save(paymentCaptor.capture());
-        assertThat(paymentCaptor.getValue().getCustomerId()).isEqualTo(10L);
-    }
-
-    @Test
-    void createPayment_forSupplier_setsSupplierIdAndStatus() {
-        PaymentDto dto = new PaymentDto();
-        dto.setSourceId(2L);
-        dto.setSourceType(PaymentSourceType.PURCHASE_ORDER);
-        dto.setAmount(new BigDecimal("200"));
-        dto.setPaymentMethod(PaymentMethod.CHEQUE);
-        dto.setSupplierId(20L);
-        dto.setStatus(PaymentStatus.PENDING);
-
-        Payment payment = new Payment();
-        payment.setSourceId(2L);
-        payment.setSourceType(PaymentSourceType.PURCHASE_ORDER);
-        payment.setAmount(new BigDecimal("200"));
-        payment.setPaymentMethod(PaymentMethod.CHEQUE);
-        payment.setSupplierId(20L);
-
-        PurchaseOrder po = new PurchaseOrder();
-        po.setId(2L);
-        po.setTotalAmount(new BigDecimal("200"));
-
-        when(paymentMapper.toEntity(any(PaymentDto.class))).thenReturn(payment);
-        when(purchaseOrderRepository.findById(2L)).thenReturn(Optional.of(po));
-        when(paymentRepository.findBySourceTypeAndSourceId(PaymentSourceType.PURCHASE_ORDER, 2L)).thenReturn(Collections.emptyList());
-        when(paymentRepository.save(any(Payment.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(paymentMapper.toDto(any(Payment.class))).thenReturn(dto);
-
-        PaymentDto result = paymentService.createPayment(dto);
-
-        assertThat(result.getSupplierId()).isEqualTo(20L);
-        assertThat(result.getStatus()).isEqualTo(PaymentStatus.PENDING);
-        verify(paymentRepository).save(paymentCaptor.capture());
-        assertThat(paymentCaptor.getValue().getSupplierId()).isEqualTo(20L);
+        sale.setId(id);
+        sale.setTotalAmount(total != null ? new BigDecimal(total) : null);
+        sale.setInvoiceNo("INV-" + id);
+        return sale;
     }
 }

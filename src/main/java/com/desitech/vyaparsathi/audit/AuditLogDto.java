@@ -17,4 +17,8 @@ public class AuditLogDto {
     private String entityId;
     private String details;
     private LocalDateTime timestamp;
+
+    // --- NEW FORENSIC FIELDS ---
+    private String ipAddress;
+    private String userAgent;
 }

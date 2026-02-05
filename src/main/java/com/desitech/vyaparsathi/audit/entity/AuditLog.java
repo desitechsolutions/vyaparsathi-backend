@@ -25,4 +25,7 @@ public class AuditLog extends ShopAwareEntity {
     @Column(length = 2000)
     private String details;
     private LocalDateTime timestamp;
+
+    private String ipAddress;
+    private String userAgent;
 }

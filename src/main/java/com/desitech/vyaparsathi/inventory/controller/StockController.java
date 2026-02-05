@@ -24,7 +24,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/stock")
-@PreAuthorize("hasAnyRole('OWNER', 'STAFF')")
+@PreAuthorize("hasAnyRole('OWNER', 'STAFF','ADMIN')")
 @Tag(name = "Stock Management", description = "Operations for inventory stock management including cost tracking, movement history, and stock adjustments")
 public class StockController {
 

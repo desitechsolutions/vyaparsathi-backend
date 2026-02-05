@@ -11,10 +11,12 @@ import com.desitech.vyaparsathi.shop.dto.ShopDto;
 import com.desitech.vyaparsathi.shop.service.ShopService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/shop")
@@ -31,10 +33,11 @@ public class ShopOnboardingController {
      * @param dto The DTO containing shop details.
      * @return The created ShopDto.
      */
-    @PostMapping("/onboarding")
+    @PostMapping(value = "/onboarding", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('PENDING_OWNER')")
     public ResponseEntity<ShopDto> completeOnboarding(
-            @Valid @RequestBody ShopDto dto,
+            @Valid @ModelAttribute ShopDto dto, // ModelAttribute for form-data
+            @RequestParam(value = "logo", required = false) MultipartFile logo,
             @AuthenticationPrincipal CustomUserDetails userDetails) {
 
         User currentUser = userDetails.getUser();
@@ -53,7 +56,7 @@ public class ShopOnboardingController {
         }
 
         // Delegate to service
-        ShopDto createdShop = shopService.completeOnboarding(dto, currentUser);
+        ShopDto createdShop = shopService.completeOnboarding(dto, currentUser, logo);
 
         logger.info("Onboarding completed for user={}, shopId={}",
                 currentUser.getUsername(), createdShop.getId());

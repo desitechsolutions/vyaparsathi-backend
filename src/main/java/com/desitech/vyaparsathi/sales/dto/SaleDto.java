@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.sales.dto;
 
+import com.desitech.vyaparsathi.audit.annotation.AuditValue;
 import com.desitech.vyaparsathi.common.util.CustomLocalDateTimeDeserializer;
 import com.desitech.vyaparsathi.customer.dto.CustomerDto;
 import com.desitech.vyaparsathi.delivery.dto.DeliveryDTO;
@@ -19,12 +20,15 @@ public class SaleDto {
     private List<PaymentDto> paymentDetails;
     private DeliveryDTO delivery;
 
+    /*@AuditValue*/
     private BigDecimal totalAmount;
     private BigDecimal paidAmount;
     private BigDecimal dueAmount;
     private BigDecimal roundOff;
     private BigDecimal discount;
     private Boolean isGstRequired;
+
+    @AuditValue
     private String invoiceNo;
 
 

@@ -29,4 +29,6 @@ public interface ItemRepository extends BaseRepository<Item, Long> {
      */
     boolean existsByCategoryId(Long categoryId);
 
+    List<Item> findByNameContainingIgnoreCase(String name);
+
 }

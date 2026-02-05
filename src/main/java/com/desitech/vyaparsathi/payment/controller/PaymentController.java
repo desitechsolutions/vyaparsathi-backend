@@ -1,10 +1,7 @@
 package com.desitech.vyaparsathi.payment.controller;
 
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
-import com.desitech.vyaparsathi.payment.dto.ApiResponse;
-import com.desitech.vyaparsathi.payment.dto.PaymentReceivedRequest;
-import com.desitech.vyaparsathi.payment.dto.PaymentResponse;
-import com.desitech.vyaparsathi.payment.dto.PaymentDto;
+import com.desitech.vyaparsathi.payment.dto.*;
 import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
 import com.desitech.vyaparsathi.payment.service.PaymentService;
 import jakarta.validation.Valid;
@@ -15,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -113,6 +111,38 @@ public class PaymentController {
                 } catch (Exception e) {
                         logger.error("Error recording batch payments: {}", e.getMessage(), e);
                         throw new ApplicationException("Failed to record batch payments", e);
+                }
+        }
+
+        @PostMapping("/bulk")
+        @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+        public ResponseEntity<ApiResponse<Void>> recordBulkPayment(
+                @Valid @RequestBody BulkPaymentRequest request) {
+                try {
+                        paymentService.bulkPayment(request);
+                        logger.info("Bulk payment processed for customerId={}, amount={}",
+                                request.getCustomerId(), request.getTotalAmount());
+
+                        return ResponseEntity.ok(
+                                new ApiResponse<>("Bulk payment processed and allocated successfully", null, null)
+                        );
+                } catch (Exception e) {
+                        logger.error("Error processing bulk payment for customerId={}: {}",
+                                request.getCustomerId(), e.getMessage(), e);
+                        throw new ApplicationException("Failed to process bulk payment", e);
+                }
+        }
+
+        @GetMapping("/customer/{customerId}/advance-balance")
+        public ResponseEntity<ApiResponse<BigDecimal>> getCustomerAdvanceBalance(@PathVariable Long customerId) {
+                try {
+                        BigDecimal balance = paymentService.getCustomerAdvanceBalance(customerId);
+                        return ResponseEntity.ok(
+                                new ApiResponse<>("Customer advance balance retrieved", balance, null)
+                        );
+                } catch (Exception e) {
+                        logger.error("Error fetching advance balance for customerId={}: {}", customerId, e.getMessage());
+                        throw new ApplicationException("Failed to fetch customer balance", e);
                 }
         }
 }

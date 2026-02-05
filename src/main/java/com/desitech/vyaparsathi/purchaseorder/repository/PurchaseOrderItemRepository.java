@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 public interface PurchaseOrderItemRepository extends BaseRepository<PurchaseOrderItem, Long> {
 
@@ -63,5 +64,5 @@ public interface PurchaseOrderItemRepository extends BaseRepository<PurchaseOrde
             "FROM RankedOrders ro " +
             "WHERE ro.rn = 1", nativeQuery = true)
     List<LastSupplierInfo> findLastSuppliersByVariantIds(@Param("variantIds") List<Long> variantIds);
-
+    Optional<PurchaseOrderItem> findTopByItemVariantId(Long itemVariantId);
 }

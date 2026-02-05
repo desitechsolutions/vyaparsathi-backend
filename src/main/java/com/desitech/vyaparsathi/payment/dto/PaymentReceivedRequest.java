@@ -20,20 +20,3 @@ public class PaymentReceivedRequest {
     private String reference;
     private String notes;
 }
-
-
-/*
-{saleId: 5, amount: 1000, method: "Cash", date: "2025-08-31"}
-amount
-:
-1000
-date
-:
-"2025-08-31"
-method
-:
-"Cash"
-saleId
-:
-5
- */

@@ -4,6 +4,7 @@ import com.desitech.vyaparsathi.common.entities.BaseEntity;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.delivery.enums.DeliveryPaidBy;
 import com.desitech.vyaparsathi.delivery.enums.DeliveryStatus;
+import com.desitech.vyaparsathi.sales.entity.Sale;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -21,8 +22,9 @@ import java.util.List;
 @Table(name = "deliveries")
 public class Delivery extends ShopAwareEntity {
 
-    @Column(nullable = false)
-    private Long saleId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "sale_id", nullable = false)
+    private Sale sale;
 
     private String invoiceNumber;
     private String customerName;

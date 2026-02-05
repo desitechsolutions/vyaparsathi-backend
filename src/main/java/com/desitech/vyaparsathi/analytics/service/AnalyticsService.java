@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.analytics.service;
 
 import com.desitech.vyaparsathi.common.exception.EntityNotFoundAppException;
+import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrderItem;
 import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderItemRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.function.Function;
@@ -32,50 +34,28 @@ public class AnalyticsService {
     @Autowired private SaleRepository saleRepository;
     @Autowired private CustomerRepository customerRepository;
     @Autowired private ItemVariantRepository itemVariantRepository;
-    // CHANGED: Use the correct repository for stock information
     @Autowired private StockMovementRepository stockMovementRepository;
     @Autowired private PurchaseOrderItemRepository purchaseOrderItemRepository;
 
-    // 1. Predict item demand (Corrected for performance)
     public List<ItemDemandPredictionDto> predictItemDemand(Long itemId) {
-        LocalDateTime threeMonthsAgo = LocalDateTime.now().minusMonths(3);
-        List<Sale> sales = saleRepository.findByDateBetween(threeMonthsAgo, LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        // Use the new lightweight query here!
+        Map<Long, Integer> currentMonth = getVolume(now.minusMonths(1), now);
+        Map<Long, Integer> prevMonth = getVolume(now.minusMonths(2), now.minusMonths(1));
 
-        Map<Long, Integer> demandMap = sales.stream()
-                .flatMap(sale -> sale.getSaleItems().stream())
-                .filter(item -> itemId == null || item.getItemVariant().getId().equals(itemId))
-                .collect(Collectors.groupingBy(
-                        item -> item.getItemVariant().getId(),
-                        Collectors.summingInt(item -> item.getQty().intValue())
-                ));
-
-        if (demandMap.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        // Fetch all needed variants in one query to avoid N+1
-        Map<Long, ItemVariant> variantMap = itemVariantRepository.findAllById(demandMap.keySet()).stream()
-                .collect(Collectors.toMap(ItemVariant::getId, Function.identity()));
-
-        List<ItemDemandPredictionDto> result = demandMap.entrySet().stream().map(entry -> {
-            ItemVariant variant = variantMap.get(entry.getKey());
-            if (variant == null) return null;
-            return new ItemDemandPredictionDto(
-                    variant.getId(),
-                    variant.getItem().getName(),
-                    entry.getValue(),
-                    "stable" // Placeholder
-            );
-        }).filter(Objects::nonNull).collect(Collectors.toList());
-
-        logger.info("Predicted item demand for {} items", result.size());
-        return result;
+        return currentMonth.entrySet().stream()
+                .filter(e -> itemId == null || e.getKey().equals(itemId))
+                .map(entry -> {
+                    ItemVariant v = itemVariantRepository.findById(entry.getKey()).orElse(null);
+                    if (v == null) return null;
+                    int cur = entry.getValue();
+                    int prev = prevMonth.getOrDefault(entry.getKey(), 0);
+                    String trend = (cur > prev) ? "Increasing" : (cur < prev ? "Decreasing" : "Stable");
+                    return new ItemDemandPredictionDto(v.getId(), v.getItem().getName(), cur, trend);
+                }).filter(Objects::nonNull).toList();
     }
 
-    // 2. Customer buying trends (No major change needed, but be aware of performance on large customer sets)
     public List<CustomerTrendDto> getCustomerTrends(Long customerId) {
-        // This method's performance depends heavily on the number of customers.
-        // For now, it's acceptable, but for thousands of customers, a more optimized query would be needed.
         logger.info("Calculating customer trends for customerId={}", customerId);
         List<Customer> customers = customerId == null ? customerRepository.findAll() :
                 customerRepository.findById(customerId).map(List::of).orElse(List.of());
@@ -100,45 +80,37 @@ public class AnalyticsService {
         }).collect(Collectors.toList());
     }
 
-    // 3. Suggest future purchase orders (Corrected for repository and performance)
     public List<PurchaseOrderSuggestionDto> suggestFuturePurchaseOrders() {
-        logger.info("Suggesting future purchase orders for low stock items");
         List<ItemVariant> variants = itemVariantRepository.findAll();
-        if (variants.isEmpty()) {
-            return Collections.emptyList();
-        }
+        List<Long> variantIds = variants.stream().map(ItemVariant::getId).toList();
 
-        List<Long> variantIds = variants.stream().map(ItemVariant::getId).collect(Collectors.toList());
-
-        // Fetch all stock levels in a single query
+        // 1. Get Stock levels
         Map<Long, BigDecimal> stockMap = stockMovementRepository.findTotalQuantitiesByItemVariantIds(variantIds)
-                .stream()
-                .collect(Collectors.toMap(
-                        StockMovementRepository.StockQuantity::getVariantId,
-                        StockMovementRepository.StockQuantity::getTotalQuantity
-                ));
+                .stream().collect(Collectors.toMap(s -> s.getVariantId(), s -> s.getTotalQuantity()));
 
+        // 2. Optimization: Get the last known purchase price for each variant to estimate investment accurately
+        // If you don't have a costPrice field, we look at the last Purchase Order
         return variants.stream()
-                .filter(variant -> variant.getLowStockThreshold() != null)
-                .map(variant -> {
-                    BigDecimal currentStock = stockMap.getOrDefault(variant.getId(), BigDecimal.ZERO);
-                    if (currentStock.compareTo(variant.getLowStockThreshold()) < 0) {
-                        BigDecimal suggestedQty = variant.getLowStockThreshold().multiply(BigDecimal.valueOf(1.1)).subtract(currentStock);
-                        if (suggestedQty.compareTo(BigDecimal.ZERO) > 0) {
-                            return new PurchaseOrderSuggestionDto(
-                                    variant.getId(),
-                                    variant.getItem().getName(),
-                                    suggestedQty.doubleValue()
-                            );
-                        }
+                .filter(v -> v.getLowStockThreshold() != null)
+                .map(v -> {
+                    BigDecimal current = stockMap.getOrDefault(v.getId(), BigDecimal.ZERO);
+
+                    if (current.compareTo(v.getLowStockThreshold()) < 0) {
+                        // Calculate how many units to buy (Safety stock of 20%)
+                        BigDecimal needed = v.getLowStockThreshold().multiply(BigDecimal.valueOf(1.2)).subtract(current);
+
+                        // --- PRICE LOGIC FIX ---
+                        // Try to get a cost price. If ItemVariant has a costPrice field, use that.
+                        // Otherwise, we use the PurchaseOrder history.
+                        BigDecimal actualCostPrice = getEstimatedCostPrice(v);
+
+                        BigDecimal totalInvestment = needed.multiply(actualCostPrice);
+
+                        return new PurchaseOrderSuggestionDto(v.getId(), v.getItem().getName(), needed.doubleValue(), totalInvestment);
                     }
                     return null;
-                })
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+                }).filter(Objects::nonNull).collect(Collectors.toList());
     }
-
-    // 4. Top rising/falling items (Corrected for performance)
     public List<TopItemDto> getTopRisingFallingItems() {
         logger.info("Calculating top rising/falling items");
         LocalDateTime now = LocalDateTime.now();
@@ -163,7 +135,6 @@ public class AnalyticsService {
             int prevQty = prevMonthMap.getOrDefault(id, 0);
             if (lastQty == 0 && prevQty == 0) return null;
 
-            // Ensure change is a non-null double primitive
             double change = (prevQty == 0) ? 100.0 : ((double) (lastQty - prevQty) * 100.0 / prevQty);
             ItemVariant variant = variantMap.get(id);
             if (variant != null) {
@@ -172,8 +143,6 @@ public class AnalyticsService {
             return null;
         }).filter(Objects::nonNull).collect(Collectors.toList());
 
-        // CORRECTED: This sorting is now null-safe and more robust.
-        // It sorts by the absolute value of the change percentage in descending order.
         result.sort(Comparator.comparing(
                 dto -> Math.abs(dto.getChangePercent()),
                 Comparator.reverseOrder()
@@ -189,8 +158,6 @@ public class AnalyticsService {
                         Collectors.summingInt(item -> item.getQty().intValue())
                 ));
     }
-
-    // 5. Seasonal trends (No change needed)
     public List<SeasonalTrendDto> getSeasonalTrends() {
         logger.info("Calculating seasonal sales trends");
         Map<Integer, Long> monthSales = saleRepository.findAll().stream()
@@ -208,21 +175,43 @@ public class AnalyticsService {
         return result;
     }
 
-    // 6. Churn prediction (Be aware of performance on large customer sets)
     public List<ChurnPredictionDto> predictChurn() {
-        logger.info("Predicting customer churn");
         LocalDateTime threeMonthsAgo = LocalDateTime.now().minusMonths(3);
-        List<Customer> customers = customerRepository.findAll();
+        List<Object[]> summaries = saleRepository.getCustomerPurchaseSummaries();
+        Map<Long, Object[]> summaryMap = summaries.stream()
+                .collect(Collectors.toMap(obj -> (Long)obj[0], obj -> obj));
 
-        return customers.stream().map(customer -> {
-            // This still queries one by one. For high performance, a custom repository method would be better.
-            // e.g., "findLastSaleDateForCustomerIds(List<Long> customerIds)"
-            Optional<Sale> lastSale = saleRepository.findTopByCustomerIdOrderByDateDesc(customer.getId());
+        return customerRepository.findAll().stream().map(customer -> {
+            Object[] summary = summaryMap.get(customer.getId());
+            LocalDateTime lastSale = (summary != null) ? (LocalDateTime)summary[1] : null;
+            BigDecimal totalSpent = (summary != null) ? (BigDecimal)summary[2] : BigDecimal.ZERO;
 
-            boolean isChurnRisk = lastSale.isEmpty() || lastSale.get().getDate().isBefore(threeMonthsAgo);
-            double probability = isChurnRisk ? 0.9 : 0.1;
+            boolean isRisk = lastSale == null || lastSale.isBefore(threeMonthsAgo);
+            // Professional Insight: Calculate average monthly loss if they leave
+            BigDecimal monthlyRisk = isRisk ? totalSpent.divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
 
-            return new ChurnPredictionDto(customer.getId(), customer.getName(), probability);
+            return new ChurnPredictionDto(customer.getId(), customer.getName(), isRisk ? 0.9 : 0.1, monthlyRisk);
         }).collect(Collectors.toList());
+    }
+
+    private Map<Long, Integer> getVolume(LocalDateTime start, LocalDateTime end) {
+        return saleRepository.findSalesForAnalytics(start, end).stream()
+                .flatMap(s -> s.getSaleItems().stream())
+                .collect(Collectors.groupingBy(i -> i.getItemVariant().getId(), Collectors.summingInt(i -> i.getQty().intValue())));
+    }
+    private BigDecimal getEstimatedCostPrice(ItemVariant v) {
+        // 1. If your entity has costPrice, use it:
+        // if (v.getCostPrice() != null) return v.getCostPrice();
+
+        // 2. Fallback: Get the latest price from the Purchase Order items repository
+        // This is more accurate than selling price
+        return purchaseOrderItemRepository.findTopByItemVariantId(v.getId())
+                .map(PurchaseOrderItem::getUnitCost)
+                .orElseGet(() -> {
+                    // 3. Ultimate Fallback: 70% of Selling Price (assuming a 30% margin)
+                    // This prevents the "Investment" KPI from being gross selling value
+                    return v.getPricePerUnit() != null ?
+                            v.getPricePerUnit().multiply(BigDecimal.valueOf(0.7)) : BigDecimal.ZERO;
+                });
     }
 }

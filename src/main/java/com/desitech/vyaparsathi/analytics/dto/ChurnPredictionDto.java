@@ -11,4 +11,5 @@ public class ChurnPredictionDto {
     private Long customerId;
     private String customerName;
     private Double churnProbability;
+    private java.math.BigDecimal revenueAtRisk;
 }

@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.sales.service.invoice;
 
 import com.desitech.vyaparsathi.common.exception.ExportAppException;
+import com.desitech.vyaparsathi.delivery.entity.Delivery;
 import com.desitech.vyaparsathi.payment.dto.PaymentDto;
 import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
 import com.desitech.vyaparsathi.payment.service.PaymentService;
@@ -8,8 +9,6 @@ import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.entity.SaleItem;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
 import com.lowagie.text.*;
-import com.lowagie.text.Font;
-import com.lowagie.text.Rectangle;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
@@ -19,17 +18,26 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.awt.*;
+import java.awt.Color;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.text.NumberFormat;
+import java.util.*;
 import java.util.List;
-import java.util.Locale;
+import java.util.stream.Collectors;
 
 @Service
 public class InvoiceService2 {
 
     private static final Logger logger = LoggerFactory.getLogger(InvoiceService2.class);
+
+    private static final Color THEME_COLOR = new Color(41, 128, 185);
+    private static final Color LIGHT_GREY = new Color(245, 245, 245);
+    private static final Color SUCCESS_GREEN = new Color(39, 174, 96);
+    private static final Color WARNING_ORANGE = new Color(243, 156, 18);
+    private static final Color DANGER_RED = new Color(231, 76, 60);
+
+    private final NumberFormat currency = NumberFormat.getCurrencyInstance(new Locale("en", "IN"));
 
     @Autowired
     private PaymentService paymentService;
@@ -37,243 +45,346 @@ public class InvoiceService2 {
     @Autowired
     private SaleRepository saleRepository;
 
-    @Value("${shop.banking.details:Bank Name: XYZ Bank, Account: 123456789, IFSC: XYZB0001234}")
+    @Value("${shop.banking.details:Bank Name: XYZ Bank\nAccount: 123456789\nIFSC: XYZB0001234}")
     private String bankingDetails;
 
-    @Value("${invoice.terms:1. Goods once sold will not be taken back.\n2. Payment due within 30 days.\n3. For clothing items, exchange within 7 days with tags intact.}")
+    @Value("${invoice.terms:1. Goods once sold will not be taken back.\n2. Payment due within 30 days.\n3. Subject to local jurisdiction.}")
     private String termsAndConditions;
 
     public byte[] generatePdf(Sale sale) {
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            Document document = new Document(PageSize.A4, 36, 36, 90, 54);
-            /*PdfWriter.getInstance(document, baos);*/
+            Document document = new Document(PageSize.A4, 36, 36, 65, 45);
             PdfWriter writer = PdfWriter.getInstance(document, baos);
+
             String logoPath = sale.getShop().getLogoPath() != null
                     ? sale.getShop().getLogoPath()
                     : "src/main/resources/static/logo.png";
+
             writer.setPageEvent(new InvoicePageEvent(logoPath));
             document.open();
 
-            // Fonts
-            Font titleFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 16, Font.BOLD, Color.BLACK);
-            Font headerFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 11, Font.BOLD, Color.BLACK);
-            Font normalFont = FontFactory.getFont(FontFactory.HELVETICA, 10, Font.NORMAL, Color.BLACK);
-            Font boldFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10, Font.BOLD, Color.BLACK);
-            Font smallFont = FontFactory.getFont(FontFactory.HELVETICA, 8, Font.NORMAL, Color.GRAY);
+            // Fonts (fixed: added Font.NORMAL where missing)
+            Font titleFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 22, Font.NORMAL, THEME_COLOR);
+            Font headerFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9, Font.NORMAL, Color.WHITE);
+            Font normalFont = FontFactory.getFont(FontFactory.HELVETICA, 9, Font.NORMAL, Color.BLACK);
+            Font boldFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9, Font.NORMAL, Color.BLACK);
+            Font smallFont = FontFactory.getFont(FontFactory.HELVETICA, 8, Font.NORMAL, Color.DARK_GRAY);
 
-            addInvoiceHeader(document, sale, titleFont, headerFont, normalFont);
-            addItemTable(document, sale, boldFont, normalFont);
-            addTaxSummary(document, sale, headerFont, normalFont, boldFont);
-            addPaymentDetails(document, sale, headerFont, normalFont, boldFont);
-            addFooter(document, smallFont, headerFont, normalFont);
+            addProfessionalHeader(document, sale, titleFont, normalFont, boldFont);
+            addAddressSection(document, sale, normalFont, boldFont);
+            addItemTable(document, sale, headerFont, normalFont, boldFont);
+            addCalculationSection(document, sale, normalFont, boldFont);
+            addFinalFooter(document, sale, normalFont, boldFont, smallFont);
 
             document.close();
             return baos.toByteArray();
         } catch (Exception e) {
-            logger.error("PDF generation failed for sale {}", sale != null ? sale.getId() : null, e);
-            throw new ExportAppException("PDF generation failed", e);
+            logger.error("PDF generation failed for sale ID: {}", sale.getId(), e);
+            throw new ExportAppException("Failed to generate invoice PDF for sale ID: " + sale.getId(), e);
         }
     }
-    private void addInvoiceHeader(Document document, Sale sale, Font titleFont, Font headerFont, Font normalFont) throws DocumentException {
-        Font boldFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10, Font.BOLD, Color.BLACK);
-        Paragraph title = new Paragraph("TAX INVOICE", titleFont);
-        title.setAlignment(Element.ALIGN_CENTER);
-        document.add(title);
-        document.add(new Paragraph("\n"));
 
-        PdfPTable headerTable = new PdfPTable(2);
-        headerTable.setWidthPercentage(100);
-        headerTable.setWidths(new float[]{50, 50});
+    private void addProfessionalHeader(Document document, Sale sale, Font titleFont, Font normalFont, Font boldFont) throws DocumentException {
+        PdfPTable table = new PdfPTable(2);
+        table.setWidthPercentage(100);
+        table.setWidths(new float[]{60, 40});
 
-        // Shop details
-        StringBuilder shopDetails = new StringBuilder()
-                .append(sale.getShop().getName()).append("\n")
-                .append("Address: ").append(sale.getShop().getAddress()).append("\n")
-                .append("GSTIN: ").append(sale.getShop().getGstin());
-
-        PdfPCell shopCell = getCell(shopDetails.toString(), normalFont, Element.ALIGN_LEFT, false);
-        shopCell.setBorder(Rectangle.NO_BORDER);
-        headerTable.addCell(shopCell);
-
-        // Customer details
-        StringBuilder custDetails = new StringBuilder()
-                .append("Customer: ").append(sale.getCustomer().getName()).append("\n")
-                .append("Address: ").append(sale.getCustomer().getAddressLine1()).append(", ")
-                .append(sale.getCustomer().getCity()).append(", ").append(sale.getCustomer().getState());
-        if (sale.getCustomer().getGstNumber() != null && !sale.getCustomer().getGstNumber().isEmpty()) {
-            custDetails.append("\nGSTIN: ").append(sale.getCustomer().getGstNumber());
+        // Left: Shop Details
+        PdfPCell left = new PdfPCell();
+        left.setBorder(Rectangle.NO_BORDER);
+        left.addElement(new Phrase(sale.getShop().getName().toUpperCase(), boldFont));
+        left.addElement(new Phrase("\n" + sale.getShop().getAddress(), normalFont));
+        if (sale.getShop().getGstin() != null) {
+            left.addElement(new Phrase("\nGSTIN: " + sale.getShop().getGstin(), normalFont));
         }
+        table.addCell(left);
 
-        PdfPCell custCell = getCell(custDetails.toString(), normalFont, Element.ALIGN_RIGHT, false);
-        custCell.setBorder(Rectangle.NO_BORDER);
-        headerTable.addCell(custCell);
-        document.add(headerTable);
-        document.add(new Paragraph("\n"));
+        // Right: Invoice Info + Status Badge
+        PdfPCell right = new PdfPCell();
+        right.setBorder(Rectangle.NO_BORDER);
+        right.setHorizontalAlignment(Element.ALIGN_RIGHT);
+        right.setPadding(4);
 
-        // Invoice Info
-        PdfPTable invoiceInfo = new PdfPTable(2);
-        invoiceInfo.setWidthPercentage(100);
-        invoiceInfo.addCell(getCell("Invoice No: " + sale.getInvoiceNo(), boldFont, Element.ALIGN_LEFT, false));
-        invoiceInfo.addCell(getCell("Date: " + sale.getDate().toLocalDate(), boldFont, Element.ALIGN_RIGHT, false));
-        document.add(invoiceInfo);
-        document.add(new Paragraph("\n"));
-    }
-
-    private void addItemTable(Document document, Sale sale, Font boldFont, Font normalFont) throws DocumentException {
-        PdfPTable itemTable = new PdfPTable(9);
-        itemTable.setWidthPercentage(100);
-        itemTable.setSpacingBefore(10f);
-        itemTable.setWidths(new float[]{5, 26, 10, 8, 8, 10, 10, 8, 15});
-
-        String[] headers = {"S.No", "Description", "HSN", "GST%", "Qty", "Unit", "Price", "Disc", "Amount"};
-        for (String header : headers) {
-            PdfPCell headerCell = getCell(header, boldFont, Element.ALIGN_CENTER, true);
-            headerCell.setNoWrap(true);
-            itemTable.addCell(headerCell);
-        }
-
-        BigDecimal totalQty = BigDecimal.ZERO;
-        BigDecimal totalAmount = BigDecimal.ZERO;
-        NumberFormat currency = NumberFormat.getCurrencyInstance(new Locale("en", "IN"));
-
-        int serial = 1;
-        for (SaleItem item : sale.getSaleItems()) {
-            BigDecimal qty = item.getQty() == null ? BigDecimal.ZERO : item.getQty();
-            BigDecimal price = item.getUnitPrice() == null ? BigDecimal.ZERO : item.getUnitPrice();
-            BigDecimal discount = item.getDiscount() == null ? BigDecimal.ZERO : item.getDiscount();
-            BigDecimal lineTotal = price.multiply(qty).subtract(discount);
-
-            itemTable.addCell(getCell(String.valueOf(serial++), normalFont, Element.ALIGN_CENTER, false));
-            itemTable.addCell(getCell(item.getItemVariant().getItem().getName(), normalFont, Element.ALIGN_LEFT, false));
-            itemTable.addCell(getCell(item.getItemVariant().getHsn(), normalFont, Element.ALIGN_CENTER, false));
-            itemTable.addCell(getCell(item.getGstType().getRate() + "%", normalFont, Element.ALIGN_CENTER, false));
-            itemTable.addCell(getCell(qty.toString(), normalFont, Element.ALIGN_CENTER, false));
-            itemTable.addCell(getCell(item.getItemVariant().getUnit(), normalFont, Element.ALIGN_CENTER, false));
-            itemTable.addCell(getCell(currency.format(price), normalFont, Element.ALIGN_RIGHT, false));
-            itemTable.addCell(getCell(currency.format(discount), normalFont, Element.ALIGN_RIGHT, false));
-            itemTable.addCell(getCell(currency.format(lineTotal), normalFont, Element.ALIGN_RIGHT, false));
-
-            totalQty = totalQty.add(qty);
-            totalAmount = totalAmount.add(lineTotal);
-        }
-
-        // Total Row
-        itemTable.addCell(getCell("", boldFont, Element.ALIGN_CENTER, true));
-        PdfPCell totalLabel = getCell("Total", boldFont, Element.ALIGN_CENTER, true);
-        itemTable.addCell(totalLabel);
-        itemTable.addCell(getCell("", boldFont, Element.ALIGN_CENTER, true));
-        itemTable.addCell(getCell("", boldFont, Element.ALIGN_CENTER, true));
-        itemTable.addCell(getCell(totalQty.toString(), boldFont, Element.ALIGN_CENTER, true));
-        itemTable.addCell(getCell("", boldFont, Element.ALIGN_CENTER, true));
-        itemTable.addCell(getCell("", boldFont, Element.ALIGN_CENTER, true));
-        itemTable.addCell(getCell("", boldFont, Element.ALIGN_CENTER, true));
-        itemTable.addCell(getCell(currency.format(totalAmount), boldFont, Element.ALIGN_RIGHT, true));
-
-        document.add(itemTable);
-    }
-
-    private void addTaxSummary(Document document, Sale sale, Font headerFont, Font normalFont, Font boldFont) throws DocumentException {
-        document.add(new Paragraph("\n"));
-        Paragraph taxHeader = new Paragraph("Tax Summary", headerFont);
-        document.add(taxHeader);
-
-        PdfPTable taxTable = new PdfPTable(4);
-        taxTable.setWidthPercentage(100);
-        taxTable.setWidths(new float[]{25, 25, 25, 25});
-
-        taxTable.addCell(getCell("Taxable", boldFont, Element.ALIGN_CENTER, true));
-        taxTable.addCell(getCell("CGST", boldFont, Element.ALIGN_CENTER, true));
-        taxTable.addCell(getCell("SGST", boldFont, Element.ALIGN_CENTER, true));
-        taxTable.addCell(getCell("IGST", boldFont, Element.ALIGN_CENTER, true));
-
-        BigDecimal totalTaxable = sale.getSaleItems().stream().map(SaleItem::getTaxableValue).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalCGST = sale.getSaleItems().stream().map(SaleItem::getCgstAmt).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalSGST = sale.getSaleItems().stream().map(SaleItem::getSgstAmt).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalIGST = sale.getSaleItems().stream().map(SaleItem::getIgstAmt).reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        NumberFormat currency = NumberFormat.getCurrencyInstance(new Locale("en", "IN"));
-        taxTable.addCell(getCell(currency.format(totalTaxable), normalFont, Element.ALIGN_RIGHT, false));
-        taxTable.addCell(getCell(currency.format(totalCGST), normalFont, Element.ALIGN_RIGHT, false));
-        taxTable.addCell(getCell(currency.format(totalSGST), normalFont, Element.ALIGN_RIGHT, false));
-        taxTable.addCell(getCell(currency.format(totalIGST), normalFont, Element.ALIGN_RIGHT, false));
-        document.add(taxTable);
-
-        Paragraph total = new Paragraph("Total Amount: ₹" + currency.format(sale.getTotalAmount()), boldFont);
-        total.setAlignment(Element.ALIGN_RIGHT);
-        document.add(total);
-
-        Paragraph words = new Paragraph("Amount in Words: " + numberToWords(sale.getTotalAmount()) + " only", normalFont);
-        words.setAlignment(Element.ALIGN_RIGHT);
-        document.add(words);
-    }
-
-    private void addPaymentDetails(Document document, Sale sale, Font headerFont, Font normalFont, Font boldFont) throws DocumentException, ExportAppException {
-        document.add(new Paragraph("\n"));
-        Paragraph paymentHeader = new Paragraph("Payment Details", headerFont);
-        document.add(paymentHeader);
-
+        // Payment Status calculation
         List<PaymentDto> payments = paymentService.getPaymentsBySource(PaymentSourceType.SALE, sale.getId());
-        BigDecimal totalPaid = payments.stream().map(PaymentDto::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal due = sale.getTotalAmount().subtract(totalPaid);
+        BigDecimal totalPaid = payments.stream()
+                .map(PaymentDto::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        PdfPTable paymentTable = new PdfPTable(3);
-        paymentTable.setWidthPercentage(100);
-        paymentTable.setWidths(new float[]{40, 30, 30});
-        paymentTable.addCell(getCell("Method", boldFont, Element.ALIGN_CENTER, true));
-        paymentTable.addCell(getCell("Amount", boldFont, Element.ALIGN_CENTER, true));
-        paymentTable.addCell(getCell("Date", boldFont, Element.ALIGN_CENTER, true));
+        BigDecimal balanceDue = sale.getTotalAmount().subtract(totalPaid).max(BigDecimal.ZERO);
+        String status = totalPaid.compareTo(sale.getTotalAmount()) >= 0 ? "PAID"
+                : totalPaid.compareTo(BigDecimal.ZERO) > 0 ? "PARTIALLY PAID" : "DUE";
 
-        NumberFormat currency = NumberFormat.getCurrencyInstance(new Locale("en", "IN"));
-        for (PaymentDto payment : payments) {
-            paymentTable.addCell(getCell(payment.getPaymentMethod().name(), normalFont, Element.ALIGN_LEFT, false));
-            paymentTable.addCell(getCell(currency.format(payment.getAmount()), normalFont, Element.ALIGN_RIGHT, false));
-            paymentTable.addCell(getCell(payment.getPaymentDate().toString(), normalFont, Element.ALIGN_CENTER, false));
+        Color statusColor = status.equals("PAID") ? SUCCESS_GREEN
+                : status.equals("PARTIALLY PAID") ? WARNING_ORANGE : DANGER_RED;
+
+        // Add invoice metadata
+        right.addElement(new Paragraph("TAX INVOICE", titleFont));
+        right.addElement(new Paragraph("Invoice No: " + sale.getInvoiceNo(), boldFont));
+        right.addElement(new Paragraph("Date: " + sale.getDate().toLocalDate(), normalFont));
+
+        // Badge using nested 1-cell table
+        PdfPTable badgeTable = new PdfPTable(1);
+        badgeTable.setWidthPercentage(100);
+
+        PdfPCell badgeCell = new PdfPCell(new Phrase(" STATUS: " + status + " ",
+                FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9, Font.NORMAL, Color.WHITE)));
+        badgeCell.setBackgroundColor(statusColor);
+        badgeCell.setBorder(Rectangle.NO_BORDER);
+        badgeCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+        badgeCell.setPadding(4);
+        badgeCell.setFixedHeight(20f); // makes it look like a badge
+
+        badgeTable.addCell(badgeCell);
+        right.addElement(badgeTable);
+
+        table.addCell(right);
+
+        document.add(table);
+        document.add(new Paragraph("\n"));
+    }
+
+    private void addAddressSection(Document document, Sale sale, Font normalFont, Font boldFont) throws DocumentException {
+        PdfPTable table = new PdfPTable(2);
+        table.setWidthPercentage(100);
+        table.setWidths(new float[]{50, 50});
+
+        PdfPCell billHead = new PdfPCell(new Phrase("BILL TO", boldFont));
+        billHead.setBackgroundColor(THEME_COLOR);
+        billHead.setPadding(6);
+        table.addCell(billHead);
+
+        PdfPCell shipHead = new PdfPCell(new Phrase("SHIP TO", boldFont));
+        shipHead.setBackgroundColor(THEME_COLOR);
+        shipHead.setPadding(6);
+        table.addCell(shipHead);
+
+        // Billing
+        PdfPCell billCell = new PdfPCell();
+        billCell.setPadding(8);
+        billCell.addElement(new Phrase(sale.getCustomer().getName(), boldFont));
+        billCell.addElement(new Phrase("\n" + sale.getCustomer().getAddressLine1(), normalFont));
+        billCell.addElement(new Phrase("\n" + sale.getCustomer().getCity() + ", " + sale.getCustomer().getState(), normalFont));
+        if (sale.getCustomer().getGstNumber() != null) {
+            billCell.addElement(new Phrase("\nGSTIN: " + sale.getCustomer().getGstNumber(), normalFont));
         }
-        document.add(paymentTable);
+        table.addCell(billCell);
 
-        Paragraph paid = new Paragraph("Total Paid: ₹" + currency.format(totalPaid), boldFont);
-        paid.setAlignment(Element.ALIGN_RIGHT);
-        document.add(paid);
+        // Shipping - Use latest delivery (if exists)
+        PdfPCell shipCell = new PdfPCell();
+        shipCell.setPadding(8);
 
-        Paragraph duePara = new Paragraph("Amount Due: ₹" + currency.format(due), boldFont);
-        duePara.setAlignment(Element.ALIGN_RIGHT);
-        document.add(duePara);
-    }
-    private void addFooter(Document document, Font smallFont, Font headerFont, Font normalFont) throws DocumentException {
+        Delivery latestDelivery = sale.getLatestDelivery();
+        String shipAddr = (latestDelivery != null && latestDelivery.getDeliveryAddress() != null
+                && !latestDelivery.getDeliveryAddress().trim().isEmpty())
+                ? latestDelivery.getDeliveryAddress()
+                : sale.getCustomer().getAddressLine1() + "\n" +
+                sale.getCustomer().getCity() + ", " +
+                sale.getCustomer().getState();
+
+        shipCell.addElement(new Phrase(sale.getCustomer().getName(), boldFont));
+        shipCell.addElement(new Phrase("\n" + shipAddr, normalFont));
+
+        if (latestDelivery != null) {
+            shipCell.addElement(new Phrase("\nDelivery Status: " + latestDelivery.getDeliveryStatus(), normalFont));
+        }
+
+        table.addCell(shipCell);
+
+        document.add(table);
         document.add(new Paragraph("\n"));
-        Paragraph bankHeader = new Paragraph("Banking Details", headerFont);
-        document.add(bankHeader);
-        document.add(new Paragraph(bankingDetails, normalFont));
-
-        document.add(new Paragraph("\n"));
-        Paragraph termsHeader = new Paragraph("Terms & Conditions", headerFont);
-        document.add(termsHeader);
-        document.add(new Paragraph(termsAndConditions, smallFont));
-
-        document.add(new Paragraph("\n"));
-        Paragraph sign = new Paragraph("Authorized Signatory", normalFont);
-        sign.setAlignment(Element.ALIGN_RIGHT);
-        document.add(sign);
-        Paragraph signature = new Paragraph("_________________________", normalFont);
-        signature.setAlignment(Element.ALIGN_RIGHT);
-        document.add(signature);
     }
 
+    private void addItemTable(Document document, Sale sale, Font headerFont, Font normalFont, Font boldFont) throws DocumentException {
+        PdfPTable table = new PdfPTable(9);
+        table.setWidthPercentage(100);
+        table.setWidths(new float[]{4, 28, 10, 7, 10, 7, 10, 10, 14});
 
-    private PdfPCell getCell(String text, Font font, int alignment, boolean header) {
+        String[] headers = {"#", "Item Description", "HSN/SAC", "Qty", "Rate", "GST %", "Disc", "Taxable Amt", "Total"};
+        for (String h : headers) {
+            PdfPCell cell = new PdfPCell(new Phrase(h, headerFont));
+            cell.setBackgroundColor(THEME_COLOR);
+            cell.setHorizontalAlignment(Element.ALIGN_CENTER);
+            cell.setPadding(5);
+            table.addCell(cell);
+        }
+
+        BigDecimal grandTotalCheck = BigDecimal.ZERO;
+        int count = 1;
+        for (SaleItem item : sale.getSaleItems()) {
+            BigDecimal qty = item.getQty() != null ? item.getQty() : BigDecimal.ZERO;
+            BigDecimal rate = item.getUnitPrice() != null ? item.getUnitPrice() : BigDecimal.ZERO;
+            BigDecimal discount = item.getDiscount() != null ? item.getDiscount() : BigDecimal.ZERO;
+            BigDecimal taxable = item.getTaxableValue() != null ? item.getTaxableValue() : BigDecimal.ZERO;
+
+            BigDecimal cgst = item.getCgstAmt() != null ? item.getCgstAmt() : BigDecimal.ZERO;
+            BigDecimal sgst = item.getSgstAmt() != null ? item.getSgstAmt() : BigDecimal.ZERO;
+            BigDecimal igst = item.getIgstAmt() != null ? item.getIgstAmt() : BigDecimal.ZERO;
+            BigDecimal taxes = cgst.add(sgst).add(igst);
+
+            BigDecimal lineTotal = taxable.add(taxes);
+
+            grandTotalCheck = grandTotalCheck.add(lineTotal);
+
+            table.addCell(createCell(String.valueOf(count++), normalFont, Element.ALIGN_CENTER));
+            table.addCell(createCell(item.getItemVariant().getItem().getName(), normalFont, Element.ALIGN_LEFT));
+            table.addCell(createCell(item.getItemVariant().getHsn(), normalFont, Element.ALIGN_CENTER));
+            table.addCell(createCell(qty.toString(), normalFont, Element.ALIGN_CENTER));
+            table.addCell(createCell(currency.format(rate), normalFont, Element.ALIGN_RIGHT));
+            table.addCell(createCell(item.getGstType().getRate() + "%", normalFont, Element.ALIGN_CENTER));
+            table.addCell(createCell(currency.format(discount), normalFont, Element.ALIGN_RIGHT));
+            table.addCell(createCell(currency.format(taxable), normalFont, Element.ALIGN_RIGHT));
+            table.addCell(createCell(currency.format(lineTotal), boldFont, Element.ALIGN_RIGHT));
+        }
+
+        if (grandTotalCheck.compareTo(sale.getTotalAmount()) != 0) {
+            logger.warn("Sale ID {}: Calculated line total {} does not match stored totalAmount {}",
+                    sale.getId(), grandTotalCheck, sale.getTotalAmount());
+        }
+
+        document.add(table);
+    }
+
+    private void addCalculationSection(Document document, Sale sale, Font normalFont, Font boldFont) throws DocumentException {
+        // GST Summary - Group by rate
+        Map<BigDecimal, GstSummary> gstMap = new LinkedHashMap<>();
+        for (SaleItem item : sale.getSaleItems()) {
+            BigDecimal rate = BigDecimal.valueOf(item.getGstType().getRate());
+            GstSummary summary = gstMap.computeIfAbsent(rate, GstSummary::new);
+            summary.addCgst(item.getCgstAmt());
+            summary.addSgst(item.getSgstAmt());
+            summary.addIgst(item.getIgstAmt());
+        }
+
+        PdfPTable gstTable = new PdfPTable(4);
+        gstTable.setWidthPercentage(100);
+        String[] gstHeaders = {"GST Rate", "CGST Amt", "SGST Amt", "IGST Amt"};
+        for (String h : gstHeaders) {
+            PdfPCell c = new PdfPCell(new Phrase(h, boldFont));
+            c.setBackgroundColor(LIGHT_GREY);
+            c.setHorizontalAlignment(Element.ALIGN_CENTER);
+            gstTable.addCell(c);
+        }
+
+        BigDecimal totalCgst = BigDecimal.ZERO, totalSgst = BigDecimal.ZERO, totalIgst = BigDecimal.ZERO;
+        for (GstSummary s : gstMap.values()) {
+            gstTable.addCell(createCell(s.rate + "%", normalFont, Element.ALIGN_CENTER));
+            gstTable.addCell(createCell(currency.format(s.cgst), normalFont, Element.ALIGN_RIGHT));
+            gstTable.addCell(createCell(currency.format(s.sgst), normalFont, Element.ALIGN_RIGHT));
+            gstTable.addCell(createCell(currency.format(s.igst), normalFont, Element.ALIGN_RIGHT));
+            totalCgst = totalCgst.add(s.cgst);
+            totalSgst = totalSgst.add(s.sgst);
+            totalIgst = totalIgst.add(s.igst);
+        }
+
+        // Amount in Words
+        String amountInWords = numberToWords(sale.getTotalAmount());
+        Paragraph words = new Paragraph("\nAmount in Words: " + amountInWords + " Only", normalFont);
+        words.setAlignment(Element.ALIGN_LEFT);
+
+        // Totals Section
+        PdfPTable totals = new PdfPTable(2);
+        totals.setWidthPercentage(100);
+
+        BigDecimal taxableTotal = sale.getSaleItems().stream()
+                .map(SaleItem::getTaxableValue)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        addTotalRow(totals, "Taxable Amount:", currency.format(taxableTotal), normalFont);
+        addTotalRow(totals, "Total CGST:", currency.format(totalCgst), normalFont);
+        addTotalRow(totals, "Total SGST:", currency.format(totalSgst), normalFont);
+        addTotalRow(totals, "Total IGST:", currency.format(totalIgst), normalFont);
+
+        // Payment Info
+        List<PaymentDto> payments = paymentService.getPaymentsBySource(PaymentSourceType.SALE, sale.getId());
+        BigDecimal totalPaid = payments.stream()
+                .map(PaymentDto::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal balanceDue = sale.getTotalAmount().subtract(totalPaid).max(BigDecimal.ZERO);
+
+        addTotalRow(totals, "Grand Total:", currency.format(sale.getTotalAmount()), boldFont);
+        addTotalRow(totals, "Amount Paid:", currency.format(totalPaid), boldFont);
+
+        // Balance Due with color
+        Font dueFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10, Font.NORMAL,
+                balanceDue.compareTo(BigDecimal.ZERO) > 0 ? DANGER_RED : SUCCESS_GREEN);
+        addTotalRow(totals, "Balance Due:", currency.format(balanceDue), dueFont);
+
+        // Combine GST + Totals
+        PdfPTable main = new PdfPTable(2);
+        main.setWidthPercentage(100);
+        main.setWidths(new float[]{60, 40});
+        main.setSpacingBefore(10);
+
+        PdfPCell left = new PdfPCell();
+        left.setBorder(Rectangle.NO_BORDER);
+        left.addElement(new Paragraph("GST SUMMARY", boldFont));
+        left.addElement(gstTable);
+        left.addElement(words);
+
+        PdfPCell right = new PdfPCell(totals);
+        right.setBorder(Rectangle.NO_BORDER);
+
+        main.addCell(left);
+        main.addCell(right);
+        document.add(main);
+    }
+
+    private void addFinalFooter(Document document, Sale sale, Font normalFont, Font boldFont, Font smallFont) throws DocumentException {
+        document.add(new Paragraph("\n"));
+
+        PdfPTable footer = new PdfPTable(2);
+        footer.setWidthPercentage(100);
+
+        PdfPCell left = new PdfPCell();
+        left.setBorder(Rectangle.NO_BORDER);
+        left.addElement(new Phrase("BANKING DETAILS", boldFont));
+        left.addElement(new Phrase(bankingDetails, smallFont));
+
+        left.addElement(new Phrase("\n\nTERMS & CONDITIONS", boldFont));
+        String[] terms = termsAndConditions.split("\n");
+        for (String t : terms) {
+            left.addElement(new Phrase("• " + t.trim(), smallFont));
+        }
+        footer.addCell(left);
+
+        PdfPCell right = new PdfPCell();
+        right.setBorder(Rectangle.NO_BORDER);
+        right.setVerticalAlignment(Element.ALIGN_BOTTOM);
+        right.addElement(new Paragraph("\n\n\nFor " + sale.getShop().getName(), boldFont));
+        right.addElement(new Paragraph("Authorized Signatory", normalFont));
+        footer.addCell(right);
+
+        document.add(footer);
+    }
+
+    // ────────────────────────────────────────────────
+    // Helpers
+    // ────────────────────────────────────────────────
+
+    private PdfPCell createCell(String text, Font font, int align) {
         PdfPCell cell = new PdfPCell(new Phrase(text, font));
-        cell.setHorizontalAlignment(alignment);
-        cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
         cell.setPadding(5);
-        cell.setNoWrap(true);
-        if (header) {
-            cell.setBackgroundColor(new Color(220, 220, 220));
-            cell.setBorderWidth(1f);
-        } else {
-            cell.setBorderWidth(0.5f);
-        }
+        cell.setHorizontalAlignment(align);
+        cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
         return cell;
     }
+
+    private void addTotalRow(PdfPTable table, String label, String value, Font font) {
+        PdfPCell labelCell = new PdfPCell(new Phrase(label, font));
+        labelCell.setBorder(Rectangle.NO_BORDER);
+        table.addCell(labelCell);
+
+        PdfPCell valueCell = new PdfPCell(new Phrase(value, font));
+        valueCell.setBorder(Rectangle.NO_BORDER);
+        valueCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+        table.addCell(valueCell);
+    }
+
     private String numberToWords(BigDecimal number) {
         if (number == null || number.compareTo(BigDecimal.ZERO) == 0) {
             return "Zero";
@@ -305,14 +416,13 @@ public class InvoiceService2 {
             scaleIndex++;
         }
 
-        // Handle decimal part
+        // Handle decimal part (paise)
         int decimalPart = number.subtract(new BigDecimal(number.longValue())).movePointRight(2).abs().intValue();
         if (decimalPart > 0) {
-            result.append(" and ");
-            result.append(convertChunk(decimalPart, units, tens)).append(" Paise");
+            result.append(" and ").append(convertChunk(decimalPart, units, tens)).append(" Paise");
         }
 
-        return result.toString();
+        return result.toString().trim();
     }
 
     private String convertChunk(int number, String[] units, String[] tens) {
@@ -336,19 +446,42 @@ public class InvoiceService2 {
         return result.toString();
     }
 
-    /**
-     * Find Sale by saleId or invoiceNo and generate PDF. Throws if not found or neither param provided.
-     */
     public byte[] generatePdfBySaleIdOrInvoiceNo(Long saleId, String invoiceNo) {
-        Sale sale = null;
+        Sale sale;
         if (saleId != null) {
-            sale = saleRepository.findById(saleId).orElseThrow(() -> new RuntimeException("Sale not found"));
+            sale = saleRepository.findById(saleId)
+                    .orElseThrow(() -> new RuntimeException("Sale not found with ID: " + saleId));
         } else if (invoiceNo != null) {
             sale = saleRepository.findByInvoiceNo(invoiceNo);
-            if (sale == null) throw new RuntimeException("Sale not found for invoiceNo");
+            if (sale == null) {
+                throw new RuntimeException("Sale not found with Invoice No: " + invoiceNo);
+            }
         } else {
-            throw new IllegalArgumentException("saleId or invoiceNo required");
+            throw new IllegalArgumentException("Either saleId or invoiceNo must be provided");
         }
         return generatePdf(sale);
+    }
+
+    private static class GstSummary {
+        final BigDecimal rate;
+        BigDecimal cgst = BigDecimal.ZERO;
+        BigDecimal sgst = BigDecimal.ZERO;
+        BigDecimal igst = BigDecimal.ZERO;
+
+        GstSummary(BigDecimal rate) {
+            this.rate = rate;
+        }
+
+        void addCgst(BigDecimal amt) {
+            if (amt != null) cgst = cgst.add(amt);
+        }
+
+        void addSgst(BigDecimal amt) {
+            if (amt != null) sgst = sgst.add(amt);
+        }
+
+        void addIgst(BigDecimal amt) {
+            if (amt != null) igst = igst.add(amt);
+        }
     }
 }

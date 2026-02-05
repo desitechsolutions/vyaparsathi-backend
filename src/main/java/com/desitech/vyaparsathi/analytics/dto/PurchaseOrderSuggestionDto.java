@@ -11,4 +11,5 @@ public class PurchaseOrderSuggestionDto {
     private Long itemId;
     private String itemName;
     private Double suggestedQuantity;
+    private java.math.BigDecimal estimatedCost;
 }

@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.ProblemDetail;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -221,40 +222,46 @@ public class ReceivingService {
      * Validates quantities and throws an exception if the total exceeds the original PO quantity or is negative.
      */
     private void validateItemQuantities(PurchaseOrderItem poItem, ReceivingItemDto newItemDto, ReceivingItem existingItem) {
-        int currentlyReceived = existingItem != null ?
+        int currentlyInThisRecord = existingItem != null ?
                 (Optional.ofNullable(existingItem.getReceivedQty()).orElse(0) +
                         Optional.ofNullable(existingItem.getDamagedQty()).orElse(0) +
                         Optional.ofNullable(existingItem.getRejectedQty()).orElse(0)) : 0;
 
-        ReceivingQtySummary qtySummary = receivingRepository.getQtySummaryForPOItem(poItem.getId(), TenantUtils.getCurrentShopId());
-        long previouslyReceived = qtySummary.received() + qtySummary.damaged() + qtySummary.rejected() - currentlyReceived;
-/*        int previouslyReceived = receivingRepository.sumReceivedQtyForPOItem(poItem.getId()) +
-                receivingRepository.sumDamagedQtyForPOItem(poItem.getId()) +
-                receivingRepository.sumRejectedQtyForPOItem(poItem.getId()) - currentlyReceived;*/
+        ReceivingQtySummary summary = receivingRepository.getQtySummaryForPOItem(poItem.getId(), TenantUtils.getCurrentShopId());
 
-        int totalToReceive = newItemDto.getReceivedQty() + newItemDto.getDamagedQty() + newItemDto.getRejectedQty();
-        long cumulativeReceived = previouslyReceived + totalToReceive;
+        // Calculate what was received in OTHER records
+        long previouslyReceivedInOtherRecords = summary.received() + summary.damaged() + summary.rejected() - currentlyInThisRecord;
 
-        if (cumulativeReceived > poItem.getQuantity()) {
-            throw new BusinessValidationException(
-                    "Cannot receive more than the remaining quantity for PO item " + poItem.getId() +
-                            ". Remaining: " + (poItem.getQuantity() - previouslyReceived)
-            );
+        int totalNewRequest = newItemDto.getReceivedQty() + newItemDto.getDamagedQty() + newItemDto.getRejectedQty();
+        long cumulativeTotal = previouslyReceivedInOtherRecords + totalNewRequest;
+
+        // Check if this is an overage
+        if (cumulativeTotal > poItem.getQuantity()) {
+            // Instead of throwing an error, we ensure the DTO has provided a reason
+            if (newItemDto.getOverageReason() == null || newItemDto.getOverageReason().isBlank()) {
+                throw new BusinessValidationException(
+                        "Overage detected for item " + poItem.getId() + ". A justification reason is required to exceed PO quantity."
+                );
+            }
+            logger.warn("Overage recorded for PO Item {}: Ordered {}, Receiving {}",
+                    poItem.getId(), poItem.getQuantity(), cumulativeTotal);
         }
     }
-
     /**
      * Helper to determine the status of a single ReceivingItem.
      */
     private ReceivingItemStatus determineReceivingItemStatus(ReceivingItem item) {
-        int totalReceived = Optional.ofNullable(item.getReceivedQty()).orElse(0) + Optional.ofNullable(item.getDamagedQty()).orElse(0) + Optional.ofNullable(item.getRejectedQty()).orElse(0);
-        if (totalReceived == 0) {
-            return ReceivingItemStatus.PENDING;
-        } else if (totalReceived >= item.getExpectedQty()) {
+        int totalReceived = Optional.ofNullable(item.getReceivedQty()).orElse(0) +
+                Optional.ofNullable(item.getDamagedQty()).orElse(0) +
+                Optional.ofNullable(item.getRejectedQty()).orElse(0);
+
+        if (totalReceived == 0) return ReceivingItemStatus.PENDING;
+
+        // Status is RECEIVED if we met OR exceeded the expected quantity
+        if (totalReceived >= item.getExpectedQty()) {
             return ReceivingItemStatus.RECEIVED;
-        } else {
-            return ReceivingItemStatus.PARTIALLY_RECEIVED;
         }
+        return ReceivingItemStatus.PARTIALLY_RECEIVED;
     }
 
     /**
@@ -588,5 +595,9 @@ public class ReceivingService {
     public List<ReceivingDto> getAllByPoNumber(String poNumber) {
         List<Receiving> receivingList = receivingRepository.findAllByPoNumber(poNumber, TenantUtils.getCurrentShopId());
         return receivingList.stream().map(receivingMapper::toDto).collect(Collectors.toList());
+    }
+
+    public List<ReceivingTicket> getAllReceivingTickets() {
+        return receivingTicketRepository.findAll();
     }
 }

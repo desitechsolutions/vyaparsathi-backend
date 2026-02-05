@@ -22,12 +22,21 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.UUID;
 
 
 @Service
 public class ShopService {
 
     private static final Logger logger = LoggerFactory.getLogger(ShopService.class);
+    private final String uploadDir = "uploads/logos/";
     @Autowired private ShopRepository shopRepository;
     @Autowired private UserRepository userRepository;
     @Autowired private CategoryService categoryService; // ← reuse this
@@ -36,7 +45,7 @@ public class ShopService {
     @Autowired private CategoryMapper categoryMapper;
 
     @Transactional
-    public ShopDto completeOnboarding(ShopDto dto, User currentUser) {
+    public ShopDto completeOnboarding(ShopDto dto, User currentUser, MultipartFile logo) {
         if (currentUser.getShop() != null) {
             throw new IllegalStateException("Shop already exists for this user");
         }
@@ -48,6 +57,18 @@ public class ShopService {
 
         // 1. Create shop
         Shop shop = shopMapper.toEntity(dto);
+        // Handle Logo Storage
+        if (logo != null && !logo.isEmpty()) {
+            String fileName = UUID.randomUUID().toString() + "_" + logo.getOriginalFilename();
+            try {
+                Path path = Paths.get(uploadDir);
+                if (!Files.exists(path)) Files.createDirectories(path);
+                Files.copy(logo.getInputStream(), path.resolve(fileName), StandardCopyOption.REPLACE_EXISTING);
+                shop.setLogoPath(fileName); // Save filename/path to DB
+            } catch (IOException e) {
+                throw new RuntimeException("Could not save logo file", e);
+            }
+        }
         shop = shopRepository.saveAndFlush(shop);
 
         TenantContext.setCurrentShopId(shop.getId());

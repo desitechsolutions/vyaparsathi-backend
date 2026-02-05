@@ -43,4 +43,14 @@ public class SalesSummaryDto {
     
     @Schema(description = "Outstanding receivables = Total sales minus total paid", example = "30000.00")
     private BigDecimal outstandingReceivable;
+
+    // Previous period comparison
+    private LocalDate previousFromDate;
+    private LocalDate previousToDate;
+    private BigDecimal previousTotalSales;
+    private BigDecimal previousNetProfit;
+
+    // Growth percentages
+    private BigDecimal salesGrowthPercent;
+    private BigDecimal profitGrowthPercent;
 }

@@ -21,4 +21,5 @@ public class PaymentDto {
     private String notes;
     private String transactionId;
     private PaymentStatus status;
+    private String invoiceNumber;
 }

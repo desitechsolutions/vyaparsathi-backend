@@ -33,7 +33,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/sales")
-@PreAuthorize("hasAnyRole('OWNER', 'STAFF')")
+@PreAuthorize("hasAnyRole('OWNER', 'STAFF','ADMIN')")
 @Tag(name = "Sales Management", description = "Operations for sales management including COGS tracking, returns, cancellations, and profit reporting")
 public class SaleController {
 
@@ -128,6 +128,19 @@ public class SaleController {
             throw new ApplicationException("Failed to fetch sales with due", e);
         }
     }
+
+    @GetMapping("/history")
+    public ResponseEntity<List<SaleDueDto>> getSalesHistory() {
+        try {
+            var result = service.getSalesHistory();
+            logger.info("Fetched sales History");
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching sales history: {}", e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch sales history", e);
+        }
+    }
+
 
     @GetMapping("/{id}/due")
     public ResponseEntity<SaleDueDto> getSaleDueBySaleId(@PathVariable Long id) {

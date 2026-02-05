@@ -1,8 +1,10 @@
 package com.desitech.vyaparsathi.payment.service;
 
+import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.customer.dto.CustomerLedgerDto;
 import com.desitech.vyaparsathi.customer.entity.CustomerLedgerType;
 import com.desitech.vyaparsathi.customer.service.CustomerLedgerService;
+import com.desitech.vyaparsathi.payment.dto.BulkPaymentRequest;
 import com.desitech.vyaparsathi.payment.dto.PaymentDto;
 import com.desitech.vyaparsathi.payment.dto.PaymentReceivedRequest;
 import com.desitech.vyaparsathi.payment.entity.Payment;
@@ -22,12 +24,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.List;
+import java.time.LocalDateTime;
+import java.util.*;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.util.Optional;
-import java.util.Set;
+
 import java.util.stream.Collectors;
+
+import static java.math.BigDecimal.ZERO;
 
 @Service
 public class PaymentServiceImpl implements PaymentService {
@@ -60,24 +65,28 @@ public class PaymentServiceImpl implements PaymentService {
     @Transactional
     public PaymentDto createPayment(PaymentDto dto) {
         Payment payment = paymentMapper.toEntity(dto);
+        BigDecimal paymentAmount = payment.getAmount() != null ? payment.getAmount() : ZERO;
 
-        // For payments linked to a source, compute total paid and due
-        BigDecimal totalAmount = BigDecimal.ZERO;
-        BigDecimal totalPaidBefore = BigDecimal.ZERO;
+        // 1. Fetch totals using Optimized Database Sum (No N+1)
+        BigDecimal totalAmount = ZERO;
+        BigDecimal totalPaidBefore = ZERO;
+
         if (payment.getSourceId() != null && payment.getSourceType() != null) {
             totalAmount = getTotalAmountForSource(payment.getSourceId(), payment.getSourceType());
-            totalPaidBefore = paymentRepository.findBySourceTypeAndSourceId(
-                            payment.getSourceType(), payment.getSourceId()
-                    ).stream()
-                    .map(p -> p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // FIX: Use a single DB query instead of streaming a list
+            totalPaidBefore = paymentRepository.sumPaymentsBySource(
+                    payment.getSourceType(), payment.getSourceId());
         }
 
-        // Add this payment
-        BigDecimal paymentAmount = payment.getAmount() != null ? payment.getAmount() : BigDecimal.ZERO;
         BigDecimal totalPaidAfter = totalPaidBefore.add(paymentAmount);
 
-        // Determine status: prefer explicit, else infer from payment method and amounts
+        // 2. Validation: Prevent accidental overpayment (if not bulk/advance)
+        if (payment.getSourceId() != null && totalPaidAfter.compareTo(totalAmount) > 0) {
+            throw new BusinessValidationException("Payment exceeds due amount for this source.");
+        }
+
+        // 3. Status Determination
         payment.setStatus(determinePaymentStatus(
                 payment.getPaymentMethod(),
                 totalPaidAfter,
@@ -88,10 +97,24 @@ public class PaymentServiceImpl implements PaymentService {
         ));
 
         Payment saved = paymentRepository.save(payment);
+
         logger.info("Payment created: id={}, sourceType={}, sourceId={}, amount={}, status={}",
                 saved.getId(), saved.getSourceType(), saved.getSourceId(), saved.getAmount(), saved.getStatus());
+        // 4. Enhanced Ledger Entry
+        if (saved.getCustomerId() != null && paymentAmount.compareTo(ZERO) > 0) {
+            CustomerLedgerDto ledgerDto = new CustomerLedgerDto();
+            ledgerDto.setAmount(paymentAmount);
+            ledgerDto.setType(CustomerLedgerType.DEBIT);
 
-        // After saving, update parent source payment status (sale/purchase/etc.)
+            // FIX: Add more context to description for the customer statement
+            String description = "Payment for " + payment.getSourceType() + " #" + payment.getSourceId();
+            if (saved.getReference() != null) description += " (Ref: " + saved.getReference() + ")";
+
+            ledgerDto.setDescription(description);
+            ledgerService.addEntry(saved.getCustomerId(), ledgerDto);
+        }
+
+        // 5. Sync Source Status (Sale/PO)
         if (payment.getSourceType() != null && payment.getSourceId() != null) {
             updateSourcePaymentStatus(payment.getSourceType(), payment.getSourceId());
         }
@@ -129,11 +152,11 @@ public class PaymentServiceImpl implements PaymentService {
         boolean hasPendingMethods = allMethods.stream().anyMatch(m ->
                 m == PaymentMethod.CHEQUE || m == PaymentMethod.NET_BANKING || m == PaymentMethod.OTHER);
 
-        if (totalAmount.compareTo(BigDecimal.ZERO) <= 0) {
+        if (totalAmount.compareTo(ZERO) <= 0) {
             return PaymentStatus.PENDING;
         }
 
-        if (totalPaid.compareTo(BigDecimal.ZERO) == 0) {
+        if (totalPaid.compareTo(ZERO) == 0) {
             return PaymentStatus.PENDING;
         } else if (totalPaid.compareTo(totalAmount) < 0) {
             return PaymentStatus.PARTIALLY_PAID;
@@ -153,36 +176,148 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     @Cacheable("paymentsBySource")
     public List<PaymentDto> getPaymentsBySource(PaymentSourceType sourceType, Long sourceId) {
-        return paymentRepository.findBySourceTypeAndSourceId(sourceType, sourceId)
-                .stream().map(paymentMapper::toDto).collect(Collectors.toList());
+        return paymentRepository
+                .findBySourceTypeAndSourceId(sourceType, sourceId)
+                .stream()
+                .map(this::enrichPaymentDto)
+                .collect(Collectors.toList());
     }
 
     @Override
     @Cacheable("paymentsBySupplier")
     public List<PaymentDto> getPaymentsBySupplier(Long supplierId) {
-        return paymentRepository.findBySupplierId(supplierId)
-                .stream().map(paymentMapper::toDto).collect(Collectors.toList());
+        return paymentRepository
+                .findBySupplierId(supplierId)
+                .stream()
+                .map(this::enrichPaymentDto)
+                .collect(Collectors.toList());
     }
+
 
     @Override
     @Cacheable("paymentsByCustomer")
     public List<PaymentDto> getPaymentsByCustomer(Long customerId) {
-        return paymentRepository.findByCustomerId(customerId)
-                .stream().map(paymentMapper::toDto).collect(Collectors.toList());
+        return paymentRepository
+                .findByCustomerId(customerId)
+                .stream()
+                .map(this::enrichPaymentDto)
+                .collect(Collectors.toList());
     }
 
     @Override
     public Optional<PaymentDto> getPayment(Long id) {
-        return paymentRepository.findById(id).map(paymentMapper::toDto);
+        return paymentRepository.findById(id)
+                .map(this::enrichPaymentDto);
     }
 
+    @Override
+    @Transactional
+    public void bulkPayment(BulkPaymentRequest request) {
+        BigDecimal totalToProcess = request.getTotalAmount();
+        BigDecimal remainingToAllocate = totalToProcess;
+        Long customerId = request.getCustomerId();
+
+        // 1. To track for the Ledger Description
+        List<String> paidInvoices = new ArrayList<>();
+
+        // 2. Fetch Sales (Waterfall or Selection)
+        List<Sale> targetSales;
+        if (request.getSelectedSaleIds() != null && !request.getSelectedSaleIds().isEmpty()) {
+            targetSales = saleRepository.findAllById(request.getSelectedSaleIds());
+            targetSales.sort(Comparator.comparing(Sale::getId));
+        } else {
+            targetSales = saleRepository.findByCustomerIdAndPaymentStatusInOrderByIdAsc(
+                    customerId, List.of(PaymentStatus.PENDING, PaymentStatus.PARTIALLY_PAID));
+        }
+
+        // 3. Process Payments
+        if (!targetSales.isEmpty()) {
+            Set<Long> saleIds = targetSales.stream().map(Sale::getId).collect(Collectors.toSet());
+            Map<Long, BigDecimal> paidAmountsMap = getTotalPaidBySaleIds(saleIds);
+
+            for (Sale sale : targetSales) {
+                if (remainingToAllocate.compareTo(ZERO) <= 0) break;
+
+                BigDecimal totalSaleAmount = sale.getTotalAmount() != null ? sale.getTotalAmount() : ZERO;
+                BigDecimal alreadyPaid = paidAmountsMap.getOrDefault(sale.getId(), ZERO);
+                BigDecimal currentDue = totalSaleAmount.subtract(alreadyPaid).max(ZERO);
+
+                if (currentDue.compareTo(ZERO) > 0) {
+                    BigDecimal allocation = remainingToAllocate.min(currentDue);
+
+                    // Track invoice for description
+                    paidInvoices.add(sale.getInvoiceNo() != null ? sale.getInvoiceNo() : "#" + sale.getId());
+
+                    Payment internalPayment = new Payment();
+                    internalPayment.setSourceId(sale.getId());
+                    internalPayment.setSourceType(PaymentSourceType.SALE);
+                    internalPayment.setAmount(allocation);
+                    internalPayment.setCustomerId(customerId);
+                    internalPayment.setPaymentMethod(request.getPaymentMethod());
+                    internalPayment.setPaymentDate(request.getPaymentDate());
+                    internalPayment.setStatus(determinePaymentStatus(request.getPaymentMethod(), alreadyPaid.add(allocation), totalSaleAmount, null, PaymentSourceType.SALE, sale.getId()));
+
+                    paymentRepository.save(internalPayment);
+                    updateSourcePaymentStatus(PaymentSourceType.SALE, sale.getId());
+
+                    remainingToAllocate = remainingToAllocate.subtract(allocation);
+                }
+            }
+        }
+
+        // 4. Construct Smart Description
+        StringBuilder description = new StringBuilder("Bulk Payment [" + request.getPaymentMethod() + "]");
+
+        if (!paidInvoices.isEmpty()) {
+            description.append(" for Invoices: ").append(String.join(", ", paidInvoices));
+        }
+
+        if (remainingToAllocate.compareTo(ZERO) > 0) {
+            description.append(" (Includes ₹").append(remainingToAllocate).append(" as Advance)");
+            saveAdvancePayment(customerId, remainingToAllocate, request);
+        }
+
+        // 5. Record SINGLE Ledger Entry with rich context
+        CustomerLedgerDto ledgerDto = new CustomerLedgerDto();
+        ledgerDto.setAmount(totalToProcess);
+        ledgerDto.setType(CustomerLedgerType.DEBIT); // DEBIT = Payment Received
+        ledgerDto.setDescription(description.toString());
+        ledgerService.addEntry(customerId, ledgerDto);
+    }
+    private void saveAdvancePayment(Long customerId, BigDecimal amount, BulkPaymentRequest request) {
+        Payment advancePayment = new Payment();
+        advancePayment.setCustomerId(customerId);
+        advancePayment.setAmount(amount);
+        advancePayment.setPaymentMethod(request.getPaymentMethod());
+        advancePayment.setPaymentDate(request.getPaymentDate());
+        advancePayment.setReference(request.getReference());
+        advancePayment.setSourceType(null); // No specific sale
+        advancePayment.setSourceId(null);   // No specific sale ID
+
+        // Advance is considered "Paid" as the money is already received
+        advancePayment.setStatus(PaymentStatus.PAID);
+        advancePayment.setNotes("Unallocated excess from bulk payment");
+
+        paymentRepository.save(advancePayment);
+        logger.info("Recorded Advance Payment: {} for Customer ID: {}", amount, customerId);
+    }
+    private BigDecimal calculateTotalPaidForSource(Long sourceId, PaymentSourceType sourceType) {
+        return paymentRepository.findBySourceTypeAndSourceId(sourceType, sourceId).stream()
+                .map(p -> p.getAmount() != null ? p.getAmount() : ZERO)
+                .reduce(ZERO, BigDecimal::add);
+    }
+
+    public BigDecimal getCustomerAdvanceBalance(Long customerId) {
+        BigDecimal advance = paymentRepository.getUnallocatedCreditByCustomerId(customerId);
+        return advance != null ? advance : BigDecimal.ZERO;
+    }
     /**
      * Record a due/partial payment for any source (SALE, PURCHASE_ORDER, etc.)
      */
     @Override
     @Transactional
     public PaymentDto recordDuePayment(PaymentReceivedRequest request) {
-        if (request.getAmount() == null || request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+        if (request.getAmount() == null || request.getAmount().compareTo(ZERO) <= 0) {
             throw new IllegalArgumentException("Invalid payment amount");
         }
         if (request.getSourceId() == null || request.getSourceType() == null) {
@@ -192,11 +327,11 @@ public class PaymentServiceImpl implements PaymentService {
         // Get previous payments for this source
         List<Payment> previousPayments = paymentRepository.findBySourceTypeAndSourceId(request.getSourceType(), request.getSourceId());
         BigDecimal totalPaidBefore = previousPayments.stream()
-                .map(p -> p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .map(p -> p.getAmount() != null ? p.getAmount() : ZERO)
+                .reduce(ZERO, BigDecimal::add);
 
         BigDecimal totalAmount = getTotalAmountForSource(request.getSourceId(), request.getSourceType());
-        BigDecimal totalDue = totalAmount.subtract(totalPaidBefore).max(BigDecimal.ZERO);
+        BigDecimal totalDue = totalAmount.subtract(totalPaidBefore).max(ZERO);
 
         if (request.getAmount().compareTo(totalDue) > 0) {
             throw new IllegalArgumentException("Payment amount exceeds due amount of " + totalDue);
@@ -236,9 +371,9 @@ public class PaymentServiceImpl implements PaymentService {
     public BigDecimal calculateDueAmount(Long sourceId, PaymentSourceType sourceType, BigDecimal totalAmount) {
         List<Payment> payments = paymentRepository.findBySourceTypeAndSourceId(sourceType, sourceId);
         BigDecimal totalPaid = payments.stream()
-                .map(p -> p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        return totalAmount.subtract(totalPaid).max(BigDecimal.ZERO);
+                .map(p -> p.getAmount() != null ? p.getAmount() : ZERO)
+                .reduce(ZERO, BigDecimal::add);
+        return totalAmount.subtract(totalPaid).max(ZERO);
     }
 
     public BigDecimal getTotalAmountForSource(Long sourceId, PaymentSourceType sourceType) {
@@ -247,7 +382,7 @@ public class PaymentServiceImpl implements PaymentService {
                     .orElseThrow(() -> new EntityNotFoundException("Sale not found"));
             if (sale.getTotalAmount() == null) {
                 logger.warn("Total amount missing for Sale with id={}", sourceId);
-                return BigDecimal.ZERO;
+                return ZERO;
             }
             return sale.getTotalAmount();
         } else if (PaymentSourceType.PURCHASE_ORDER.equals(sourceType)) {
@@ -255,7 +390,7 @@ public class PaymentServiceImpl implements PaymentService {
                     .orElseThrow(() -> new EntityNotFoundException("Purchase Order not found"));
             if (po.getTotalAmount() == null) {
                 logger.warn("Total amount missing for PurchaseOrder with id={}", sourceId);
-                return BigDecimal.ZERO;
+                return ZERO;
             }
             return po.getTotalAmount();
         }
@@ -268,8 +403,8 @@ public class PaymentServiceImpl implements PaymentService {
     private void updateSourcePaymentStatus(PaymentSourceType sourceType, Long sourceId) {
         List<Payment> allPayments = paymentRepository.findBySourceTypeAndSourceId(sourceType, sourceId);
         BigDecimal totalPaid = allPayments.stream()
-                .map(p -> p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .map(p -> p.getAmount() != null ? p.getAmount() : ZERO)
+                .reduce(ZERO, BigDecimal::add);
 
         BigDecimal totalAmount = getTotalAmountForSource(sourceId, sourceType);
 
@@ -282,7 +417,7 @@ public class PaymentServiceImpl implements PaymentService {
                 m == PaymentMethod.CHEQUE || m == PaymentMethod.NET_BANKING || m == PaymentMethod.OTHER);
 
         PaymentStatus status;
-        if (totalPaid.compareTo(BigDecimal.ZERO) == 0) {
+        if (totalPaid.compareTo(ZERO) == 0) {
             status = PaymentStatus.PENDING;
         } else if (totalPaid.compareTo(totalAmount) < 0) {
             status = PaymentStatus.PARTIALLY_PAID;
@@ -314,5 +449,86 @@ public class PaymentServiceImpl implements PaymentService {
             // 🔮 In future: handle other types here
             default -> throw new UnsupportedOperationException("Unsupported sourceType: " + sourceType);
         }
+    }
+    private PaymentDto enrichPaymentDto(Payment payment) {
+        PaymentDto dto = paymentMapper.toDto(payment);
+
+        if (payment.getSourceType() == PaymentSourceType.SALE) {
+            saleRepository.findById(payment.getSourceId())
+                    .map(Sale::getInvoiceNo)
+                    .ifPresent(dto::setInvoiceNumber);
+        }
+
+        return dto;
+    }
+
+    /**
+     * Returns total paid amount per sale ID
+     * @param saleIds Set of sale IDs (can be null or empty)
+     * @return Map<saleId, totalPaidAmount> — never null
+     */
+    public Map<Long, BigDecimal> getTotalPaidBySaleIds(Set<Long> saleIds) {
+        if (saleIds == null || saleIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Object[]> sums = paymentRepository.sumPaymentsBySaleIds(saleIds, PaymentSourceType.SALE);
+
+        Map<Long, BigDecimal> paidMap = new HashMap<>();
+        for (Object[] row : sums) {
+            Long saleId = (Long) row[0];
+            BigDecimal sum = row[1] != null ? (BigDecimal) row[1] : ZERO;
+            paidMap.put(saleId, sum);
+        }
+
+        // Fill missing sales with ZERO
+        saleIds.forEach(id -> paidMap.putIfAbsent(id, ZERO));
+
+        return paidMap;
+    }
+
+    @Override
+    @Transactional
+    public BigDecimal applyAdvanceToSale(Long customerId, Long saleId, BigDecimal saleTotal) {
+        BigDecimal remainingSaleDue = saleTotal;
+        BigDecimal totalApplied = BigDecimal.ZERO;
+
+        // 1. Get all payments where sourceId is NULL (Advance/Unallocated)
+        List<Payment> advances = paymentRepository.findAvailableAdvances(customerId);
+
+        for (Payment advance : advances) {
+            if (remainingSaleDue.compareTo(BigDecimal.ZERO) <= 0) break;
+
+            BigDecimal advanceAmount = advance.getAmount();
+            // Determine how much of THIS specific advance to use
+            BigDecimal amountToTake = advanceAmount.min(remainingSaleDue);
+
+            // 2. Reduce the original Advance record
+            advance.setAmount(advanceAmount.subtract(amountToTake));
+            // If the advance is now 0, it's fully consumed
+            paymentRepository.save(advance);
+
+            // 3. Create a NEW Payment record linked to this Sale
+            Payment linkedPayment = new Payment();
+            linkedPayment.setCustomerId(customerId);
+            linkedPayment.setSourceId(saleId);
+            linkedPayment.setSourceType(PaymentSourceType.SALE);
+            linkedPayment.setAmount(amountToTake);
+            linkedPayment.setPaymentMethod(advance.getPaymentMethod());
+            linkedPayment.setPaymentDate(LocalDateTime.now());
+            linkedPayment.setNotes("Settled from Advance (Ref: " + advance.getId() + ")");
+            linkedPayment.setStatus(PaymentStatus.PAID);
+            paymentRepository.save(linkedPayment);
+
+            remainingSaleDue = remainingSaleDue.subtract(amountToTake);
+            totalApplied = totalApplied.add(amountToTake);
+        }
+
+        // 4. Update Sale status (Paid/Partially Paid)
+        if (totalApplied.compareTo(BigDecimal.ZERO) > 0) {
+            updateSourcePaymentStatus(PaymentSourceType.SALE, saleId);
+        }
+
+        return totalApplied;
     }
 }

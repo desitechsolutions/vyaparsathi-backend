@@ -63,9 +63,24 @@ public class StockService {
             return Collections.emptyList();
         }
 
-        List<Long> variantIds = itemVariants.stream().map(ItemVariant::getId).collect(Collectors.toList());
-        // Efficiently get stock levels for all variants at once
+        List<Long> variantIds = itemVariants.stream()
+                .map(ItemVariant::getId)
+                .collect(Collectors.toList());
+
+        // 1. Get current stock quantities (Sum of movements)
         Map<Long, BigDecimal> stockMap = getStocksForVariants(variantIds);
+
+        // 2. Get the latest purchase costs using your existing repo method
+        List<StockMovementRepository.LastPurchasePrice> lastPrices =
+                stockMovementRepository.findLastPurchasePricesByVariantIds(variantIds);
+
+        // Convert list to a Map for quick lookup during the stream
+        Map<Long, BigDecimal> costMap = lastPrices.stream()
+                .collect(Collectors.toMap(
+                        StockMovementRepository.LastPurchasePrice::getVariantId,
+                        StockMovementRepository.LastPurchasePrice::getPrice,
+                        (v1, v2) -> v1 // In case of duplicates, keep the first
+                ));
 
         return itemVariants.stream().map(variant -> {
             CurrentStockDto dto = new CurrentStockDto();
@@ -78,7 +93,10 @@ public class StockService {
             dto.setDesign(variant.getDesign());
             dto.setPricePerUnit(variant.getPricePerUnit());
             dto.setTotalQuantity(stockMap.getOrDefault(variant.getId(), BigDecimal.ZERO));
-            // Batch info is removed as it's not reliable to show a single batch for aggregated stock
+
+            // Map the purchase price from our new map
+            dto.setCostPerUnit(costMap.getOrDefault(variant.getId(), BigDecimal.ZERO));
+
             dto.setBatch(null);
             return dto;
         }).collect(Collectors.toList());

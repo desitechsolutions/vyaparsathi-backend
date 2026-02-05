@@ -24,4 +24,7 @@ public class ReceivingItemDto {
     private String rejectReason;
     @Min(value = 0, message = "Putaway quantity cannot be negative")
     private Integer putawayQty;
+    private String overageReason;
+    private String overageNotes;
+    private Boolean isOveraged = false;
 }

@@ -7,4 +7,7 @@ import java.util.List;
 
 public interface DeliveryRepository extends BaseRepository<Delivery, Long> {
     List<Delivery> findBySaleId(Long saleId);
+
+    List<Delivery> findBySaleIdOrderByCreatedAtDesc(Long saleId);
+
 }

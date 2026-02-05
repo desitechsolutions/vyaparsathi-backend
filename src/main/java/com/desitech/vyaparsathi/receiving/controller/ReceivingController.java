@@ -92,6 +92,10 @@ public class ReceivingController {
         return ResponseEntity.of(receivingService.getReceivingTicketById(id));
     }
 
+    @GetMapping("/tickets")
+    public ResponseEntity<List<ReceivingTicket>> getAllReceivingTickets() {
+        return ResponseEntity.of(Optional.ofNullable(receivingService.getAllReceivingTickets()));
+    }
     @PostMapping("/receive-goods")
     public ResponseEntity<ReceivingDto> receiveGoods(@Valid @RequestBody CreateReceivingDto createReceivingDto) {
         ReceivingDto receiving = receivingService.createInitialReceivingRecord(createReceivingDto);

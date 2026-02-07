@@ -187,12 +187,12 @@ public class SaleService {
         sale.setSyncedFlag(false);
         sale.setSaleItems(saleItems);
         saleItems.forEach(si -> si.setSale(sale));
-        saleRepository.save(sale);
+        Sale savedSale = saleRepository.saveAndFlush(sale);
 
         // 7. Handle Delivery
         if (dto.getDelivery() != null) {
             DeliveryDTO deliveryDTO = dto.getDelivery();
-            deliveryDTO.setSaleId(sale.getId());
+            deliveryDTO.setSaleId(savedSale.getId());
             deliveryDTO.setInvoiceNumber(invoiceNo);
             if (customer != null) deliveryDTO.setCustomerName(customer.getName());
             deliveryService.createDelivery(deliveryDTO);
@@ -208,14 +208,14 @@ public class SaleService {
             ledgerService.addEntry(customer.getId(), saleLedgerDto);
 
             // B. Apply existing Advance Pool (Drains available credits to pay this sale)
-            BigDecimal advanceApplied = paymentService.applyAdvanceToSale(customer.getId(), sale.getId(), finalTotalAmount);
+            BigDecimal advanceApplied = paymentService.applyAdvanceToSale(customer.getId(), savedSale.getId(), finalTotalAmount);
 
         }
 
         // 9. Process Fresh Payments (e.g., Cash paid at counter after advance was applied)
         if (dto.getPaymentDetails() != null && !dto.getPaymentDetails().isEmpty()) {
             // Calculate remaining gap after advance application
-            BigDecimal remainingDue = paymentService.calculateDueAmount(sale.getId(), PaymentSourceType.SALE, finalTotalAmount);
+            BigDecimal remainingDue = paymentService.calculateDueAmount(savedSale.getId(), PaymentSourceType.SALE, finalTotalAmount);
 
             BigDecimal totalPaidInput = dto.getPaymentDetails().stream()
                     .map(p -> p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
@@ -229,7 +229,7 @@ public class SaleService {
             for (PaymentDto paymentDTO : dto.getPaymentDetails()) {
                 if (remainingDue.compareTo(BigDecimal.ZERO) <= 0) break;
 
-                paymentDTO.setSourceId(sale.getId());
+                paymentDTO.setSourceId(savedSale.getId());
                 paymentDTO.setSourceType(PaymentSourceType.SALE);
                 paymentDTO.setCustomerId(customer != null ? customer.getId() : null);
                 paymentDTO.setPaymentDate(LocalDateTime.now());
@@ -242,14 +242,14 @@ public class SaleService {
         }
 
         // 10. ChangeLog, JWT Token Generation and Response
-        changeLogService.append("SALE", sale.getId(), com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.CREATE, mapper.toDto(sale), "LOCAL_DEVICE");
+        changeLogService.append("SALE", savedSale.getId(), com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.CREATE, mapper.toDto(savedSale), "LOCAL_DEVICE");
 
-        String signedToken = jwtUtil.generateInvoiceToken(sale.getId(), sale.getInvoiceNo());
-        SaleDto resultDto = mapper.toDto(sale);
+        String signedToken = jwtUtil.generateInvoiceToken(savedSale.getId(), sale.getInvoiceNo());
+        SaleDto resultDto = mapper.toDto(savedSale);
         resultDto.setSignedInvoiceUrl("/api/invoices/signed?token=" + signedToken);
 
         logger.info("Sale created successfully: ID={}, Invoice={}, Applied Advance=₹{}",
-                sale.getId(), sale.getInvoiceNo(), (customer != null ? "Checked" : "N/A"));
+                savedSale.getId(), savedSale.getInvoiceNo(), (customer != null ? "Checked" : "N/A"));
 
         return resultDto;
     }

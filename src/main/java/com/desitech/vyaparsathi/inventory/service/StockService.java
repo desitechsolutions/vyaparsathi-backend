@@ -77,9 +77,9 @@ public class StockService {
         // Convert list to a Map for quick lookup during the stream
         Map<Long, BigDecimal> costMap = lastPrices.stream()
                 .collect(Collectors.toMap(
-                        StockMovementRepository.LastPurchasePrice::getVariantId,
-                        StockMovementRepository.LastPurchasePrice::getPrice,
-                        (v1, v2) -> v1 // In case of duplicates, keep the first
+                        lp -> ((Number) lp.getVariantId()).longValue(),
+                        lp -> lp.getPrice() != null ? lp.getPrice() : BigDecimal.ZERO,
+                        (v1, v2) -> v1
                 ));
 
         return itemVariants.stream().map(variant -> {
@@ -117,8 +117,9 @@ public class StockService {
             throw new InsufficientStockException("Insufficient stock for item variant " + itemVariantId);
         }
 
+        BigDecimal latestCost = getLatestPurchaseCost(itemVariantId);
         // The entire complex FIFO logic is replaced by this single line.
-        recordStockMovement(itemVariantId, StockMovementType.DEDUCT, quantityToDeduct.negate(), null, null, reason, reference);
+        recordStockMovement(itemVariantId, StockMovementType.DEDUCT, quantityToDeduct.negate(), latestCost, null, reason, reference);
     }
 
     public boolean isStockAvailable(Long itemVariantId, BigDecimal quantity) {
@@ -189,8 +190,7 @@ public class StockService {
         movement.setItemVariant(itemVariant);
         movement.setMovementType(movementType);
         movement.setQuantity(quantity);
-        // Only set cost for ADD movements
-        movement.setCostPerUnit(StockMovementType.ADD.equals(movementType) ? costPerUnit : null);
+        movement.setCostPerUnit(costPerUnit);
         movement.setBatch(batch);
         movement.setReason(reason);
         movement.setReference(reference);
@@ -232,8 +232,9 @@ public class StockService {
         Map<Long, BigDecimal> priceMap = stockMovementRepository.findLastPurchasePricesByVariantIds(variantIds)
                 .stream()
                 .collect(Collectors.toMap(
-                        StockMovementRepository.LastPurchasePrice::getVariantId,
-                        StockMovementRepository.LastPurchasePrice::getPrice
+                        lp -> ((Number) lp.getVariantId()).longValue(),
+                        lp -> lp.getPrice() != null ? lp.getPrice() : BigDecimal.ZERO,
+                        (v1, v2) -> v1
                 ));
 
         Map<Long, PurchaseOrderItemRepository.LastSupplierInfo> supplierInfoMap = purchaseOrderItemRepository.findLastSuppliersByVariantIds(variantIds)
@@ -290,5 +291,16 @@ public class StockService {
         return dto;
     }
 
+    public BigDecimal getLatestPurchaseCost(Long itemVariantId) {
+        List<StockMovementRepository.LastPurchasePrice> prices = stockMovementRepository
+                .findLastPurchasePricesByVariantIds(Collections.singletonList(itemVariantId));
+
+        if (prices.isEmpty() || prices.get(0).getPrice() == null) {
+            // Fallback to variant's default price or ZERO if no purchase history exists
+            return BigDecimal.ZERO;
+        }
+
+        return prices.get(0).getPrice();
+    }
     // All other methods (like addStock overloads, calculateCOGSFifo) that were dependent on StockEntry are removed.
 }

@@ -190,7 +190,7 @@ public class StockService {
         movement.setMovementType(movementType);
         movement.setQuantity(quantity);
         // Only set cost for ADD movements
-        movement.setCostPerUnit("ADD".equals(movementType) ? costPerUnit : null);
+        movement.setCostPerUnit(StockMovementType.ADD.equals(movementType) ? costPerUnit : null);
         movement.setBatch(batch);
         movement.setReason(reason);
         movement.setReference(reference);

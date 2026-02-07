@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.auth.dto;
 
 import com.desitech.vyaparsathi.auth.model.Role;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -15,4 +16,13 @@ public class RegisterRequest {
     private String pin;
     @NotNull(message = "Role is required")
     private Role role;
+
+    private String firstName;
+    private String lastName;
+
+    @Email(message = "Please provide a valid email address")
+    private String email;
+
+    private Long shopId;
+
 }

@@ -1,0 +1,2 @@
+ALTER TABLE sale_item
+ADD COLUMN discount DECIMAL(12,2) DEFAULT 0.00 AFTER igst_amt;

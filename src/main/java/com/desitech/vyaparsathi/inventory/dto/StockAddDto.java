@@ -8,5 +8,6 @@ import java.math.BigDecimal;
 public class StockAddDto {
     private Long itemVariantId;
     private BigDecimal quantity;
+    private BigDecimal costPerUnit;
     private String batch;
 }

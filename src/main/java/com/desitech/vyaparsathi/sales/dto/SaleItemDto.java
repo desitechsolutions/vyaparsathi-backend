@@ -21,6 +21,7 @@ public class SaleItemDto {
     private BigDecimal qty;
     @NotNull(message = "Unit price cannot be null")
     private BigDecimal unitPrice;
+    private BigDecimal costPerUnit;
     private BigDecimal discount = BigDecimal.ZERO;
     private int gstRate;
     private BigDecimal taxableValue;

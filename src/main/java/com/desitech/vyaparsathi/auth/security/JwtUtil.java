@@ -1,5 +1,7 @@
 package com.desitech.vyaparsathi.auth.security;
 
+import com.desitech.vyaparsathi.auth.entity.User;
+import com.desitech.vyaparsathi.sales.dto.InvoiceTokenData;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;
@@ -8,12 +10,15 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
-import java.util.logging.Logger;
 import java.util.Base64;
+import java.util.logging.Logger;
 
 @Component
 public class JwtUtil {
+
     private static final Logger logger = Logger.getLogger(JwtUtil.class.getName());
+    @Value("${jwt.invoice.expiration:1800000}") // 30 minutes default
+    private long invoiceExpirationMs;
 
     @Value("${jwt.secret}")
     private String secret;
@@ -26,24 +31,34 @@ public class JwtUtil {
 
     private SecretKey secretKey;
 
-    // Initialize the SecretKey after secret is injected
     @PostConstruct
     public void init() {
-        // Decode Base64 encoded secret if stored as base64
         byte[] keyBytes = Base64.getDecoder().decode(secret);
-        logger.info("JWT secret key length (bytes): " + keyBytes.length);
         this.secretKey = Keys.hmacShaKeyFor(keyBytes);
+
+        if (keyBytes.length < 32) {
+            throw new IllegalArgumentException("JWT secret key is too weak! Must be at least 256 bits.");
+        }
     }
-    public String generateAccessToken(String username, String role) {
-        return Jwts.builder()
-                .setSubject(username)
-                .claim("role", role)
+
+    // --- ACCESS TOKEN GENERATION ---
+    public String generateAccessToken(User user, Long shopId) {
+        JwtBuilder builder = Jwts.builder()
+                .setSubject(user.getUsername())
+                .claim("role", user.getRole().name())
+                .claim("firstName", user.getFirstName())
+                .claim("lastName", user.getLastName())
                 .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
-                .signWith(secretKey, SignatureAlgorithm.HS512)
-                .compact();
+                .setExpiration(new Date(System.currentTimeMillis() + jwtExpirationMs));
+
+        if (shopId != null) {
+            builder.claim("shopId", shopId);
+        }
+
+        return builder.signWith(secretKey, SignatureAlgorithm.HS512).compact();
     }
-    // Generate Refresh Token
+
+    // --- REFRESH TOKEN GENERATION ---
     public String generateRefreshToken(String username) {
         return Jwts.builder()
                 .setSubject(username)
@@ -52,30 +67,83 @@ public class JwtUtil {
                 .signWith(secretKey, SignatureAlgorithm.HS512)
                 .compact();
     }
+
+    // --- EXTRACTION METHODS ---
     public String extractUsername(String token) {
-        return Jwts.parserBuilder()
-                .setSigningKey(secretKey)
-                .build()
-                .parseClaimsJws(token)
-                .getBody()
-                .getSubject();
+        return parseClaims(token).getSubject();
     }
 
+    public Long extractShopId(String token) {
+        return parseClaims(token).get("shopId", Long.class);
+    }
+
+    public String extractRole(String token) {
+        return parseClaims(token).get("role", String.class);
+    }
+
+    // --- VALIDATION ---
     public boolean validateToken(String token) {
         try {
-            Jwts.parserBuilder().setSigningKey(secretKey).build().parseClaimsJws(token);
+            parseClaims(token);
             return true;
-        } catch (SignatureException e) {
-            logger.warning("Invalid JWT signature: " + e.getMessage());
-        } catch (MalformedJwtException e) {
-            logger.warning("Invalid JWT token: " + e.getMessage());
-        } catch (ExpiredJwtException e) {
-            logger.warning("JWT token is expired: " + e.getMessage());
-        } catch (UnsupportedJwtException e) {
-            logger.warning("JWT token is unsupported: " + e.getMessage());
-        } catch (IllegalArgumentException e) {
-            logger.warning("JWT claims string is empty: " + e.getMessage());
+        } catch (JwtException | IllegalArgumentException e) {
+            logger.warning("Invalid JWT: " + e.getMessage());
+            return false;
         }
-        return false;
+    }
+
+    private Claims parseClaims(String token) {
+        return Jwts.parser()
+                .verifyWith(secretKey)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+    }
+    /**
+     * Generates a short-lived JWT specifically for viewing/downloading one invoice.
+     * @param saleId the sale identifier
+     * @param invoiceNo the invoice number
+     * @return signed JWT token (valid for ~30 minutes)
+     */
+    public String generateInvoiceToken(Long saleId, String invoiceNo) {
+        return Jwts.builder()
+                .setSubject("invoice-access")  // special subject to identify
+                .claim("saleId", saleId)
+                .claim("invoiceNo", invoiceNo)
+                .claim("scope", "invoice:read")  // optional: add scope for extra security
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + invoiceExpirationMs))
+                .signWith(secretKey, SignatureAlgorithm.HS512)
+                .setIssuer("vyaparsathi-invoice-service")
+                .compact();
+    }
+
+    // New method: Validate invoice token and extract saleId/invoiceNo
+    public InvoiceTokenData validateInvoiceToken(String token) {
+        try {
+            Claims claims = parseClaims(token);
+
+            String subject = claims.getSubject();
+            if (!"invoice-access".equals(subject)) {
+                throw new JwtException("Invalid subject for invoice token");
+            }
+
+            String scope = claims.get("scope", String.class);
+            if (!"invoice:read".equals(scope)) {
+                throw new JwtException("Invalid scope for invoice token");
+            }
+
+            Long saleId = claims.get("saleId", Long.class);
+            String invoiceNo = claims.get("invoiceNo", String.class);
+
+            if (saleId == null && (invoiceNo == null || invoiceNo.isBlank())) {
+                throw new JwtException("Missing saleId or invoiceNo in token");
+            }
+
+            return new InvoiceTokenData(saleId, invoiceNo);
+        } catch (JwtException | IllegalArgumentException e) {
+            logger.warning("Invalid invoice JWT: " + e.getMessage());
+            throw e;
+        }
     }
 }

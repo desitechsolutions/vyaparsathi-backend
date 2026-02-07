@@ -1,14 +1,31 @@
 package com.desitech.vyaparsathi.payment.service;
 
-import com.desitech.vyaparsathi.payment.entity.Payment;
+import com.desitech.vyaparsathi.payment.dto.BulkPaymentRequest;
+import com.desitech.vyaparsathi.payment.dto.PaymentDto;
+import com.desitech.vyaparsathi.payment.dto.PaymentReceivedRequest;
+import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 public interface PaymentService {
-    Payment savePayment(Payment payment);
-    List<Payment> getPaymentsBySaleId(Long saleId);
-    BigDecimal calculateDueAmount(Long saleId, BigDecimal totalAmount);
+    PaymentDto createPayment(PaymentDto dto);
+    Page<PaymentDto> getPaymentsBySource(PaymentSourceType sourceType, Long sourceId, Pageable pageable);
+    Page<PaymentDto> getPaymentsBySupplier(Long supplierId, Pageable pageable);
+    Page<PaymentDto> getPaymentsByCustomer(Long customerId, Pageable pageable);
+    Optional<PaymentDto> getPayment(Long id);
 
-    Payment recordDuePayment(Long saleId, BigDecimal amount, String method);
+    BigDecimal calculateDueAmount(Long sourceId, PaymentSourceType sourceType, BigDecimal totalAmount);
+    PaymentDto recordDuePayment(PaymentReceivedRequest paymentReceivedRequest);
+
+    Map<Long, BigDecimal> getTotalPaidBySaleIds(Set<Long> saleIds);
+
+    void bulkPayment(BulkPaymentRequest request);
+    BigDecimal getCustomerAdvanceBalance(Long customerId);
+    BigDecimal applyAdvanceToSale(Long customerId, Long saleId, BigDecimal saleTotal);
 }

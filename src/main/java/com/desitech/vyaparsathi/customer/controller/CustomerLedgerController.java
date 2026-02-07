@@ -1,4 +1,8 @@
+
 package com.desitech.vyaparsathi.customer.controller;
+import com.desitech.vyaparsathi.common.exception.ApplicationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.desitech.vyaparsathi.customer.dto.CustomerLedgerDto;
 import com.desitech.vyaparsathi.customer.service.CustomerLedgerService;
@@ -15,6 +19,8 @@ import java.util.List;
 @RequestMapping("/api/customers/{customerId}/ledger")
 @PreAuthorize("hasAnyRole('OWNER', 'STAFF')")
 public class CustomerLedgerController {
+
+    private static final Logger logger = LoggerFactory.getLogger(CustomerLedgerController.class);
     @Autowired
     private CustomerLedgerService ledgerService;
 
@@ -22,14 +28,28 @@ public class CustomerLedgerController {
     public ResponseEntity<CustomerLedgerDto> addLedgerEntry(
             @PathVariable Long customerId,
             @Valid @RequestBody CustomerLedgerDto dto) {
-        return ResponseEntity.ok(ledgerService.addEntry(customerId, dto));
+        try {
+            CustomerLedgerDto result = ledgerService.addEntry(customerId, dto);
+            logger.info("Added ledger entry for customerId={}", customerId);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error adding ledger entry for customerId={}: {}", customerId, e.getMessage(), e);
+            throw new ApplicationException("Failed to add ledger entry", e);
+        }
     }
 
     @PutMapping("/{ledgerId}")
     public ResponseEntity<CustomerLedgerDto> updateLedgerEntry(
             @PathVariable Long ledgerId,
             @Valid @RequestBody CustomerLedgerDto dto) {
-        return ResponseEntity.ok(ledgerService.updateEntry(ledgerId, dto));
+        try {
+            CustomerLedgerDto result = ledgerService.updateEntry(ledgerId, dto);
+            logger.info("Updated ledger entry id={}", ledgerId);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error updating ledger entry id={}: {}", ledgerId, e.getMessage(), e);
+            throw new ApplicationException("Failed to update ledger entry", e);
+        }
     }
 
     @GetMapping
@@ -37,12 +57,25 @@ public class CustomerLedgerController {
             @PathVariable Long customerId,
             @RequestParam(required = false) LocalDateTime startDate,
             @RequestParam(required = false) LocalDateTime endDate) {
-        return ResponseEntity.ok(ledgerService.getLedger(customerId, startDate, endDate));
+        try {
+            List<CustomerLedgerDto> result = ledgerService.getLedger(customerId, startDate, endDate);
+            logger.info("Fetched ledger for customerId={}", customerId);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching ledger for customerId={}: {}", customerId, e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch ledger", e);
+        }
     }
 
     @DeleteMapping("/{ledgerId}")
     public ResponseEntity<Void> deleteLedgerEntry(@PathVariable Long ledgerId) {
-        ledgerService.deleteEntry(ledgerId);
-        return ResponseEntity.noContent().build();
+        try {
+            ledgerService.deleteEntry(ledgerId);
+            logger.info("Deleted ledger entry id={}", ledgerId);
+            return ResponseEntity.noContent().build();
+        } catch (Exception e) {
+            logger.error("Error deleting ledger entry id={}: {}", ledgerId, e.getMessage(), e);
+            throw new ApplicationException("Failed to delete ledger entry", e);
+        }
     }
 }

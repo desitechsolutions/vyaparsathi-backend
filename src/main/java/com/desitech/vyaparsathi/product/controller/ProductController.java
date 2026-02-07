@@ -1,4 +1,8 @@
+
 package com.desitech.vyaparsathi.product.controller;
+import com.desitech.vyaparsathi.common.exception.ApplicationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.desitech.vyaparsathi.product.dto.ProductDto;
 import com.desitech.vyaparsathi.product.service.ProductService;
@@ -12,12 +16,20 @@ import java.util.List;
 @RequestMapping("/api/products")
 public class ProductController {
 
+    private static final Logger logger = LoggerFactory.getLogger(ProductController.class);
+
     @Autowired
     private ProductService productService;
 
     @GetMapping
     public ResponseEntity<List<ProductDto>> getAllProducts() {
-        List<ProductDto> products = productService.getAllProducts();
-        return ResponseEntity.ok(products);
+        try {
+            List<ProductDto> products = productService.getAllProducts();
+            logger.info("Fetched all products");
+            return ResponseEntity.ok(products);
+        } catch (Exception e) {
+            logger.error("Error fetching all products: {}", e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch products", e);
+        }
     }
 }

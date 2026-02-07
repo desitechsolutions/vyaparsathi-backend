@@ -1,21 +1,24 @@
 package com.desitech.vyaparsathi.customer.entity;
 
-import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import jakarta.persistence.*;
 import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
+import org.hibernate.annotations.Filter;
+import org.hibernate.annotations.FilterDef;
+import org.hibernate.annotations.ParamDef;
+
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "customer")
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
-public class Customer {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
+public class Customer extends ShopAwareEntity {
     @Column(nullable = false)
     private String name;
 
@@ -35,25 +38,4 @@ public class Customer {
 
     @Column(name = "credit_balance", nullable = false)
     private BigDecimal creditBalance = BigDecimal.ZERO;
-
-    @Convert(converter = LocalDateTimeAttributeConverter.class)
-    @Column(name = "created_at", nullable = false)
-    private LocalDateTime createdAt;
-
-    @Convert(converter = LocalDateTimeAttributeConverter.class)
-    @Column(name = "updated_at", nullable = false)
-    private LocalDateTime updatedAt;
-
-    @PrePersist
-    @Convert(converter = LocalDateTimeAttributeConverter.class)
-    public void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = createdAt;
-    }
-
-    @PreUpdate
-    @Convert(converter = LocalDateTimeAttributeConverter.class)
-    public void onUpdate() {
-        updatedAt = LocalDateTime.now();
-    }
 }

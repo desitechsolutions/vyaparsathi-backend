@@ -34,4 +34,9 @@ public class DailyReportDto {
     
     @Schema(description = "Outstanding receivables = Total sales minus total paid", example = "800.00")
     private BigDecimal outstandingReceivable;
+
+    private BigDecimal salesTrendPercent;      // % change vs yesterday
+    private BigDecimal profitTrendPercent;     // % change vs yesterday
+    private BigDecimal yesterdaySales;         // optional - for transparency
+    private BigDecimal yesterdayNetProfit;     // optional
 }

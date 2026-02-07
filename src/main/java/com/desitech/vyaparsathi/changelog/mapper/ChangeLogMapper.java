@@ -10,5 +10,5 @@ import java.util.List;
 public interface ChangeLogMapper {
     ChangeLog toEntity(ChangeLogDto dto);
     ChangeLogDto toDto(ChangeLog entity);
-    List<ChangeLogDto> toDtoList(List<ChangeLog> entities);
+    java.util.List<ChangeLogDto> toDtoList(java.util.List<ChangeLog> entities);
 }

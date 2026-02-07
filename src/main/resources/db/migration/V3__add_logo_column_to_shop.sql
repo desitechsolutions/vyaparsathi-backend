@@ -1,0 +1,2 @@
+ALTER TABLE shop
+ADD COLUMN logo_path varchar(255) DEFAULT NULL

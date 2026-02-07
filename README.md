@@ -11,15 +11,15 @@ This is the backend for **VyaparSathi**, a powerful, offline-first shop manageme
 
 *   **Secure Authentication**: Implements a robust JSON Web Token (**JWT**) based authentication system to secure API endpoints.
 
-*   **Comprehensive Inventory Management**: Tracks items, their variants, and stock levels, including purchase orders and supplier information.
+*   **Comprehensive Inventory Management**: Advanced inventory tracking with cost-per-unit, FIFO-based COGS calculation, stock movement history, low stock alerts, and manual stock adjustments with full audit trails.
 
-*   **Sales and Billing**: Facilitates sales transactions, calculates GST, and generates professional PDF invoices using **OpenPDF**.
+*   **Sales and Billing**: Enhanced sales system with automatic COGS calculation, sales returns, complete sale cancellations, and profit reporting capabilities. Generates professional PDF invoices using **OpenPDF**.
 
-*   **Customer & Supplier Management**: Manages detailed information for both customers and suppliers.
+*   **Customer & Supplier Management**: Manages detailed information for both customers and suppliers with complete ledger transaction tracking.
 
-*   **Financial Tracking**: Records and manages business expenses and customer credit balances through a dedicated ledger. **NEW**: Enhanced with proper separation between operational expenses and inventory purchases, plus COGS calculation for accurate profit reporting.
+*   **Financial Tracking**: Records and manages business expenses with strict validation to separate operational costs from inventory purchases. Features comprehensive Cost of Goods Sold (COGS) tracking using FIFO method for accurate profit analysis.
 
-*   **Advanced Financial Reports**: Provides comprehensive reports including sales summaries, daily reports, and GST breakdowns. **NEW**: Features corrected net revenue calculation, COGS tracking, and outstanding receivables with clear distinction between inventory costs and operational expenses.
+*   **Advanced Financial Reports**: Comprehensive reporting including sales summaries, profit analysis with gross margins, COGS tracking, daily reports, and GST breakdowns with proper distinction between inventory costs and operational expenses.
 
 *   **API Documentation**: Provides clear and interactive API documentation with **Swagger UI**.
 
@@ -88,15 +88,15 @@ The project is organized into logical modules, each handling a specific business
 
 *   catalog: Deals with item and product variant definitions.
 
-*   inventory: Manages suppliers, purchase orders, and stock entries.
+*   inventory: **ENHANCED**: Comprehensive stock management with cost tracking, FIFO COGS calculation, stock movement history, low stock alerts, and manual adjustments with audit trails.
 
 *   customer: Manages customer information and their financial ledger.
 
-*   sales: Handles sales transactions and billing, including invoice generation.
+*   sales: **ENHANCED**: Advanced sales processing with COGS calculation, sales returns, cancellations, and profit reporting capabilities including invoice generation.
 
-*   expense: Tracks and manages operational business expenses. **IMPORTANT**: Now includes validation to prevent inventory/stock purchases from being recorded as expenses - use Purchase Orders instead.
+*   expense: Tracks and manages operational business expenses. **IMPORTANT**: Includes validation to prevent inventory/stock purchases from being recorded as expenses - use Purchase Orders instead.
 
-*   reports: **NEW**: Enhanced financial reporting with COGS calculation, corrected net profit calculations, and clear distinction between operational expenses and inventory costs.
+*   reports: **ENHANCED**: Advanced financial reporting with COGS calculation, profit margins, corrected net profit calculations, and clear distinction between operational expenses and inventory costs.
 
 *   changelog: Provides an audit trail for all data modifications.
 
@@ -114,6 +114,39 @@ The project is organized into logical modules, each handling a specific business
 
 *   **Flyway**: Migration scripts are located in src/main/resources/db/migration and are executed automatically on application startup.
 
+### Enhanced Inventory & Sales Features
+
+This version introduces comprehensive improvements to inventory and sales management with advanced cost tracking and business intelligence capabilities:
+
+#### 🔄 Advanced Stock Management
+
+*   **Cost-Per-Unit Tracking**: Every stock entry now tracks the actual cost, enabling accurate COGS calculation
+*   **FIFO COGS Calculation**: Uses First-In-First-Out method to calculate cost of goods sold for precise profit analysis
+*   **Complete Stock Movement History**: Comprehensive audit trail for all stock operations (additions, deductions, adjustments)
+*   **Low Stock Alerts**: Configurable threshold-based alerts with severity levels (LOW/CRITICAL)
+*   **Manual Stock Adjustments**: Controlled stock adjustments with mandatory reason tracking for audit compliance
+
+#### 💰 Enhanced Sales Processing
+
+*   **Automatic COGS Calculation**: Real-time cost of goods sold calculation using FIFO methodology
+*   **Sales Returns**: Partial and complete return processing with automatic stock restoration and payment reversal
+*   **Sale Cancellations**: Complete transaction reversal including stock, payments, and ledger entries
+*   **Profit Analysis**: Real-time gross profit and margin calculations with detailed reporting
+
+#### 📊 Business Intelligence & Reporting
+
+*   **Profit Reporting**: Comprehensive profit analysis with revenue, COGS, and margin percentages
+*   **Stock Movement Reports**: Detailed movement history for inventory auditing and trend analysis
+*   **Alert System**: Proactive low stock notifications to prevent stockouts
+*   **Complete Audit Trail**: Full transaction history for compliance and business analysis
+
+#### 🔒 Enhanced Security & Compliance
+
+*   **Audit Logging**: All operations logged through changelog system for complete traceability
+*   **Reason Tracking**: Mandatory reason codes for all manual adjustments and cancellations
+*   **Transaction Integrity**: Complete rollback capabilities for cancelled operations
+*   **Role-Based Access**: Existing security model extended to all new endpoints
+
 ### Financial Reporting Improvements
 
 This version includes significant improvements to financial reporting and business logic:
@@ -122,13 +155,15 @@ This version includes significant improvements to financial reporting and busine
 
 *   **Expense Validation**: The system now prevents inventory/stock purchases from being recorded as business expenses. Only operational expenses (rent, utilities, salary, marketing, etc.) can be recorded in the expense module.
 
-*   **COGS Calculation**: Implemented Cost of Goods Sold (COGS) calculation using average cost method based on actual purchase costs from purchase orders.
+*   **COGS Calculation**: Implemented Cost of Goods Sold (COGS) calculation using FIFO method based on actual purchase costs from purchase orders, providing accurate profit analysis.
 
 *   **Corrected Net Profit**: Net profit is now calculated as: `Total Sales - COGS - Operational Expenses` (excludes inventory purchases).
 
 *   **Outstanding Receivables**: Added proper calculation of outstanding receivables as `Total Sales - Total Paid`.
 
-*   **Enhanced Reports**: All financial reports now include COGS, corrected net profit calculations, and clear field descriptions in API documentation.
+*   **Enhanced Reports**: All financial reports now include COGS, corrected net profit calculations, profit margins, and clear field descriptions in API documentation.
+
+*   **Stock Movement Tracking**: Complete audit trail for all inventory operations with timestamps, reasons, and references.
 
 #### Important Notes
 
@@ -138,6 +173,26 @@ This version includes significant improvements to financial reporting and busine
 
 #### API Changes
 
-*   Expense creation/update endpoints now validate expense types
-*   Report endpoints return additional fields: `totalCOGS`, corrected `netProfit`, and `outstandingReceivable`
-*   Enhanced Swagger documentation explains the distinction between different financial metrics
+*   **Enhanced Expense Management**: Expense creation/update endpoints now validate expense types
+*   **New Stock Management Endpoints**: 
+  *   `GET /api/stock/movements/{itemVariantId}` - Stock movement history
+  *   `GET /api/stock/movements` - Movement reports by date range
+  *   `GET /api/stock/low-stock-alerts` - Low stock alerts
+  *   `POST /api/stock/adjust` - Manual stock adjustments
+*   **New Sales Management Endpoints**:
+  *   `POST /api/sales/{id}/return` - Process sales returns
+  *   `POST /api/sales/{id}/cancel` - Cancel entire sales
+  *   `GET /api/sales/profit-report` - Profit analysis reporting
+*   **Enhanced Report Endpoints**: Return additional fields: `totalCOGS`, corrected `netProfit`, `grossMargin`, and `outstandingReceivable`
+*   **Comprehensive API Documentation**: Enhanced Swagger documentation explains all new features and the distinction between different financial metrics
+
+### COGS Calculation Methodology
+
+The system uses **FIFO (First-In-First-Out)** method for Cost of Goods Sold calculation:
+
+1. **Stock Entry**: Each stock addition records the actual cost per unit from purchase orders
+2. **Sale Processing**: When items are sold, the system calculates COGS by consuming stock entries in chronological order (oldest first)
+3. **Profit Calculation**: Gross Profit = Sales Revenue - COGS, with margin percentages automatically calculated
+4. **Audit Trail**: Complete stock movement history maintains accurate cost tracking for compliance and analysis
+
+This methodology ensures accurate profit reporting and provides valuable business insights for pricing and inventory management decisions.

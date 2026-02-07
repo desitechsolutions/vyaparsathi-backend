@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.expense.service;
 
 import com.desitech.vyaparsathi.changelog.service.ChangeLogService;
+import com.desitech.vyaparsathi.changelog.model.ChangeLogOperation;
 import com.desitech.vyaparsathi.expense.dto.ExpenseDto;
 import com.desitech.vyaparsathi.expense.dto.UpdateExpenseDto;
 import com.desitech.vyaparsathi.expense.entity.Expense;
@@ -34,7 +35,7 @@ public class ExpenseService {
         
         Expense expense = mapper.toEntity(dto);
         repository.save(expense);
-        changeLogService.append("EXPENSE", expense.getId(), "CREATE", expense, "LOCAL_DEVICE");
+    changeLogService.append("EXPENSE", expense.getId(), ChangeLogOperation.CREATE, expense, "LOCAL_DEVICE");
         return mapper.toDto(expense);
     }
 
@@ -60,7 +61,7 @@ public class ExpenseService {
         
         mapper.updateEntityFromDto(dto, expense);
         repository.save(expense);
-        changeLogService.append("EXPENSE", expense.getId(), "UPDATE", expense, "LOCAL_DEVICE");
+    changeLogService.append("EXPENSE", expense.getId(), ChangeLogOperation.UPDATE, expense, "LOCAL_DEVICE");
         return mapper.toDto(expense);
     }
 
@@ -74,6 +75,6 @@ public class ExpenseService {
         }
         expense.setDeleted(true);
         repository.save(expense);
-        changeLogService.append("EXPENSE", id, "DELETE", null, "LOCAL_DEVICE");
+    changeLogService.append("EXPENSE", id, ChangeLogOperation.DELETE, null, "LOCAL_DEVICE");
     }
 }

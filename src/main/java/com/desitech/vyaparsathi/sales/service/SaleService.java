@@ -1,29 +1,46 @@
 package com.desitech.vyaparsathi.sales.service;
 
+import com.desitech.vyaparsathi.audit.annotation.LogAudit;
+import com.desitech.vyaparsathi.audit.helper.AuditHelper;
+import com.desitech.vyaparsathi.auth.security.JwtUtil;
+import com.desitech.vyaparsathi.changelog.service.ChangeLogService;
+import com.desitech.vyaparsathi.common.configs.TenantContext;
+import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
+import com.desitech.vyaparsathi.common.exception.EntityNotFoundAppException;
+import com.desitech.vyaparsathi.common.exception.InsufficientStockException;
 import com.desitech.vyaparsathi.customer.dto.CustomerLedgerDto;
+import com.desitech.vyaparsathi.customer.entity.Customer;
 import com.desitech.vyaparsathi.customer.entity.CustomerLedgerType;
+import com.desitech.vyaparsathi.customer.repository.CustomerRepository;
 import com.desitech.vyaparsathi.customer.service.CustomerLedgerService;
-import com.desitech.vyaparsathi.payment.dto.PaymentDTO;
-import com.desitech.vyaparsathi.payment.entity.Payment;
-import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
+import com.desitech.vyaparsathi.delivery.dto.DeliveryDTO;
+import com.desitech.vyaparsathi.delivery.mapper.DeliveryMapper;
+import com.desitech.vyaparsathi.delivery.repository.DeliveryRepository;
+import com.desitech.vyaparsathi.delivery.service.DeliveryService;
+import com.desitech.vyaparsathi.inventory.dto.StockAdjustmentDto;
+import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
+import com.desitech.vyaparsathi.inventory.repository.ItemVariantRepository;
+import com.desitech.vyaparsathi.inventory.service.StockService;
+import com.desitech.vyaparsathi.payment.dto.BulkPaymentRequest;
+import com.desitech.vyaparsathi.payment.dto.PaymentDto;
+import com.desitech.vyaparsathi.payment.enums.PaymentMethod;
+import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
 import com.desitech.vyaparsathi.payment.service.PaymentService;
-import com.desitech.vyaparsathi.sales.GSTType;
+import com.desitech.vyaparsathi.sales.enums.GSTType;
 import com.desitech.vyaparsathi.sales.dto.SaleDto;
 import com.desitech.vyaparsathi.sales.dto.SaleDueDto;
 import com.desitech.vyaparsathi.sales.dto.SaleItemDto;
+import com.desitech.vyaparsathi.sales.dto.SaleReturnDto;
 import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.entity.SaleItem;
+import com.desitech.vyaparsathi.sales.enums.SaleStatus;
 import com.desitech.vyaparsathi.sales.mapper.SaleMapper;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
-import com.desitech.vyaparsathi.changelog.service.ChangeLogService;
-import com.desitech.vyaparsathi.customer.entity.Customer;
-import com.desitech.vyaparsathi.customer.repository.CustomerRepository;
-import com.desitech.vyaparsathi.inventory.service.StockService;
+import com.desitech.vyaparsathi.sales.service.invoice.InvoiceService;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
-import com.desitech.vyaparsathi.common.exception.InsufficientStockException;
-import com.desitech.vyaparsathi.catalog.entity.ItemVariant;
-import com.desitech.vyaparsathi.catalog.repository.ItemVariantRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -35,14 +52,17 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
+
+import static java.math.BigDecimal.ZERO;
 
 @Service
 public class SaleService {
+
+    private static final Logger logger = LoggerFactory.getLogger(SaleService.class);
 
     @Autowired
     private SaleRepository saleRepository;
@@ -60,50 +80,69 @@ public class SaleService {
     private SaleMapper mapper;
     @Autowired
     private ItemVariantRepository itemVariantRepository;
-
     @Autowired
     private PaymentService paymentService;
     @Autowired
     private CustomerLedgerService ledgerService;
+    @Autowired
+    private DeliveryService deliveryService;
+    @Autowired
+    private DeliveryRepository deliveryRepository;
+    @Autowired
+    private JwtUtil jwtUtil;
+    @Autowired
+    private DeliveryMapper deliveryMapper;
+
+    @Autowired
+    private AuditHelper auditHelper;
 
     @Transactional
-    public byte[] createSale(SaleDto dto) {
-        Shop shop = shopRepository.findById(1L).orElseThrow(() -> new RuntimeException("Shop not found"));
-        Optional<Customer> customerOpt = Optional.ofNullable(dto.getCustomerId()).flatMap(customerRepository::findById);
+    @LogAudit(action = "CREATE_SALE", entity = "SALE")
+    public SaleDto createSale(SaleDto dto) {
+        // 1. Fetch Context (Shop and Customer)
+        Shop shop = shopRepository.findById(TenantContext.getCurrentShopId())
+                .orElseThrow(() -> new EntityNotFoundAppException("Shop", TenantContext.getCurrentShopId()));
+
+        Optional<Customer> customerOpt = Optional.ofNullable(dto.getCustomer())
+                .map(c -> customerRepository.findById(c.getId())
+                        .orElseThrow(() -> new EntityNotFoundAppException("Customer", c.getId())));
         Customer customer = customerOpt.orElse(null);
 
+        // 2. Process Sale Items and Calculate Taxes
         List<SaleItem> saleItems = new ArrayList<>();
         BigDecimal totalTaxableValue = BigDecimal.ZERO;
         BigDecimal totalGSTAmount = BigDecimal.ZERO;
 
         for (SaleItemDto itemDto : dto.getItems()) {
             if (!stockService.isStockAvailable(itemDto.getItemVariantId(), itemDto.getQty())) {
+                logger.warn("Insufficient stock for item: {}", itemDto.getItemName());
                 throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
             }
 
             ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
-                    .orElseThrow(() -> new RuntimeException("Item Variant not found for ID: " + itemDto.getItemVariantId()));
+                    .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
 
             SaleItem saleItem = new SaleItem();
             saleItem.setItemVariant(itemVariant);
             saleItem.setQty(itemDto.getQty());
             saleItem.setUnitPrice(itemDto.getUnitPrice());
 
+            // Calculate taxable value: (Qty * Price) - Discount
+            BigDecimal itemTaxableValue = itemDto.getQty()
+                    .multiply(itemDto.getUnitPrice())
+                    .subtract(itemDto.getDiscount() != null ? itemDto.getDiscount() : BigDecimal.ZERO);
+
+            saleItem.setTaxableValue(itemTaxableValue);
+            totalTaxableValue = totalTaxableValue.add(itemTaxableValue);
+
             if (Boolean.TRUE.equals(dto.getIsGstRequired()) && itemVariant.getGstRate() != null) {
                 GSTType gstType = GSTType.fromRate(itemVariant.getGstRate());
+                BigDecimal rate = BigDecimal.valueOf(gstType.getRate());
+                BigDecimal gstAmount = itemTaxableValue.multiply(rate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
 
-                BigDecimal taxableValue = itemDto.getQty()
-                        .multiply(itemDto.getUnitPrice())
-                        .subtract(itemDto.getDiscount() != null ? itemDto.getDiscount() : BigDecimal.ZERO);
-
-                BigDecimal gstAmount = taxableValue
-                        .multiply(BigDecimal.valueOf(gstType.getRate()))
-                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-
-                saleItem.setTaxableValue(taxableValue);
                 saleItem.setGstType(gstType);
+                boolean sameState = customer != null && shop.getState().equalsIgnoreCase(customer.getState());
 
-                boolean sameState = customer != null && shop.getState().equals(customer.getState());
                 if (sameState) {
                     BigDecimal half = gstAmount.divide(BigDecimal.valueOf(2), RoundingMode.HALF_UP);
                     saleItem.setCgstAmt(half);
@@ -114,92 +153,251 @@ public class SaleService {
                     saleItem.setCgstAmt(BigDecimal.ZERO);
                     saleItem.setSgstAmt(BigDecimal.ZERO);
                 }
-
-                totalTaxableValue = totalTaxableValue.add(taxableValue);
                 totalGSTAmount = totalGSTAmount.add(gstAmount);
             } else {
-                saleItem.setTaxableValue(BigDecimal.ZERO);
                 saleItem.setGstType(GSTType.GST_0);
                 saleItem.setCgstAmt(BigDecimal.ZERO);
                 saleItem.setSgstAmt(BigDecimal.ZERO);
                 saleItem.setIgstAmt(BigDecimal.ZERO);
             }
-
             saleItems.add(saleItem);
-            stockService.deductStock(itemDto.getItemVariantId(), itemDto.getQty());
         }
 
-        BigDecimal totalAmountBeforeRoundOff;
-        if (Boolean.TRUE.equals(dto.getIsGstRequired())) {
-            totalAmountBeforeRoundOff = totalTaxableValue.add(totalGSTAmount);
-        } else {
-            totalAmountBeforeRoundOff = dto.getItems().stream()
-                    .map(item -> item.getQty().multiply(item.getUnitPrice()).subtract(item.getDiscount() != null ? item.getDiscount() : BigDecimal.ZERO))
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-        }
-        BigDecimal roundOff = totalAmountBeforeRoundOff.subtract(totalAmountBeforeRoundOff.setScale(0, RoundingMode.HALF_UP));
-        BigDecimal finalTotalAmount = totalAmountBeforeRoundOff.setScale(0, RoundingMode.HALF_UP);
-
+        // 3. Generate Invoice Number
         String seq = String.format("%03d", saleRepository.count() + 1);
         String invoiceNo = shop.getCode() + "-" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMM")) + "-" + seq;
 
+        // 4. Calculate Final Totals and Rounding
+        BigDecimal totalBeforeRoundOff = totalTaxableValue.add(totalGSTAmount);
+        BigDecimal finalTotalAmount = totalBeforeRoundOff.setScale(0, RoundingMode.HALF_UP);
+        BigDecimal roundOff = finalTotalAmount.subtract(totalBeforeRoundOff);
+
+        // 5. Deduct Stock
+        for (SaleItem item : saleItems) {
+            stockService.deductStock(item.getItemVariant().getId(), item.getQty(), "Sale Transaction", "Sale #" + invoiceNo);
+        }
+
+        // 6. Persist Sale Entity
         Sale sale = new Sale();
         sale.setInvoiceNo(invoiceNo);
         sale.setShop(shop);
         sale.setCustomer(customer);
         sale.setTotalAmount(finalTotalAmount);
-        sale.setRoundOff(roundOff.negate());
+        sale.setRoundOff(roundOff);
         sale.setSyncedFlag(false);
         sale.setSaleItems(saleItems);
         saleItems.forEach(si -> si.setSale(sale));
+        saleRepository.save(sale);
 
-        saleRepository.save(sale); // Save sale first to ensure ID is set
+        // 7. Handle Delivery
+        if (dto.getDelivery() != null) {
+            DeliveryDTO deliveryDTO = dto.getDelivery();
+            deliveryDTO.setSaleId(sale.getId());
+            deliveryDTO.setInvoiceNumber(invoiceNo);
+            if (customer != null) deliveryDTO.setCustomerName(customer.getName());
+            deliveryService.createDelivery(deliveryDTO);
+        }
 
-        // Record the total sale amount as credit (initial debt)
+        // 8. Ledger Entry & Advance Liquidation
         if (customer != null) {
+            // A. Record the initial Debt (CREDIT increases Customer's payable balance)
             CustomerLedgerDto saleLedgerDto = new CustomerLedgerDto();
             saleLedgerDto.setAmount(finalTotalAmount);
-            saleLedgerDto.setType(CustomerLedgerType.CREDIT); // Sale increases debt
+            saleLedgerDto.setType(CustomerLedgerType.CREDIT);
             saleLedgerDto.setDescription("Sale #" + invoiceNo);
             ledgerService.addEntry(customer.getId(), saleLedgerDto);
+
+            // B. Apply existing Advance Pool (Drains available credits to pay this sale)
+            BigDecimal advanceApplied = paymentService.applyAdvanceToSale(customer.getId(), sale.getId(), finalTotalAmount);
+
         }
 
-        if (dto.getPaymentDetails() != null) {
-            BigDecimal totalPaid = BigDecimal.ZERO;
-            for (PaymentDTO paymentDTO : dto.getPaymentDetails()) {
-                if (paymentDTO.getAmountPaid() == null) {
-                    throw new IllegalArgumentException("Payment amount cannot be null");
-                }
-                Payment payment = new Payment();
-                payment.setSale(sale);
-                payment.setMethod(paymentDTO.getMethod());
-                payment.setAmountPaid(paymentDTO.getAmountPaid());
-                payment.setPaymentDate(LocalDateTime.now());
-                payment = paymentService.savePayment(payment); // Let PaymentService handle status
-                totalPaid = totalPaid.add(paymentDTO.getAmountPaid());
+        // 9. Process Fresh Payments (e.g., Cash paid at counter after advance was applied)
+        if (dto.getPaymentDetails() != null && !dto.getPaymentDetails().isEmpty()) {
+            // Calculate remaining gap after advance application
+            BigDecimal remainingDue = paymentService.calculateDueAmount(sale.getId(), PaymentSourceType.SALE, finalTotalAmount);
 
-                if (customer != null) {
-                    CustomerLedgerDto ledgerDto = new CustomerLedgerDto();
-                    ledgerDto.setAmount(paymentDTO.getAmountPaid());
-                    ledgerDto.setType(CustomerLedgerType.DEBIT); // Payment reduces debt
-                    ledgerDto.setDescription("Payment for Sale #" + invoiceNo + " (" + paymentDTO.getMethod() + ")");
-                    ledgerService.addEntry(customer.getId(), ledgerDto);
-                }
+            BigDecimal totalPaidInput = dto.getPaymentDetails().stream()
+                    .map(p -> p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // Validation: Ensure fresh payment doesn't exceed the REMAINING balance
+            if (totalPaidInput.compareTo(remainingDue) > 0) {
+                throw new BusinessValidationException("Payment amount exceeds the remaining due after advance: ₹" + remainingDue);
             }
 
-            BigDecimal unpaidAmount = finalTotalAmount.subtract(totalPaid);
-            if (unpaidAmount.compareTo(BigDecimal.ZERO) < 0) {
-                throw new IllegalArgumentException("Total paid cannot exceed sale amount");
+            for (PaymentDto paymentDTO : dto.getPaymentDetails()) {
+                if (remainingDue.compareTo(BigDecimal.ZERO) <= 0) break;
+
+                paymentDTO.setSourceId(sale.getId());
+                paymentDTO.setSourceType(PaymentSourceType.SALE);
+                paymentDTO.setCustomerId(customer != null ? customer.getId() : null);
+                paymentDTO.setPaymentDate(LocalDateTime.now());
+
+                // Creates Payment record + Ledger DEBIT automatically
+                paymentService.createPayment(paymentDTO);
+
+                remainingDue = remainingDue.subtract(paymentDTO.getAmount());
             }
         }
 
-        changeLogService.append("SALE", sale.getId(), "CREATE", sale, "LOCAL_DEVICE");
+        // 10. ChangeLog, JWT Token Generation and Response
+        changeLogService.append("SALE", sale.getId(), com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.CREATE, mapper.toDto(sale), "LOCAL_DEVICE");
 
-        return invoiceService.generatePdf(sale);
+        String signedToken = jwtUtil.generateInvoiceToken(sale.getId(), sale.getInvoiceNo());
+        SaleDto resultDto = mapper.toDto(sale);
+        resultDto.setSignedInvoiceUrl("/api/invoices/signed?token=" + signedToken);
+
+        logger.info("Sale created successfully: ID={}, Invoice={}, Applied Advance=₹{}",
+                sale.getId(), sale.getInvoiceNo(), (customer != null ? "Checked" : "N/A"));
+
+        return resultDto;
+    }
+    @Transactional
+    public void processSaleReturn(SaleReturnDto returnDto) {
+        Sale sale = saleRepository.findById(returnDto.getSaleId())
+                .orElseThrow(() -> new EntityNotFoundAppException("Sale", returnDto.getSaleId()));
+
+        BigDecimal totalReturnAmount = ZERO;
+
+        for (SaleReturnDto.SaleReturnItemDto returnItem : returnDto.getReturnItems()) {
+            SaleItem saleItem = sale.getSaleItems().stream()
+                    .filter(si -> si.getId().equals(returnItem.getSaleItemId()))
+                    .findFirst()
+                    .orElseThrow(() -> new EntityNotFoundAppException("Sale item", returnItem.getSaleItemId()));
+
+            if (returnItem.getReturnQuantity().compareTo(saleItem.getQty()) > 0) {
+                throw new BusinessValidationException("Return quantity cannot exceed original quantity");
+            }
+
+            BigDecimal itemReturnAmount = saleItem.getUnitPrice().multiply(returnItem.getReturnQuantity());
+            totalReturnAmount = totalReturnAmount.add(itemReturnAmount);
+
+            // Stock Adjustment
+            StockAdjustmentDto adjustment = new StockAdjustmentDto();
+            adjustment.setItemVariantId(saleItem.getItemVariant().getId());
+            adjustment.setAdjustmentQuantity(returnItem.getReturnQuantity());
+            adjustment.setReason("Return from Sale #" + sale.getInvoiceNo());
+            stockService.adjustStock(adjustment);
+
+            saleItem.setQty(saleItem.getQty().subtract(returnItem.getReturnQuantity()));
+        }
+
+        sale.setTotalAmount(sale.getTotalAmount().subtract(totalReturnAmount));
+        saleRepository.save(sale);
+
+        if (sale.getCustomer() != null) {
+            // 1. Record the reduction in debt in Customer Ledger
+            CustomerLedgerDto ledgerDto = new CustomerLedgerDto();
+            ledgerDto.setAmount(totalReturnAmount);
+            ledgerDto.setType(CustomerLedgerType.DEBIT);
+            ledgerDto.setDescription("Return Credit for Sale #" + sale.getInvoiceNo());
+            ledgerService.addEntry(sale.getCustomer().getId(), ledgerDto);
+
+            // 2. If Refund/Credit is required, use bulkPayment to trigger Advance logic
+            if (returnDto.isRefundPayment()) {
+                BulkPaymentRequest bulkRequest = new BulkPaymentRequest();
+                bulkRequest.setCustomerId(sale.getCustomer().getId());
+                bulkRequest.setTotalAmount(totalReturnAmount);
+                bulkRequest.setPaymentMethod(PaymentMethod.OTHER);
+                bulkRequest.setPaymentDate(LocalDateTime.now());
+                bulkRequest.setReference("RETURN-REFUND-" + sale.getInvoiceNo());
+                bulkRequest.setSelectedSaleIds(new ArrayList<>()); // Empty list ensures it hits saveAdvancePayment internally
+
+                paymentService.bulkPayment(bulkRequest);
+            }
+        }
+
+        auditHelper.log("PROCESS_RETURN", "SALE", returnDto.getSaleId().toString(), "Return Reason: " + returnDto.getReason());
+        changeLogService.append("SALE_RETURN", sale.getId(), com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.RETURN, returnDto, "LOCAL_DEVICE");
+    }
+    @Transactional
+    public void cancelSale(Long saleId, String reason) {
+        BigDecimal totalPaid = ZERO;
+        Sale sale = saleRepository.findById(saleId)
+                .orElseThrow(() -> new EntityNotFoundAppException("Sale", saleId));
+
+        // 1. Return Stock to Inventory
+        for (SaleItem saleItem : sale.getSaleItems()) {
+            StockAdjustmentDto adjustment = new StockAdjustmentDto();
+            adjustment.setItemVariantId(saleItem.getItemVariant().getId());
+            adjustment.setAdjustmentQuantity(saleItem.getQty()); // Positive adjustment adds back to stock
+            adjustment.setReason("Cancelled Sale #" + sale.getInvoiceNo());
+            stockService.adjustStock(adjustment);
+        }
+
+        if (sale.getCustomer() != null) {
+            // 2. Reverse the Sale Debt (DEBIT)
+            CustomerLedgerDto reverseDto = new CustomerLedgerDto();
+            reverseDto.setAmount(sale.getTotalAmount());
+            reverseDto.setType(CustomerLedgerType.DEBIT);
+            reverseDto.setDescription("Cancelled Sale #" + sale.getInvoiceNo() +
+                    (reason != null ? " - " + reason : ""));
+            ledgerService.addEntry(sale.getCustomer().getId(), reverseDto);
+
+            // 3. Handle existing payments
+            totalPaid = paymentService.getTotalPaidBySaleIds(Set.of(sale.getId()))
+                    .getOrDefault(sale.getId(), ZERO);
+
+            if (totalPaid.compareTo(ZERO) > 0) {
+            /* Instead of just a ledger entry, we use your bulkPayment logic
+               with an empty list to convert these "lost" payments into
+               an Advance/Credit for the customer.
+            */
+                BulkPaymentRequest refundToAdvance = new BulkPaymentRequest();
+                refundToAdvance.setCustomerId(sale.getCustomer().getId());
+                refundToAdvance.setTotalAmount(totalPaid);
+                refundToAdvance.setPaymentMethod(PaymentMethod.OTHER);
+                refundToAdvance.setPaymentDate(LocalDateTime.now());
+                refundToAdvance.setReference("CANCEL-REFUND-" + sale.getInvoiceNo());
+                refundToAdvance.setSelectedSaleIds(new ArrayList<>()); // This triggers advance logic
+
+                paymentService.bulkPayment(refundToAdvance);
+
+                // Note: We don't need a manual CREDIT ledger entry here because
+                // bulkPayment's ledger logic will handle it.
+            }
+        }
+
+        // 4. Finalize Sale State
+        sale.setTotalAmount(ZERO);
+        // If you have a status field, set it here:
+        // sale.setStatus(SaleStatus.CANCELLED);
+        saleRepository.save(sale);
+
+        logger.info("Cancelled sale with ID {} and reversed {} in payments", saleId, totalPaid);
+
+        auditHelper.log(
+                "CANCEL_SALE",
+                "SALE",
+                saleId.toString(),
+                "Reason: " + reason
+        );
+        changeLogService.append("SALE_CANCEL", sale.getId(),
+                com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.CANCEL,
+                java.util.Map.of("reason", reason != null ? reason : "No reason provided"), "LOCAL_DEVICE");
     }
 
-    public Optional<SaleDto> getSaleById(Long id) {
-        return saleRepository.findById(id).map(mapper::toDto);
+    public Optional<SaleDto> getSaleById(Long saleId) {
+        return saleRepository.findById(saleId)
+                .map(sale -> {
+                    SaleDto dto = mapper.toDto(sale);
+
+                    deliveryRepository.findBySaleIdOrderByCreatedAtDesc(saleId)
+                            .stream()
+                            .findFirst()
+                            .ifPresent(delivery ->
+                                    dto.setDelivery(deliveryMapper.toDto(delivery))
+                            );
+
+                    // Optional: add paid/due if needed
+                    Map<Long, BigDecimal> paidMap = paymentService.getTotalPaidBySaleIds(Set.of(saleId));
+                    BigDecimal paid = paidMap.getOrDefault(saleId, ZERO);
+                    dto.setPaidAmount(paid);
+                    dto.setDueAmount(sale.getTotalAmount().subtract(paid));
+
+                    return dto;
+                });
     }
 
     public List<SaleDto> listSales(LocalDateTime startDate, LocalDateTime endDate) {
@@ -208,89 +406,333 @@ public class SaleService {
         }
         if (endDate == null) {
             endDate = LocalDateTime.now();
+        } else {
+            endDate = endDate.with(LocalTime.MAX);
         }
-        List<Sale> sales = saleRepository.findByDateBetween(startDate, endDate);
-        return mapper.toDtoList(sales);
-    }
 
-    private PaymentStatus determinePaymentStatus(BigDecimal totalAmount, List<PaymentDTO> payments) {
-        BigDecimal totalPaid = payments.stream()
-                .map(PaymentDTO::getAmountPaid)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        if (totalPaid.compareTo(totalAmount) >= 0) return PaymentStatus.PAID;
-        if (totalPaid.compareTo(BigDecimal.ZERO) > 0) return PaymentStatus.PARTIALLY_PAID;
-        return PaymentStatus.PENDING;
+        List<Sale> sales = saleRepository.findByDateBetween(startDate, endDate);
+
+        // Bulk fetch all payments for these sales
+        Set<Long> saleIds = sales.stream()
+                .filter(s -> s.getId() != null)
+                .map(Sale::getId)
+                .collect(Collectors.toSet());
+
+        Map<Long, BigDecimal> paidBySale = paymentService.getTotalPaidBySaleIds(saleIds);
+
+        List<SaleDto> saleDtos = new ArrayList<>();
+        for (Sale sale : sales) {
+            SaleDto dto = mapper.toDto(sale);
+            BigDecimal totalAmount = sale.getTotalAmount() != null ? sale.getTotalAmount() : ZERO;
+            BigDecimal paidAmount = paidBySale.getOrDefault(sale.getId(), ZERO);
+            BigDecimal dueAmount = totalAmount.subtract(paidAmount);
+            dto.setPaidAmount(paidAmount);
+            dto.setDueAmount(dueAmount);
+            saleDtos.add(dto);
+        }
+
+        logger.info("Fetched {} sales between {} and {}", sales.size(), startDate, endDate);
+        return saleDtos;
     }
 
     public List<SaleDueDto> getSalesWithDue() {
-        List<Sale> sales = saleRepository.findAll(); // Custom query with join fetch
-        return sales.stream()
-                .map(sale -> {
-                    BigDecimal totalAmount = sale.getTotalAmount();
-                    List<Payment> payments = sale.getPayments(); // Eager-loaded
-                    BigDecimal paidAmount = payments.stream()
-                            .map(Payment::getAmountPaid)
-                            .reduce(BigDecimal.ZERO, BigDecimal::add);
-                    BigDecimal dueAmount = paymentService.calculateDueAmount(sale.getId(), totalAmount);
-                    return new SaleDueDto(
-                            sale.getId(),
-                            sale.getInvoiceNo(),
-                            dueAmount,
-                            sale.getCustomer().getId(),
-                            sale.getDate(),
-                            sale.getTotalAmount(),
-                            paidAmount,
-                            sale.getCustomer().getName(),
-                            sale.getCustomer().getAddressLine1(),
-                            sale.getCustomer().getCity(),
-                            sale.getCustomer().getState(),
-                            sale.getCustomer().getPostalCode()
+        List<Sale> sales = saleRepository.findByStatus(SaleStatus.COMPLETED);
 
-                    );
-                })
+        Set<Long> saleIds = sales.stream().map(Sale::getId).collect(Collectors.toSet());
+        Map<Long, BigDecimal> paidBySale = paymentService.getTotalPaidBySaleIds(saleIds);
+
+        return sales.stream()
+                .map(sale -> mapToDueDto(sale, paidBySale.getOrDefault(sale.getId(), ZERO)))
+                .filter(dto -> dto.getDueAmount().compareTo(ZERO) > 0) // Only show actual dues
                 .collect(Collectors.toList());
     }
 
+    public List<SaleDueDto> getSalesHistory() {
+        // WARNING: For production, this should be Paginated!
+        List<Sale> sales = saleRepository.findAll();
+
+        Set<Long> saleIds = sales.stream().map(Sale::getId).collect(Collectors.toSet());
+        Map<Long, BigDecimal> paidBySale = paymentService.getTotalPaidBySaleIds(saleIds);
+
+        return sales.stream()
+                .map(sale -> mapToDueDto(sale, paidBySale.getOrDefault(sale.getId(), ZERO)))
+                .collect(Collectors.toList());
+    }
     public SaleDueDto getSaleDueBySaleId(Long saleId) {
-        return saleRepository.findById(saleId)
-                .map(sale -> {
-                    SaleDueDto dto = new SaleDueDto();
-                    dto.setSaleId(sale.getId());
-                    dto.setInvoiceNo(sale.getInvoiceNo());
-                    dto.setDueAmount(paymentService.calculateDueAmount(sale.getId(), sale.getTotalAmount()));
-                    return dto;
-                })
-                .orElseThrow(() -> new RuntimeException("Sale not found with ID: " + saleId));
+        Sale sale = saleRepository.findById(saleId)
+                .orElseThrow(() -> new EntityNotFoundAppException("Sale", saleId));
+
+        Map<Long, BigDecimal> paidMap = paymentService.getTotalPaidBySaleIds(Set.of(saleId));
+        BigDecimal paid = paidMap.getOrDefault(saleId, ZERO);
+        BigDecimal due = sale.getTotalAmount().subtract(paid);
+
+        SaleDueDto dto = new SaleDueDto();
+        dto.setSaleId(sale.getId());
+        dto.setInvoiceNo(sale.getInvoiceNo());
+        dto.setDueAmount(due);
+        return dto;
     }
 
     public Page<SaleDueDto> getDuesByCustomerId(Long customerId, Pageable pageable) {
-        Page<Sale> sales = saleRepository.findByCustomerId(customerId, pageable);
-        List<SaleDueDto> filtered = sales.stream()
-                .map(sale -> {
-                    BigDecimal totalAmount = sale.getTotalAmount();
-                    List<Payment> payments = sale.getPayments(); // Should be eager-loaded now
-                    BigDecimal paidAmount = payments.stream()
-                            .map(Payment::getAmountPaid)
-                            .reduce(BigDecimal.ZERO, BigDecimal::add);
-                    BigDecimal dueAmount = paymentService.calculateDueAmount(sale.getId(), totalAmount);
-                    return new SaleDueDto(
-                            sale.getId(),
-                            sale.getInvoiceNo(),
-                            dueAmount,
-                            sale.getCustomer().getId(),
-                            sale.getDate(),
-                            totalAmount,
-                            paidAmount,
-                            sale.getCustomer().getName(),
-                            sale.getCustomer().getAddressLine1(),
-                            sale.getCustomer().getCity(),
-                            sale.getCustomer().getState(),
-                            sale.getCustomer().getPostalCode()
-                    );
-                })
-                .filter(dto -> dto.getDueAmount().compareTo(BigDecimal.ZERO) > 0) // Only include dues > 0
-                .toList();
+        Page<Sale> salesPage = saleRepository.findByCustomerIdAndStatus(customerId, SaleStatus.COMPLETED, pageable);
 
-        return new PageImpl<>(filtered, pageable, sales.getTotalElements());
+        Set<Long> saleIds = salesPage.getContent().stream().map(Sale::getId).collect(Collectors.toSet());
+        Map<Long, BigDecimal> paidBySale = paymentService.getTotalPaidBySaleIds(saleIds);
+
+        List<SaleDueDto> dtos = salesPage.getContent().stream()
+                .map(sale -> mapToDueDto(sale, paidBySale.getOrDefault(sale.getId(), ZERO)))
+                .collect(Collectors.toList());
+
+        return new PageImpl<>(dtos, pageable, salesPage.getTotalElements());
+    }
+    @Transactional
+    public SaleDto saveOrUpdateDraft(SaleDto dto) {
+        Shop shop = shopRepository.findById(TenantContext.getCurrentShopId())
+                .orElseThrow(() -> new EntityNotFoundAppException("Shop", TenantContext.getCurrentShopId()));
+
+        Customer customer = (dto.getCustomer() != null) ?
+                customerRepository.findById(dto.getCustomer().getId()).orElse(null) : null;
+
+        Sale sale;
+        boolean isUpdate = dto.getId() != null;
+
+        if (isUpdate) {
+            sale = saleRepository.findById(dto.getId())
+                    .orElseThrow(() -> new EntityNotFoundAppException("Sale", dto.getId()));
+
+            if (sale.getStatus() != SaleStatus.DRAFT) {
+                throw new BusinessValidationException("Only drafts can be updated via this endpoint.");
+            }
+            // Clear items safely
+            sale.getSaleItems().clear();
+        } else {
+            sale = new Sale();
+            String seq = String.format("%03d", saleRepository.count() + 1);
+            // Ensure invoiceNo is assigned here for new drafts
+            sale.setInvoiceNo("DRF-" + shop.getCode() + "-" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMM")) + "-" + seq);
+            sale.setStatus(SaleStatus.DRAFT);
+        }
+
+        BigDecimal totalTaxableValue = ZERO;
+        List<SaleItem> itemsToUpdate = new ArrayList<>();
+
+        for (SaleItemDto itemDto : dto.getItems()) {
+            ItemVariant iv = itemVariantRepository.findById(itemDto.getItemVariantId())
+                    .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+
+            SaleItem saleItem = new SaleItem();
+            saleItem.setItemVariant(iv);
+            saleItem.setQty(itemDto.getQty());
+            saleItem.setUnitPrice(itemDto.getUnitPrice());
+            saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
+
+            BigDecimal taxableValue = itemDto.getQty().multiply(itemDto.getUnitPrice())
+                    .subtract(saleItem.getDiscount());
+
+            saleItem.setTaxableValue(taxableValue);
+            totalTaxableValue = totalTaxableValue.add(taxableValue);
+
+            // Drafts usually have 0 tax until completed
+            saleItem.setGstType(GSTType.GST_0);
+            saleItem.setCgstAmt(ZERO);
+            saleItem.setSgstAmt(ZERO);
+            saleItem.setIgstAmt(ZERO);
+
+            saleItem.setSale(sale);
+            itemsToUpdate.add(saleItem);
+        }
+
+        sale.setShop(shop);
+        sale.setCustomer(customer);
+        sale.setTotalAmount(totalTaxableValue.setScale(0, RoundingMode.HALF_UP));
+        sale.setRoundOff(sale.getTotalAmount().subtract(totalTaxableValue)); // Difference for ledger balancing
+        sale.getSaleItems().addAll(itemsToUpdate);
+
+        Sale saved = saleRepository.save(sale);
+
+        // Handle Delivery (Now uses saved.getInvoiceNo() to avoid null issues)
+        if (dto.getDelivery() != null) {
+            DeliveryDTO deliveryDTO = dto.getDelivery();
+            deliveryDTO.setSaleId(saved.getId());
+            deliveryDTO.setInvoiceNumber(saved.getInvoiceNo());
+            if (customer != null) {
+                deliveryDTO.setCustomerName(customer.getName());
+            }
+            deliveryService.createDelivery(deliveryDTO);
+        }
+
+        logger.info("Draft {} saved successfully", saved.getInvoiceNo());
+        return mapper.toDto(saved);
+    }
+    @Transactional
+    @LogAudit(action = "COMPLETE_SALE", entity = "SALE")
+    public SaleDto completeDraft(SaleDto dto) {
+        if (dto.getId() == null) {
+            throw new BusinessValidationException("Sale ID is required to complete a draft");
+        }
+
+        Sale existing = saleRepository.findById(dto.getId())
+                .orElseThrow(() -> new EntityNotFoundAppException("Sale", dto.getId()));
+
+        if (existing.getStatus() != SaleStatus.DRAFT) {
+            throw new BusinessValidationException("Only DRAFT sales can be completed");
+        }
+
+        Customer customer = Optional.ofNullable(dto.getCustomer())
+                .map(c -> customerRepository.findById(c.getId())
+                        .orElseThrow(() -> new EntityNotFoundAppException("Customer", c.getId())))
+                .orElse(null);
+
+        // Clear old draft items to replace with final ones
+        existing.getSaleItems().clear();
+
+        BigDecimal totalTaxableValue = ZERO;
+        BigDecimal totalGSTAmount = ZERO;
+
+        for (SaleItemDto itemDto : dto.getItems()) {
+            if (!stockService.isStockAvailable(itemDto.getItemVariantId(), itemDto.getQty())) {
+                throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
+            }
+
+            ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
+                    .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+
+            SaleItem saleItem = new SaleItem();
+            saleItem.setSale(existing);
+            saleItem.setItemVariant(itemVariant);
+            saleItem.setQty(itemDto.getQty());
+            saleItem.setUnitPrice(itemDto.getUnitPrice());
+            saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
+
+            // FIX: Taxable value calculation for EVERY item (Required for Sales Volume Reports)
+            BigDecimal taxableValue = itemDto.getQty()
+                    .multiply(itemDto.getUnitPrice())
+                    .subtract(saleItem.getDiscount());
+
+            saleItem.setTaxableValue(taxableValue);
+            totalTaxableValue = totalTaxableValue.add(taxableValue);
+
+            if (Boolean.TRUE.equals(dto.getIsGstRequired()) && itemVariant.getGstRate() != null) {
+                GSTType gstType = GSTType.fromRate(itemVariant.getGstRate());
+                BigDecimal gstAmount = taxableValue
+                        .multiply(BigDecimal.valueOf(gstType.getRate()))
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+
+                saleItem.setGstType(gstType);
+                boolean sameState = customer != null && existing.getShop().getState().equalsIgnoreCase(customer.getState());
+
+                if (sameState) {
+                    BigDecimal half = gstAmount.divide(BigDecimal.valueOf(2), RoundingMode.HALF_UP);
+                    saleItem.setCgstAmt(half);
+                    saleItem.setSgstAmt(half);
+                    saleItem.setIgstAmt(ZERO);
+                } else {
+                    saleItem.setIgstAmt(gstAmount);
+                    saleItem.setCgstAmt(ZERO);
+                    saleItem.setSgstAmt(ZERO);
+                }
+                totalGSTAmount = totalGSTAmount.add(gstAmount);
+            } else {
+                saleItem.setGstType(GSTType.GST_0);
+                saleItem.setCgstAmt(ZERO);
+                saleItem.setSgstAmt(ZERO);
+                saleItem.setIgstAmt(ZERO);
+            }
+            existing.getSaleItems().add(saleItem);
+        }
+
+        // Deduct stock
+        for (SaleItem item : existing.getSaleItems()) {
+            stockService.deductStock(item.getItemVariant().getId(), item.getQty(), "Sale Completion", "Sale #" + existing.getInvoiceNo());
+        }
+
+        // Totals and Rounding
+        BigDecimal totalBeforeRoundOff = totalTaxableValue.add(totalGSTAmount);
+        BigDecimal finalTotal = totalBeforeRoundOff.setScale(0, RoundingMode.HALF_UP);
+        BigDecimal roundOff = finalTotal.subtract(totalBeforeRoundOff);
+
+        existing.setTotalAmount(finalTotal);
+        existing.setRoundOff(roundOff);
+        existing.setCustomer(customer);
+        existing.setStatus(SaleStatus.COMPLETED);
+
+        Sale saved = saleRepository.save(existing);
+
+        // Delivery Logic
+        if (dto.getDelivery() != null) {
+            DeliveryDTO deliveryDTO = dto.getDelivery();
+            deliveryDTO.setSaleId(saved.getId());
+            deliveryDTO.setInvoiceNumber(saved.getInvoiceNo());
+            if (customer != null) deliveryDTO.setCustomerName(customer.getName());
+            deliveryService.createDelivery(deliveryDTO);
+        }
+
+        // Ledger Entry: Sale (CREDIT)
+        if (customer != null) {
+            CustomerLedgerDto ledger = new CustomerLedgerDto();
+            ledger.setAmount(finalTotal);
+            ledger.setType(CustomerLedgerType.CREDIT);
+            ledger.setDescription("Sale #" + saved.getInvoiceNo());
+            ledgerService.addEntry(customer.getId(), ledger);
+        }
+
+        // Payment Logic
+        if (dto.getPaymentDetails() != null) {
+            // Pre-validation: Don't allow overpayment
+            BigDecimal totalPaidAmount = dto.getPaymentDetails().stream()
+                    .map(p -> p.getAmount() != null ? p.getAmount() : ZERO)
+                    .reduce(ZERO, BigDecimal::add);
+
+            if (totalPaidAmount.compareTo(finalTotal) > 0) {
+                throw new BusinessValidationException("Total paid cannot exceed sale amount");
+            }
+
+            for (PaymentDto p : dto.getPaymentDetails()) {
+                p.setSourceId(saved.getId());
+                p.setSourceType(PaymentSourceType.SALE);
+                p.setCustomerId(customer != null ? customer.getId() : null);
+                p.setPaymentDate(LocalDateTime.now());
+
+                // FIX: This call now handles the Payment record AND its Ledger entry automatically
+                paymentService.createPayment(p);
+            }
+        }
+
+        // Log Change and Generate Invoice
+        changeLogService.append("SALE", saved.getId(), com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.UPDATE, mapper.toDto(saved), "LOCAL_DEVICE");
+
+        String signedToken = jwtUtil.generateInvoiceToken(saved.getId(), saved.getInvoiceNo());
+        SaleDto result = mapper.toDto(saved);
+        result.setSignedInvoiceUrl("/api/invoices/signed?token=" + signedToken);
+
+        return result;
+    }
+
+    private SaleDueDto mapToDueDto(Sale sale, BigDecimal paidAmount) {
+        BigDecimal totalAmount = sale.getTotalAmount() != null ? sale.getTotalAmount() : ZERO;
+        BigDecimal dueAmount = totalAmount.subtract(paidAmount);
+
+        SaleDueDto dto = new SaleDueDto();
+        dto.setSaleId(sale.getId());
+        dto.setInvoiceNo(sale.getInvoiceNo());
+        dto.setDueAmount(dueAmount);
+        dto.setTotalAmount(totalAmount);
+        dto.setPaidAmount(paidAmount);
+        dto.setDate(sale.getDate());
+        dto.setStatus(sale.getStatus().name());
+
+        if (sale.getCustomer() != null) {
+            Customer c = sale.getCustomer();
+            dto.setCustomerId(c.getId());
+            dto.setCustomerName(c.getName());
+            dto.setCity(c.getCity());
+            dto.setState(c.getState());
+            dto.setPostalCode(c.getPostalCode());
+            dto.setAddressLine1(c.getAddressLine1());
+            dto.setGSTIN(c.getGstNumber());
+            dto.setPhone(c.getPhone());
+            dto.setShopName(shopRepository.findById(TenantContext.getCurrentShopId()).map(Shop::getName).orElse(""));
+        }
+        return dto;
     }
 }

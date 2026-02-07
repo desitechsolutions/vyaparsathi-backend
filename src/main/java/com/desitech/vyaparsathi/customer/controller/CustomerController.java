@@ -1,48 +1,95 @@
 package com.desitech.vyaparsathi.customer.controller;
 
+import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.customer.dto.CustomerDto;
 import com.desitech.vyaparsathi.customer.service.CustomerService;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.persistence.EntityNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/customers")
-@PreAuthorize("hasAnyRole('OWNER', 'STAFF')")
+@PreAuthorize("hasAnyRole('OWNER', 'STAFF','ADMIN')")
 public class CustomerController {
-    @Autowired
-    private CustomerService customerService;
+
+    private static final Logger logger = LoggerFactory.getLogger(CustomerController.class);
+    private final CustomerService customerService;
+
+    public CustomerController(CustomerService customerService) {
+        this.customerService = customerService;
+    }
 
     @PostMapping
     public ResponseEntity<CustomerDto> addCustomer(@RequestBody CustomerDto dto) {
-        return ResponseEntity.ok(customerService.addCustomer(dto));
+        try {
+            CustomerDto result = customerService.addCustomer(dto);
+            logger.info("Added customer with name={}", dto.getName());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error adding customer with name={}: {}", dto.getName(), e.getMessage(), e);
+            throw new ApplicationException("Failed to add customer", e);
+        }
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<CustomerDto> updateCustomer(@PathVariable Long id, @RequestBody CustomerDto dto) {
-        return ResponseEntity.ok(customerService.updateCustomer(id, dto));
+        try {
+            CustomerDto result = customerService.updateCustomer(id, dto);
+            logger.info("Updated customer id={}", id);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error updating customer id={}: {}", id, e.getMessage(), e);
+            throw new ApplicationException("Failed to update customer", e);
+        }
     }
 
     @GetMapping
     public ResponseEntity<List<CustomerDto>> listCustomers(@RequestParam(required = false) String name) {
-        if (name != null && !name.isEmpty()) {
-            return ResponseEntity.ok(customerService.searchCustomers(name));
+        try {
+            List<CustomerDto> result;
+            if (name != null && !name.isEmpty()) {
+                result = customerService.searchCustomers(name);
+                logger.info("Searched customers by name={}", name);
+            } else {
+                result = customerService.listCustomers();
+                logger.info("Listed all customers");
+            }
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error listing/searching customers: {}", e.getMessage(), e);
+            throw new ApplicationException("Failed to list/search customers", e);
         }
-        return ResponseEntity.ok(customerService.listCustomers());
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<CustomerDto> getCustomer(@PathVariable Long id) {
-        return customerService.getCustomer(id)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+        try {
+            CustomerDto customer = customerService.getCustomer(id);
+            logger.info("Fetched customer id={}", id);
+            return ResponseEntity.ok(customer);
+        } catch (EntityNotFoundException e) {
+            logger.warn("Customer not found id={}", id);
+            return ResponseEntity.notFound().build();
+        } catch (Exception e) {
+            logger.error("Error fetching customer id={}: {}", id, e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch customer", e);
+        }
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteCustomer(@PathVariable Long id) {
-        customerService.deleteCustomer(id);
-        return ResponseEntity.noContent().build();
+        try {
+            customerService.deleteCustomer(id);
+            logger.info("Deleted customer id={}", id);
+            return ResponseEntity.noContent().build();
+        } catch (Exception e) {
+            logger.error("Error deleting customer id={}: {}", id, e.getMessage(), e);
+            throw new ApplicationException("Failed to delete customer", e);
+        }
     }
 }

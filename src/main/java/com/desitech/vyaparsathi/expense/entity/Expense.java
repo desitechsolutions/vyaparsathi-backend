@@ -1,23 +1,22 @@
 package com.desitech.vyaparsathi.expense.entity;
 
+import com.desitech.vyaparsathi.common.entities.BaseEntity;
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "expense")
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
-public class Expense {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(name = "shop_id", nullable = false)
-    private Long shopId;
+public class Expense extends ShopAwareEntity {
 
     @Column(nullable = false)
     private String type;
@@ -34,7 +33,9 @@ public class Expense {
 
     @PrePersist
     @Convert(converter = LocalDateTimeAttributeConverter.class)
+    @Override
     public void onCreate() {
+        super.onCreate();
         if (this.date == null) {
             this.date = LocalDateTime.now();
         }

@@ -5,6 +5,8 @@ import lombok.Data;
 
 @Data
 public class ShopDto {
+
+    private Long id;
     @NotBlank(message = "Shop name is required")
     private String name;
 

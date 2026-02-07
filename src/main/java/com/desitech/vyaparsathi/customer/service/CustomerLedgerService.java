@@ -1,5 +1,7 @@
 package com.desitech.vyaparsathi.customer.service;
 
+import com.desitech.vyaparsathi.common.exception.CustomerNotFoundException;
+import com.desitech.vyaparsathi.common.exception.LedgerNotFoundException;
 import com.desitech.vyaparsathi.customer.dto.CustomerLedgerDto;
 import com.desitech.vyaparsathi.customer.entity.Customer;
 import com.desitech.vyaparsathi.customer.entity.CustomerLedger;
@@ -28,7 +30,7 @@ public class CustomerLedgerService {
     @Transactional
     public CustomerLedgerDto addEntry(Long customerId, CustomerLedgerDto dto) {
         Customer customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new RuntimeException("Customer not found"));
+                .orElseThrow(() -> new CustomerNotFoundException("Customer not found"));
 
         if (dto.getType() == CustomerLedgerType.CREDIT) {
             customer.setCreditBalance(customer.getCreditBalance().add(dto.getAmount()));
@@ -46,7 +48,7 @@ public class CustomerLedgerService {
     @Transactional
     public CustomerLedgerDto updateEntry(Long ledgerId, CustomerLedgerDto dto) {
         CustomerLedger existingEntry = ledgerRepository.findById(ledgerId)
-                .orElseThrow(() -> new RuntimeException("Ledger entry not found"));
+                .orElseThrow(() -> new LedgerNotFoundException("Ledger entry not found"));
 
         Customer customer = existingEntry.getCustomer();
 
@@ -79,7 +81,7 @@ public class CustomerLedgerService {
     @Transactional
     public void deleteEntry(Long ledgerId) {
         CustomerLedger existingEntry = ledgerRepository.findById(ledgerId)
-                .orElseThrow(() -> new RuntimeException("Ledger entry not found"));
+                .orElseThrow(() -> new LedgerNotFoundException("Ledger entry not found"));
 
         Customer customer = existingEntry.getCustomer();
         BigDecimal oldAmount = existingEntry.getAmount();
@@ -97,7 +99,7 @@ public class CustomerLedgerService {
 
     public List<CustomerLedgerDto> getLedger(Long customerId, LocalDateTime startDate, LocalDateTime endDate) {
         Customer customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new RuntimeException("Customer not found"));
+                .orElseThrow(() -> new CustomerNotFoundException("Customer not found"));
 
         List<CustomerLedger> ledgerEntries = ledgerRepository.findByCustomerAndDateRange(customer, startDate, endDate);
         return ledgerEntries.stream().map(mapper::toDto).collect(Collectors.toList());

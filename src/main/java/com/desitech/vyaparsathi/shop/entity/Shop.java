@@ -3,13 +3,16 @@ package com.desitech.vyaparsathi.shop.entity;
 import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
 import jakarta.persistence.*;
 import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "shop")
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
 public class Shop {
     @Id
@@ -36,4 +39,8 @@ public class Shop {
     @Convert(converter = LocalDateTimeAttributeConverter.class)
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
+
+
+    @Column(nullable = true)
+    String logoPath;
 }

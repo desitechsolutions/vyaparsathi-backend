@@ -22,7 +22,12 @@ public class SaleDueDto {
     private String addressLine1;
     private String city;
     private String state;
+    private String GSTIN;
+    private String phone;
+    private String shopName;
     private String postalCode;
+    private String status;
+
 
 
 }

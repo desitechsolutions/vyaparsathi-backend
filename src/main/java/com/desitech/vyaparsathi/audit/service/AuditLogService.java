@@ -1,6 +1,6 @@
 package com.desitech.vyaparsathi.audit.service;
 
-import com.desitech.vyaparsathi.audit.AuditLogDto;
+import com.desitech.vyaparsathi.audit.dto.AuditLogDto;
 import com.desitech.vyaparsathi.audit.entity.AuditLog;
 import com.desitech.vyaparsathi.audit.repository.AuditLogRepository;
 import lombok.RequiredArgsConstructor;

@@ -1,6 +1,5 @@
-package com.desitech.vyaparsathi.inventory.entity;
+package com.desitech.vyaparsathi.supplier.entity;
 
-import com.desitech.vyaparsathi.common.entities.BaseEntity;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import jakarta.persistence.*;
 import lombok.*;

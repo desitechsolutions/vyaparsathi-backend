@@ -1,4 +1,4 @@
-package com.desitech.vyaparsathi.notification;
+package com.desitech.vyaparsathi.notification.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

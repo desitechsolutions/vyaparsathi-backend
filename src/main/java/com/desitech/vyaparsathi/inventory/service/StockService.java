@@ -3,7 +3,7 @@ package com.desitech.vyaparsathi.inventory.service;
 import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.common.exception.EntityNotFoundAppException;
 import com.desitech.vyaparsathi.common.exception.InsufficientStockException;
-import com.desitech.vyaparsathi.inventory.StockMovementType;
+import com.desitech.vyaparsathi.inventory.enums.StockMovementType;
 import com.desitech.vyaparsathi.inventory.dto.*;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.entity.StockMovement;

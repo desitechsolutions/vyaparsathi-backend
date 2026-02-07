@@ -1,4 +1,4 @@
-package com.desitech.vyaparsathi.inventory.dto;
+package com.desitech.vyaparsathi.supplier.dto;
 
 import lombok.Data;
 

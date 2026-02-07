@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 
 import java.util.List;
@@ -40,36 +43,53 @@ class PaymentControllerTest {
     @Test
     void getPayments_BySourceTypeAndSourceId() {
         PaymentDto dto = new PaymentDto();
-        when(paymentService.getPaymentsBySource(PaymentSourceType.SALE, 1L)).thenReturn(List.of(dto));
-        ResponseEntity<List<PaymentDto>> response = paymentController.getPayments(PaymentSourceType.SALE, 1L, null, null);
+        // Wrap the list in a Page object
+        Page<PaymentDto> page = new PageImpl<>(List.of(dto));
+
+        // Update stub to match the Pageable parameter (any() or specific PageRequest)
+        when(paymentService.getPaymentsBySource(eq(PaymentSourceType.SALE), eq(1L), any(Pageable.class)))
+                .thenReturn(page);
+
+        // Call with default page/size or the ones defined in your controller defaults
+        ResponseEntity<Page<PaymentDto>> response = paymentController.getPayments(PaymentSourceType.SALE, 1L, null, null, 0, 20);
+
         assertEquals(200, response.getStatusCodeValue());
-        assertEquals(1, response.getBody().size());
+        assertEquals(1, response.getBody().getContent().size());
+        assertEquals(1, response.getBody().getTotalElements());
     }
 
     @Test
     void getPayments_BySupplierId() {
         PaymentDto dto = new PaymentDto();
-        when(paymentService.getPaymentsBySupplier(2L)).thenReturn(List.of(dto));
-        ResponseEntity<List<PaymentDto>> response = paymentController.getPayments(null, null, 2L, null);
+        Page<PaymentDto> page = new PageImpl<>(List.of(dto));
+
+        when(paymentService.getPaymentsBySupplier(eq(2L), any(Pageable.class))).thenReturn(page);
+
+        ResponseEntity<Page<PaymentDto>> response = paymentController.getPayments(null, null, 2L, null, 0, 20);
+
         assertEquals(200, response.getStatusCodeValue());
-        assertEquals(1, response.getBody().size());
+        assertEquals(1, response.getBody().getContent().size());
     }
 
     @Test
     void getPayments_ByCustomerId() {
         PaymentDto dto = new PaymentDto();
-        when(paymentService.getPaymentsByCustomer(3L)).thenReturn(List.of(dto));
-        ResponseEntity<List<PaymentDto>> response = paymentController.getPayments(null, null, null, 3L);
+        Page<PaymentDto> page = new PageImpl<>(List.of(dto));
+
+        when(paymentService.getPaymentsByCustomer(eq(3L), any(Pageable.class))).thenReturn(page);
+
+        ResponseEntity<Page<PaymentDto>> response = paymentController.getPayments(null, null, null, 3L, 0, 20);
+
         assertEquals(200, response.getStatusCodeValue());
-        assertEquals(1, response.getBody().size());
+        assertEquals(1, response.getBody().getContent().size());
     }
 
     @Test
     void getPayments_BadRequest() {
-        ResponseEntity<List<PaymentDto>> response = paymentController.getPayments(null, null, null, null);
+        // Note the change in return type to Page<PaymentDto>
+        ResponseEntity<Page<PaymentDto>> response = paymentController.getPayments(null, null, null, null, 0, 20);
         assertEquals(400, response.getStatusCodeValue());
     }
-
     @Test
     void getPayment_Found() {
         PaymentDto dto = new PaymentDto();

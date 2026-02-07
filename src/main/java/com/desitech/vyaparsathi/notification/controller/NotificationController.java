@@ -4,10 +4,9 @@ import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.desitech.vyaparsathi.notification.NotificationDto;
+import com.desitech.vyaparsathi.notification.dto.NotificationDto;
 import com.desitech.vyaparsathi.notification.service.NotificationService;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;

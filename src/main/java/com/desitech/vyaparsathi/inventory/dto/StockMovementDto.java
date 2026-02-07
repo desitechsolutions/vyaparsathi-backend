@@ -1,6 +1,6 @@
 package com.desitech.vyaparsathi.inventory.dto;
 
-import com.desitech.vyaparsathi.inventory.StockMovementType;
+import com.desitech.vyaparsathi.inventory.enums.StockMovementType;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.desitech.vyaparsathi.common.util.CustomLocalDateTimeDeserializer;
 import lombok.Data;

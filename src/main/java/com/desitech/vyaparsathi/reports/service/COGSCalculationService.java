@@ -1,6 +1,6 @@
 package com.desitech.vyaparsathi.reports.service;
 
-import com.desitech.vyaparsathi.inventory.StockMovementType;
+import com.desitech.vyaparsathi.inventory.enums.StockMovementType;
 import com.desitech.vyaparsathi.inventory.entity.StockMovement;
 import com.desitech.vyaparsathi.inventory.repository.StockMovementRepository;
 import com.desitech.vyaparsathi.sales.entity.Sale;

@@ -1,13 +1,12 @@
 package com.desitech.vyaparsathi.audit.controller;
 
-import com.desitech.vyaparsathi.audit.AuditLogDto;
+import com.desitech.vyaparsathi.audit.dto.AuditLogDto;
 import com.desitech.vyaparsathi.audit.export.AuditLogExportService;
 import com.desitech.vyaparsathi.audit.service.AuditLogService;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.common.exception.ExportAppException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;

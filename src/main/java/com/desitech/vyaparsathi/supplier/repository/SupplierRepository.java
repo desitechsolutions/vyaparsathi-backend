@@ -1,8 +1,7 @@
-package com.desitech.vyaparsathi.inventory.repository;
+package com.desitech.vyaparsathi.supplier.repository;
 
 import com.desitech.vyaparsathi.common.repository.BaseRepository;
-import com.desitech.vyaparsathi.inventory.entity.Supplier;
-import org.springframework.data.jpa.repository.JpaRepository;
+import com.desitech.vyaparsathi.supplier.entity.Supplier;
 
 public interface SupplierRepository extends BaseRepository<Supplier, Long> {
 	// Add custom fetch if Supplier has relations in future (e.g., @EntityGraph)

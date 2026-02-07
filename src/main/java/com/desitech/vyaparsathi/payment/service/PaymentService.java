@@ -4,6 +4,8 @@ import com.desitech.vyaparsathi.payment.dto.BulkPaymentRequest;
 import com.desitech.vyaparsathi.payment.dto.PaymentDto;
 import com.desitech.vyaparsathi.payment.dto.PaymentReceivedRequest;
 import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -13,9 +15,9 @@ import java.util.Set;
 
 public interface PaymentService {
     PaymentDto createPayment(PaymentDto dto);
-    List<PaymentDto> getPaymentsBySource(PaymentSourceType sourceType, Long sourceId);
-    List<PaymentDto> getPaymentsBySupplier(Long supplierId);
-    List<PaymentDto> getPaymentsByCustomer(Long customerId);
+    Page<PaymentDto> getPaymentsBySource(PaymentSourceType sourceType, Long sourceId, Pageable pageable);
+    Page<PaymentDto> getPaymentsBySupplier(Long supplierId, Pageable pageable);
+    Page<PaymentDto> getPaymentsByCustomer(Long customerId, Pageable pageable);
     Optional<PaymentDto> getPayment(Long id);
 
     BigDecimal calculateDueAmount(Long sourceId, PaymentSourceType sourceType, BigDecimal totalAmount);
@@ -25,4 +27,5 @@ public interface PaymentService {
 
     void bulkPayment(BulkPaymentRequest request);
     BigDecimal getCustomerAdvanceBalance(Long customerId);
+    BigDecimal applyAdvanceToSale(Long customerId, Long saleId, BigDecimal saleTotal);
 }

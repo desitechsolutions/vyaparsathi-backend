@@ -1,6 +1,6 @@
 package com.desitech.vyaparsathi.reports.service;
 
-import com.desitech.vyaparsathi.inventory.StockMovementType;
+import com.desitech.vyaparsathi.inventory.enums.StockMovementType;
 import com.desitech.vyaparsathi.inventory.entity.Item;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.entity.StockMovement;
@@ -19,7 +19,6 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyLong;

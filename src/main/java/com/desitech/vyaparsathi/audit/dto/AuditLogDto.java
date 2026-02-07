@@ -1,4 +1,4 @@
-package com.desitech.vyaparsathi.audit;
+package com.desitech.vyaparsathi.audit.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -17,8 +17,6 @@ public class AuditLogDto {
     private String entityId;
     private String details;
     private LocalDateTime timestamp;
-
-    // --- NEW FORENSIC FIELDS ---
     private String ipAddress;
     private String userAgent;
 }

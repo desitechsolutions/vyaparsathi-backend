@@ -1,6 +1,6 @@
 package com.desitech.vyaparsathi.audit.export;
 
-import com.desitech.vyaparsathi.audit.AuditLogDto;
+import com.desitech.vyaparsathi.audit.dto.AuditLogDto;
 import com.desitech.vyaparsathi.common.exception.ExportAppException;
 import com.lowagie.text.*;
 import com.lowagie.text.pdf.*;

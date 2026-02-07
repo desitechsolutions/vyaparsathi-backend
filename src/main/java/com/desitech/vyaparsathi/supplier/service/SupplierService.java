@@ -1,9 +1,9 @@
-package com.desitech.vyaparsathi.inventory.service;
+package com.desitech.vyaparsathi.supplier.service;
 
-import com.desitech.vyaparsathi.inventory.dto.SupplierDto;
-import com.desitech.vyaparsathi.inventory.entity.Supplier;
-import com.desitech.vyaparsathi.inventory.mapper.SupplierMapper;
-import com.desitech.vyaparsathi.inventory.repository.SupplierRepository;
+import com.desitech.vyaparsathi.supplier.dto.SupplierDto;
+import com.desitech.vyaparsathi.supplier.entity.Supplier;
+import com.desitech.vyaparsathi.supplier.mapper.SupplierMapper;
+import com.desitech.vyaparsathi.supplier.repository.SupplierRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 

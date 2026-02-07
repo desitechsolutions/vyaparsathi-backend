@@ -1,6 +1,6 @@
 package com.desitech.vyaparsathi.notification.service;
 
-import com.desitech.vyaparsathi.notification.NotificationDto;
+import com.desitech.vyaparsathi.notification.dto.NotificationDto;
 import com.desitech.vyaparsathi.notification.entity.Notification;
 import com.desitech.vyaparsathi.notification.repository.NotificationRepository;
 import org.springframework.beans.factory.annotation.Autowired;

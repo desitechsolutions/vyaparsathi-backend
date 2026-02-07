@@ -1,11 +1,11 @@
 
-package com.desitech.vyaparsathi.inventory.controller;
+package com.desitech.vyaparsathi.supplier.controller;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.desitech.vyaparsathi.inventory.dto.SupplierDto;
-import com.desitech.vyaparsathi.inventory.service.SupplierService;
+import com.desitech.vyaparsathi.supplier.dto.SupplierDto;
+import com.desitech.vyaparsathi.supplier.service.SupplierService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;

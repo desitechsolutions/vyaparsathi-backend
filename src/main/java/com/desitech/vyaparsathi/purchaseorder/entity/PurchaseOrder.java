@@ -1,9 +1,9 @@
 package com.desitech.vyaparsathi.purchaseorder.entity;
 
-import com.desitech.vyaparsathi.common.entities.BaseEntity;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
 import com.desitech.vyaparsathi.purchaseorder.enums.PurchaseOrderStatus;
+import com.desitech.vyaparsathi.supplier.entity.Supplier;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -26,7 +26,7 @@ public class PurchaseOrder extends ShopAwareEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "supplier_id", nullable = false)
-    private com.desitech.vyaparsathi.inventory.entity.Supplier supplier;
+    private Supplier supplier;
 
     @Column(name = "order_date", nullable = false)
     private LocalDateTime orderDate;

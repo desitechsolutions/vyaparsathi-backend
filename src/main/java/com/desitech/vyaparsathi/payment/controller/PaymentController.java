@@ -8,6 +8,10 @@ import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -33,17 +37,22 @@ public class PaymentController {
         }
 
         @GetMapping
-        public ResponseEntity<List<PaymentDto>> getPayments(
+        public ResponseEntity<Page<PaymentDto>> getPayments(
                 @RequestParam(required = false) PaymentSourceType sourceType,
                 @RequestParam(required = false) Long sourceId,
                 @RequestParam(required = false) Long supplierId,
-                @RequestParam(required = false) Long customerId) {
+                @RequestParam(required = false) Long customerId,
+                @RequestParam(defaultValue = "0") int page,
+                @RequestParam(defaultValue = "20") int size) {
+
+                PageRequest pageable = PageRequest.of(page, size, Sort.by("paymentDate").descending());
+
                 if (sourceType != null && sourceId != null) {
-                        return ResponseEntity.ok(paymentService.getPaymentsBySource(sourceType, sourceId));
+                        return ResponseEntity.ok(paymentService.getPaymentsBySource(sourceType, sourceId, pageable));
                 } else if (supplierId != null) {
-                        return ResponseEntity.ok(paymentService.getPaymentsBySupplier(supplierId));
+                        return ResponseEntity.ok(paymentService.getPaymentsBySupplier(supplierId, pageable));
                 } else if (customerId != null) {
-                        return ResponseEntity.ok(paymentService.getPaymentsByCustomer(customerId));
+                        return ResponseEntity.ok(paymentService.getPaymentsByCustomer(customerId, pageable));
                 } else {
                         return ResponseEntity.badRequest().build();
                 }

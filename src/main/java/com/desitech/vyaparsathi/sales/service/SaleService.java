@@ -3,7 +3,6 @@ package com.desitech.vyaparsathi.sales.service;
 import com.desitech.vyaparsathi.audit.annotation.LogAudit;
 import com.desitech.vyaparsathi.audit.helper.AuditHelper;
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
-import com.desitech.vyaparsathi.changelog.model.ChangeLogOperation;
 import com.desitech.vyaparsathi.changelog.service.ChangeLogService;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
@@ -15,7 +14,6 @@ import com.desitech.vyaparsathi.customer.entity.CustomerLedgerType;
 import com.desitech.vyaparsathi.customer.repository.CustomerRepository;
 import com.desitech.vyaparsathi.customer.service.CustomerLedgerService;
 import com.desitech.vyaparsathi.delivery.dto.DeliveryDTO;
-import com.desitech.vyaparsathi.delivery.entity.Delivery;
 import com.desitech.vyaparsathi.delivery.mapper.DeliveryMapper;
 import com.desitech.vyaparsathi.delivery.repository.DeliveryRepository;
 import com.desitech.vyaparsathi.delivery.service.DeliveryService;
@@ -38,7 +36,7 @@ import com.desitech.vyaparsathi.sales.entity.SaleItem;
 import com.desitech.vyaparsathi.sales.enums.SaleStatus;
 import com.desitech.vyaparsathi.sales.mapper.SaleMapper;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
-import com.desitech.vyaparsathi.sales.service.invoice.InvoiceService2;
+import com.desitech.vyaparsathi.sales.service.invoice.InvoiceService;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import org.slf4j.Logger;
@@ -77,7 +75,7 @@ public class SaleService {
     @Autowired
     private ChangeLogService changeLogService;
     @Autowired
-    private InvoiceService2 invoiceService;
+    private InvoiceService invoiceService;
     @Autowired
     private SaleMapper mapper;
     @Autowired
@@ -112,8 +110,8 @@ public class SaleService {
 
         // 2. Process Sale Items and Calculate Taxes
         List<SaleItem> saleItems = new ArrayList<>();
-        BigDecimal totalTaxableValue = ZERO;
-        BigDecimal totalGSTAmount = ZERO;
+        BigDecimal totalTaxableValue = BigDecimal.ZERO;
+        BigDecimal totalGSTAmount = BigDecimal.ZERO;
 
         for (SaleItemDto itemDto : dto.getItems()) {
             if (!stockService.isStockAvailable(itemDto.getItemVariantId(), itemDto.getQty())) {
@@ -129,10 +127,10 @@ public class SaleService {
             saleItem.setQty(itemDto.getQty());
             saleItem.setUnitPrice(itemDto.getUnitPrice());
 
-            // FIX: Calculate taxable value regardless of GST status for correct reporting
+            // Calculate taxable value: (Qty * Price) - Discount
             BigDecimal itemTaxableValue = itemDto.getQty()
                     .multiply(itemDto.getUnitPrice())
-                    .subtract(itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
+                    .subtract(itemDto.getDiscount() != null ? itemDto.getDiscount() : BigDecimal.ZERO);
 
             saleItem.setTaxableValue(itemTaxableValue);
             totalTaxableValue = totalTaxableValue.add(itemTaxableValue);
@@ -149,23 +147,23 @@ public class SaleService {
                     BigDecimal half = gstAmount.divide(BigDecimal.valueOf(2), RoundingMode.HALF_UP);
                     saleItem.setCgstAmt(half);
                     saleItem.setSgstAmt(half);
-                    saleItem.setIgstAmt(ZERO);
+                    saleItem.setIgstAmt(BigDecimal.ZERO);
                 } else {
                     saleItem.setIgstAmt(gstAmount);
-                    saleItem.setCgstAmt(ZERO);
-                    saleItem.setSgstAmt(ZERO);
+                    saleItem.setCgstAmt(BigDecimal.ZERO);
+                    saleItem.setSgstAmt(BigDecimal.ZERO);
                 }
                 totalGSTAmount = totalGSTAmount.add(gstAmount);
             } else {
                 saleItem.setGstType(GSTType.GST_0);
-                saleItem.setCgstAmt(ZERO);
-                saleItem.setSgstAmt(ZERO);
-                saleItem.setIgstAmt(ZERO);
+                saleItem.setCgstAmt(BigDecimal.ZERO);
+                saleItem.setSgstAmt(BigDecimal.ZERO);
+                saleItem.setIgstAmt(BigDecimal.ZERO);
             }
             saleItems.add(saleItem);
         }
 
-        // 3. Generate Invoice Number (Note: Consider DB Sequence for high concurrency)
+        // 3. Generate Invoice Number
         String seq = String.format("%03d", saleRepository.count() + 1);
         String invoiceNo = shop.getCode() + "-" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMM")) + "-" + seq;
 
@@ -185,7 +183,7 @@ public class SaleService {
         sale.setShop(shop);
         sale.setCustomer(customer);
         sale.setTotalAmount(finalTotalAmount);
-        sale.setRoundOff(roundOff); // Storing actual diff; adjust .negate() based on your UI preference
+        sale.setRoundOff(roundOff);
         sale.setSyncedFlag(false);
         sale.setSaleItems(saleItems);
         saleItems.forEach(si -> si.setSale(sale));
@@ -200,47 +198,61 @@ public class SaleService {
             deliveryService.createDelivery(deliveryDTO);
         }
 
-        // 8. Ledger Entry: Record the Debt (CREDIT)
+        // 8. Ledger Entry & Advance Liquidation
         if (customer != null) {
+            // A. Record the initial Debt (CREDIT increases Customer's payable balance)
             CustomerLedgerDto saleLedgerDto = new CustomerLedgerDto();
             saleLedgerDto.setAmount(finalTotalAmount);
             saleLedgerDto.setType(CustomerLedgerType.CREDIT);
             saleLedgerDto.setDescription("Sale #" + invoiceNo);
             ledgerService.addEntry(customer.getId(), saleLedgerDto);
+
+            // B. Apply existing Advance Pool (Drains available credits to pay this sale)
+            BigDecimal advanceApplied = paymentService.applyAdvanceToSale(customer.getId(), sale.getId(), finalTotalAmount);
+
         }
 
-        // 9. Process Payments with Pre-Validation
+        // 9. Process Fresh Payments (e.g., Cash paid at counter after advance was applied)
         if (dto.getPaymentDetails() != null && !dto.getPaymentDetails().isEmpty()) {
-            BigDecimal totalPaidInput = dto.getPaymentDetails().stream()
-                    .map(p -> p.getAmount() != null ? p.getAmount() : ZERO)
-                    .reduce(ZERO, BigDecimal::add);
+            // Calculate remaining gap after advance application
+            BigDecimal remainingDue = paymentService.calculateDueAmount(sale.getId(), PaymentSourceType.SALE, finalTotalAmount);
 
-            if (totalPaidInput.compareTo(finalTotalAmount) > 0) {
-                throw new BusinessValidationException("Total payment amount exceeds sale total.");
+            BigDecimal totalPaidInput = dto.getPaymentDetails().stream()
+                    .map(p -> p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // Validation: Ensure fresh payment doesn't exceed the REMAINING balance
+            if (totalPaidInput.compareTo(remainingDue) > 0) {
+                throw new BusinessValidationException("Payment amount exceeds the remaining due after advance: ₹" + remainingDue);
             }
 
             for (PaymentDto paymentDTO : dto.getPaymentDetails()) {
+                if (remainingDue.compareTo(BigDecimal.ZERO) <= 0) break;
+
                 paymentDTO.setSourceId(sale.getId());
                 paymentDTO.setSourceType(PaymentSourceType.SALE);
                 paymentDTO.setCustomerId(customer != null ? customer.getId() : null);
                 paymentDTO.setPaymentDate(LocalDateTime.now());
 
-                // This now handles Payment Record + Ledger DEBIT automatically
+                // Creates Payment record + Ledger DEBIT automatically
                 paymentService.createPayment(paymentDTO);
+
+                remainingDue = remainingDue.subtract(paymentDTO.getAmount());
             }
         }
 
-        // 10. Logging and Response
+        // 10. ChangeLog, JWT Token Generation and Response
         changeLogService.append("SALE", sale.getId(), com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.CREATE, mapper.toDto(sale), "LOCAL_DEVICE");
 
         String signedToken = jwtUtil.generateInvoiceToken(sale.getId(), sale.getInvoiceNo());
         SaleDto resultDto = mapper.toDto(sale);
         resultDto.setSignedInvoiceUrl("/api/invoices/signed?token=" + signedToken);
 
-        logger.info("Sale created successfully: ID={}, Invoice={}", sale.getId(), sale.getInvoiceNo());
+        logger.info("Sale created successfully: ID={}, Invoice={}, Applied Advance=₹{}",
+                sale.getId(), sale.getInvoiceNo(), (customer != null ? "Checked" : "N/A"));
+
         return resultDto;
     }
-
     @Transactional
     public void processSaleReturn(SaleReturnDto returnDto) {
         Sale sale = saleRepository.findById(returnDto.getSaleId())

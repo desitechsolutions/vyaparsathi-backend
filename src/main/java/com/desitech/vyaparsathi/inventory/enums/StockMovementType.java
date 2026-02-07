@@ -1,4 +1,4 @@
-package com.desitech.vyaparsathi.inventory;
+package com.desitech.vyaparsathi.inventory.enums;
 
 public enum StockMovementType {
     ADD, DEDUCT, ADJUST

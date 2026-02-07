@@ -1,9 +1,8 @@
 package com.desitech.vyaparsathi.receiving.dto;
 
-import com.desitech.vyaparsathi.inventory.dto.SupplierDto;
+import com.desitech.vyaparsathi.supplier.dto.SupplierDto;
 import com.desitech.vyaparsathi.receiving.enums.ReceivingStatus;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -34,4 +33,6 @@ public class ReceivingDto {
     private Long shopId;
 
     private SupplierDto supplier;
+    private Integer putawayQty;
+    private String putAwayStatus;
 }

@@ -2,7 +2,7 @@ package com.desitech.vyaparsathi.sales.controller;
 
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
 import com.desitech.vyaparsathi.sales.dto.InvoiceTokenData;
-import com.desitech.vyaparsathi.sales.service.invoice.InvoiceService2;
+import com.desitech.vyaparsathi.sales.service.invoice.InvoiceService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,9 +17,9 @@ public class InvoiceController {
     private static final Logger logger = LoggerFactory.getLogger(InvoiceController.class);
     @Autowired
     private JwtUtil jwtUtil;
-    private final InvoiceService2 invoiceService;
+    private final InvoiceService invoiceService;
 
-    public InvoiceController(InvoiceService2 invoiceService) {
+    public InvoiceController(InvoiceService invoiceService) {
         this.invoiceService = invoiceService;
     }
 

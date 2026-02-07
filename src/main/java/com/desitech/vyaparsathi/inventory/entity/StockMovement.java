@@ -1,8 +1,7 @@
 package com.desitech.vyaparsathi.inventory.entity;
 
-import com.desitech.vyaparsathi.common.entities.BaseEntity;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
-import com.desitech.vyaparsathi.inventory.StockMovementType;
+import com.desitech.vyaparsathi.inventory.enums.StockMovementType;
 import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
 import jakarta.persistence.*;
 

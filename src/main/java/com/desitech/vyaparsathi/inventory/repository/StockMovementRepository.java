@@ -1,9 +1,8 @@
 package com.desitech.vyaparsathi.inventory.repository;
 
 import com.desitech.vyaparsathi.common.repository.BaseRepository;
-import com.desitech.vyaparsathi.inventory.StockMovementType;
+import com.desitech.vyaparsathi.inventory.enums.StockMovementType;
 import com.desitech.vyaparsathi.inventory.entity.StockMovement;
-import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;

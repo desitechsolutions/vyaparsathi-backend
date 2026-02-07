@@ -1,7 +1,7 @@
-package com.desitech.vyaparsathi.inventory.mapper;
+package com.desitech.vyaparsathi.supplier.mapper;
 
-import com.desitech.vyaparsathi.inventory.dto.SupplierDto;
-import com.desitech.vyaparsathi.inventory.entity.Supplier;
+import com.desitech.vyaparsathi.supplier.dto.SupplierDto;
+import com.desitech.vyaparsathi.supplier.entity.Supplier;
 import org.mapstruct.Mapper;
 
 import java.util.List;

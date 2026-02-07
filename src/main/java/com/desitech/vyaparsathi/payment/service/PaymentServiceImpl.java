@@ -20,6 +20,8 @@ import com.desitech.vyaparsathi.sales.repository.SaleRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -138,14 +140,10 @@ public class PaymentServiceImpl implements PaymentService {
         if (method == null) return PaymentStatus.PENDING;
 
         // Fetch all payment methods for this source
-        List<Payment> payments = (sourceType != null && sourceId != null)
-                ? paymentRepository.findBySourceTypeAndSourceId(sourceType, sourceId)
-                : List.of();
+        Set<PaymentMethod> allMethods = (sourceType != null && sourceId != null)
+                ? paymentRepository.findPaymentMethodsBySource(sourceType, sourceId)
+                : new HashSet<>();
 
-        // Add current method if not already present (for new payment)
-        Set<PaymentMethod> allMethods = payments.stream()
-                .map(Payment::getPaymentMethod)
-                .collect(Collectors.toSet());
         allMethods.add(method);
 
         boolean hasOnlyInstantlySettled = allMethods.stream().allMatch(INSTANTLY_SETTLED_METHODS::contains);
@@ -175,35 +173,25 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Override
     @Cacheable("paymentsBySource")
-    public List<PaymentDto> getPaymentsBySource(PaymentSourceType sourceType, Long sourceId) {
+    public Page<PaymentDto> getPaymentsBySource(PaymentSourceType sourceType, Long sourceId, Pageable pageable) {
         return paymentRepository
-                .findBySourceTypeAndSourceId(sourceType, sourceId)
-                .stream()
-                .map(this::enrichPaymentDto)
-                .collect(Collectors.toList());
+                .findBySourceTypeAndSourceId(sourceType, sourceId, pageable)
+                .map(this::enrichPaymentDto);
     }
 
     @Override
     @Cacheable("paymentsBySupplier")
-    public List<PaymentDto> getPaymentsBySupplier(Long supplierId) {
+    public Page<PaymentDto> getPaymentsBySupplier(Long supplierId, Pageable pageable) {
         return paymentRepository
-                .findBySupplierId(supplierId)
-                .stream()
-                .map(this::enrichPaymentDto)
-                .collect(Collectors.toList());
+                .findBySupplierId(supplierId, pageable)
+                .map(this::enrichPaymentDto);
     }
-
-
     @Override
     @Cacheable("paymentsByCustomer")
-    public List<PaymentDto> getPaymentsByCustomer(Long customerId) {
-        return paymentRepository
-                .findByCustomerId(customerId)
-                .stream()
-                .map(this::enrichPaymentDto)
-                .collect(Collectors.toList());
+    public Page<PaymentDto> getPaymentsByCustomer(Long customerId, Pageable pageable) {
+        Page<Payment> payments = paymentRepository.findByCustomerId(customerId, pageable);
+        return payments.map(this::enrichPaymentDto);
     }
-
     @Override
     public Optional<PaymentDto> getPayment(Long id) {
         return paymentRepository.findById(id)
@@ -302,9 +290,8 @@ public class PaymentServiceImpl implements PaymentService {
         logger.info("Recorded Advance Payment: {} for Customer ID: {}", amount, customerId);
     }
     private BigDecimal calculateTotalPaidForSource(Long sourceId, PaymentSourceType sourceType) {
-        return paymentRepository.findBySourceTypeAndSourceId(sourceType, sourceId).stream()
-                .map(p -> p.getAmount() != null ? p.getAmount() : ZERO)
-                .reduce(ZERO, BigDecimal::add);
+        BigDecimal total = paymentRepository.sumPaymentsBySource(sourceType, sourceId);
+        return total != null ? total : ZERO;
     }
 
     public BigDecimal getCustomerAdvanceBalance(Long customerId) {
@@ -325,10 +312,8 @@ public class PaymentServiceImpl implements PaymentService {
         }
 
         // Get previous payments for this source
-        List<Payment> previousPayments = paymentRepository.findBySourceTypeAndSourceId(request.getSourceType(), request.getSourceId());
-        BigDecimal totalPaidBefore = previousPayments.stream()
-                .map(p -> p.getAmount() != null ? p.getAmount() : ZERO)
-                .reduce(ZERO, BigDecimal::add);
+        BigDecimal totalPaidBefore = paymentRepository.sumPaymentsBySource(request.getSourceType(), request.getSourceId());
+        if (totalPaidBefore == null) totalPaidBefore = ZERO;
 
         BigDecimal totalAmount = getTotalAmountForSource(request.getSourceId(), request.getSourceType());
         BigDecimal totalDue = totalAmount.subtract(totalPaidBefore).max(ZERO);
@@ -369,10 +354,7 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Override
     public BigDecimal calculateDueAmount(Long sourceId, PaymentSourceType sourceType, BigDecimal totalAmount) {
-        List<Payment> payments = paymentRepository.findBySourceTypeAndSourceId(sourceType, sourceId);
-        BigDecimal totalPaid = payments.stream()
-                .map(p -> p.getAmount() != null ? p.getAmount() : ZERO)
-                .reduce(ZERO, BigDecimal::add);
+        BigDecimal totalPaid = paymentRepository.sumPaymentsBySource(sourceType, sourceId);
         return totalAmount.subtract(totalPaid).max(ZERO);
     }
 
@@ -401,16 +383,14 @@ public class PaymentServiceImpl implements PaymentService {
      * Update parent payment status (Sale/PurchaseOrder/other types) based on all payments and payment methods.
      */
     private void updateSourcePaymentStatus(PaymentSourceType sourceType, Long sourceId) {
-        List<Payment> allPayments = paymentRepository.findBySourceTypeAndSourceId(sourceType, sourceId);
-        BigDecimal totalPaid = allPayments.stream()
-                .map(p -> p.getAmount() != null ? p.getAmount() : ZERO)
-                .reduce(ZERO, BigDecimal::add);
+        BigDecimal totalPaid = paymentRepository.sumPaymentsBySource(sourceType, sourceId);
+        if (totalPaid == null) totalPaid = BigDecimal.ZERO;
 
         BigDecimal totalAmount = getTotalAmountForSource(sourceId, sourceType);
-
-        Set<PaymentMethod> allMethods = allPayments.stream()
-                .map(Payment::getPaymentMethod)
-                .collect(Collectors.toSet());
+        if (totalAmount == null || totalAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        Set<PaymentMethod> allMethods = paymentRepository.findPaymentMethodsBySource(sourceType, sourceId);
 
         boolean hasOnlyInstantlySettled = !allMethods.isEmpty() && allMethods.stream().allMatch(INSTANTLY_SETTLED_METHODS::contains);
         boolean hasPendingMethods = allMethods.stream().anyMatch(m ->

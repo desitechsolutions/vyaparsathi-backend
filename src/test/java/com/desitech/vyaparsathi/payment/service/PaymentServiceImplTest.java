@@ -177,22 +177,31 @@ class PaymentServiceImplTest {
 
     @Test
     void recordDuePayment_throwsIfOverpay() {
+        // 1. Setup Request: Paying 1500
         PaymentReceivedRequest req = new PaymentReceivedRequest();
         req.setAmount(new BigDecimal("1500"));
         req.setSourceId(10L);
         req.setSourceType(PaymentSourceType.SALE);
+        req.setCustomerId(1L); // Ensure customerId is set if used for ledger
 
+        // 2. Mock the Sum query: 0 has been paid so far
+        // This replaces the findBySourceTypeAndSourceId mock
+        when(paymentRepository.sumPaymentsBySource(PaymentSourceType.SALE, 10L))
+                .thenReturn(BigDecimal.ZERO);
+
+        // 3. Mock the Sale: Total invoice value is only 1000
         Sale sale = createSale(10L, "1000");
-
-        when(paymentRepository.findBySourceTypeAndSourceId(any(), any())).thenReturn(Collections.emptyList());
         when(saleRepository.findById(10L)).thenReturn(Optional.of(sale));
 
+        // 4. Act & Assert: Should throw because 1500 > 1000
         assertThatThrownBy(() -> paymentService.recordDuePayment(req))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("exceeds due amount");
     }
 
     @Test
     void recordDuePayment_successAndSetsStatus() {
+        // 1. Setup Request
         PaymentReceivedRequest req = new PaymentReceivedRequest();
         req.setAmount(new BigDecimal("500"));
         req.setSourceId(11L);
@@ -201,19 +210,44 @@ class PaymentServiceImplTest {
         req.setCustomerId(101L);
 
         Sale sale = createSale(11L, "1000");
-        Payment payment = createBasicEntity(11L, PaymentSourceType.SALE, "500");
+        // Ensure initial status is NOT what we are checking for
+        sale.setPaymentStatus(PaymentStatus.PENDING);
 
-        when(paymentRepository.findBySourceTypeAndSourceId(any(), any())).thenReturn(Collections.emptyList());
+        Payment payment = createBasicEntity(11L, PaymentSourceType.SALE, "500");
+        payment.setPaymentMethod(PaymentMethod.CASH);
+
+        // 2. Mocks
+        when(paymentRepository.sumPaymentsBySource(PaymentSourceType.SALE, 11L))
+                .thenReturn(BigDecimal.ZERO)
+                .thenReturn(new BigDecimal("500"));
+        when(paymentRepository.findPaymentMethodsBySource(PaymentSourceType.SALE, 11L))
+                .thenReturn(new HashSet<>(Set.of(PaymentMethod.CASH)));
+
+        // Crucial: Use thenAnswer or return the same object to track state changes
         when(saleRepository.findById(11L)).thenReturn(Optional.of(sale));
         when(paymentMapper.toEntityFromPayRequest(any())).thenReturn(payment);
-        when(paymentRepository.save(any())).thenReturn(payment);
+        when(paymentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
+        // 3. Act
         paymentService.recordDuePayment(req);
 
+        // 4. Verification
+        // Verify Payment Save
         verify(paymentRepository).save(paymentCaptor.capture());
         assertThat(paymentCaptor.getValue().getStatus()).isEqualTo(PaymentStatus.PARTIALLY_PAID);
-    }
 
+        // Verify Sale Save with specific field check
+        // We use ArgumentCaptor for Sale to avoid the "Actual invocations have different arguments" confusion
+        ArgumentCaptor<Sale> saleCaptor = ArgumentCaptor.forClass(Sale.class);
+        verify(saleRepository, atLeastOnce()).save(saleCaptor.capture());
+
+        assertThat(saleCaptor.getValue().getPaymentStatus())
+                .as("The Sale status should be updated to PARTIALLY_PAID")
+                .isEqualTo(PaymentStatus.PARTIALLY_PAID);
+
+        // Verify Ledger
+        verify(ledgerService).addEntry(eq(101L), any(CustomerLedgerDto.class));
+    }
     // ----------- bulkPayment tests ------------
 
     @Test

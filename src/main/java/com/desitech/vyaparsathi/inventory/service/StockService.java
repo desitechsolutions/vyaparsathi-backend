@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
@@ -82,6 +83,10 @@ public class StockService {
                         (v1, v2) -> v1
                 ));
 
+        Map<Long, BigDecimal> wacMap = stockMovementRepository.findWacByVariantIds(variantIds)
+                .stream()
+                .collect(Collectors.toMap(StockMovementRepository.WacProjection::getVariantId, StockMovementRepository.WacProjection::getWac));
+
         return itemVariants.stream().map(variant -> {
             CurrentStockDto dto = new CurrentStockDto();
             dto.setItemVariantId(variant.getId());
@@ -95,7 +100,7 @@ public class StockService {
             dto.setTotalQuantity(stockMap.getOrDefault(variant.getId(), BigDecimal.ZERO));
 
             // Map the purchase price from our new map
-            dto.setCostPerUnit(costMap.getOrDefault(variant.getId(), BigDecimal.ZERO));
+            dto.setCostPerUnit(wacMap.getOrDefault(variant.getId(), BigDecimal.ZERO));
 
             dto.setBatch(null);
             return dto;
@@ -116,12 +121,10 @@ public class StockService {
             logger.warn("Insufficient stock for item variant {} (requested: {}, available: {})", itemVariantId, quantityToDeduct, currentStock);
             throw new InsufficientStockException("Insufficient stock for item variant " + itemVariantId);
         }
+        BigDecimal currentWac = getWeightedAverageCost(itemVariantId);
 
-        BigDecimal latestCost = getLatestPurchaseCost(itemVariantId);
-        // The entire complex FIFO logic is replaced by this single line.
-        recordStockMovement(itemVariantId, StockMovementType.DEDUCT, quantityToDeduct.negate(), latestCost, null, reason, reference);
+        recordStockMovement(itemVariantId, StockMovementType.DEDUCT, quantityToDeduct.negate(), currentWac, null, reason, reference);
     }
-
     public boolean isStockAvailable(Long itemVariantId, BigDecimal quantity) {
         BigDecimal currentStock = getCurrentStock(itemVariantId);
         return currentStock.compareTo(quantity) >= 0;
@@ -155,6 +158,11 @@ public class StockService {
     /**
      * Manual stock adjustment.
      */
+    /**
+     * Manual stock adjustment.
+     * Positive adjustments use provided cost or WAC fallback.
+     * Negative adjustments always use current WAC for valuation.
+     */
     @Transactional
     public StockMovementDto adjustStock(StockAdjustmentDto dto) {
         if (dto.getReason() == null || dto.getReason().trim().isEmpty()) {
@@ -164,21 +172,37 @@ public class StockService {
         itemVariantRepository.findById(dto.getItemVariantId())
                 .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", dto.getItemVariantId()));
 
-        // For negative adjustments, check for sufficient stock
-        if (dto.getAdjustmentQuantity().compareTo(BigDecimal.ZERO) < 0) {
-            BigDecimal quantityToDeduct = dto.getAdjustmentQuantity().abs();
+        BigDecimal adjustmentQty = dto.getAdjustmentQuantity();
+        BigDecimal currentWac = getWeightedAverageCost(dto.getItemVariantId());
+        BigDecimal finalCostPerUnit;
+
+        if (adjustmentQty.compareTo(BigDecimal.ZERO) < 0) {
+            // Negative Adjustment: Check stock and use WAC
+            BigDecimal quantityToDeduct = adjustmentQty.abs();
             BigDecimal currentStock = getCurrentStock(dto.getItemVariantId());
             if (currentStock.compareTo(quantityToDeduct) < 0) {
-                throw new InsufficientStockException("Cannot adjust by " + dto.getAdjustmentQuantity() + ". Only " + currentStock + " available.");
+                throw new InsufficientStockException("Cannot adjust by " + adjustmentQty + ". Only " + currentStock + " available.");
             }
+            finalCostPerUnit = currentWac;
+        } else {
+            // Positive Adjustment: Use provided cost, fallback to WAC
+            finalCostPerUnit = (dto.getCostPerUnit() != null && dto.getCostPerUnit().compareTo(BigDecimal.ZERO) > 0)
+                    ? dto.getCostPerUnit()
+                    : currentWac;
         }
 
-        StockMovement movement = recordStockMovement(dto.getItemVariantId(), StockMovementType.ADJUST, dto.getAdjustmentQuantity(),
-                dto.getCostPerUnit(), dto.getBatch(), dto.getReason(), "Manual Adjustment");
+        StockMovement movement = recordStockMovement(
+                dto.getItemVariantId(),
+                StockMovementType.ADJUST,
+                adjustmentQty,
+                finalCostPerUnit,
+                dto.getBatch(),
+                dto.getReason(),
+                "Manual Adjustment"
+        );
 
         return mapToStockMovementDto(movement);
     }
-
     // --- Helper and Passthrough Methods ---
 
     private StockMovement recordStockMovement(Long itemVariantId, StockMovementType movementType, BigDecimal quantity,
@@ -302,5 +326,20 @@ public class StockService {
 
         return prices.get(0).getPrice();
     }
-    // All other methods (like addStock overloads, calculateCOGSFifo) that were dependent on StockEntry are removed.
+
+    /**
+     * Calculates WAC: (Total Cost of All Additions) / (Total Quantity of All Additions)
+     */
+    public BigDecimal getWeightedAverageCost(Long itemVariantId) {
+        BigDecimal totalInvestment = stockMovementRepository.sumTotalCostForAddMovements(itemVariantId);
+        BigDecimal totalAdded = stockMovementRepository.sumTotalQuantityForAddMovements(itemVariantId);
+
+        // Check for nulls or zero quantity to avoid division by zero or NPE
+        if (totalAdded == null || totalAdded.compareTo(BigDecimal.ZERO) <= 0 || totalInvestment == null) {
+            // Fallback: If no ADD movements exist, valuation is zero
+            return BigDecimal.ZERO;
+        }
+
+        return totalInvestment.divide(totalAdded, 2, RoundingMode.HALF_UP);
+    }
 }

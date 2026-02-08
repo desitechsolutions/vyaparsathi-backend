@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -58,4 +59,34 @@ public interface StockMovementRepository extends BaseRepository<StockMovement, L
             "WHERE rm.rn = 1", nativeQuery = true)
     List<LastPurchasePrice> findLastPurchasePricesByVariantIds(@Param("variantIds") List<Long> variantIds);
 
+    @Query("SELECT SUM(sm.quantity * sm.costPerUnit) FROM StockMovement sm " +
+            "WHERE sm.itemVariant.id = :variantId AND sm.movementType = 'ADD'")
+    BigDecimal sumTotalCostForAddMovements(@Param("variantId") Long variantId);
+
+    @Query("SELECT SUM(sm.quantity) FROM StockMovement sm " +
+            "WHERE sm.itemVariant.id = :variantId AND sm.movementType = 'ADD'")
+    BigDecimal sumTotalQuantityForAddMovements(@Param("variantId") Long variantId);
+
+    // Optimized single-query WAC
+    @Query("SELECT COALESCE(SUM(sm.quantity * sm.costPerUnit) / NULLIF(SUM(sm.quantity), 0), 0) " +
+            "FROM StockMovement sm " +
+            "WHERE sm.itemVariant.id = :variantId AND sm.movementType = 'ADD' AND sm.quantity > 0")
+    BigDecimal getWeightedAverageCost(@Param("variantId") Long variantId);
+
+    interface WacProjection {
+        Long getVariantId();
+        BigDecimal getWac();
+    }
+
+    @Query("SELECT sm.itemVariant.id AS variantId, " +
+            "COALESCE(SUM(sm.quantity * sm.costPerUnit) / NULLIF(SUM(sm.quantity), 0), 0) AS wac " +
+            "FROM StockMovement sm WHERE sm.itemVariant.id IN :variantIds " +
+            "AND sm.movementType = 'ADD' GROUP BY sm.itemVariant.id")
+    List<WacProjection> findWacByVariantIds(@Param("variantIds") List<Long> variantIds);
+
+    /**
+     * New method to support WAC calculation by fetching multiple types (ADD, ADJUSTMENT).
+     * This ensures manual stock corrections are factored into the average cost.
+     */
+    List<StockMovement> findByItemVariantIdAndMovementTypeIn(Long itemVariantId, Collection<StockMovementType> types);
 }

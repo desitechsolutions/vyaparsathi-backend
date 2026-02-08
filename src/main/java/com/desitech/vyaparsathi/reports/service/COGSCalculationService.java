@@ -13,24 +13,24 @@ import org.slf4j.LoggerFactory;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Service to calculate Cost of Goods Sold (COGS).
- * Uses a weighted average cost method based on 'ADD' movements from the StockMovement table.
+ * Uses a weighted average cost method based on ADD and positive ADJUSTMENT movements.
  */
 @Service
 public class COGSCalculationService {
 
     private static final Logger logger = LoggerFactory.getLogger(COGSCalculationService.class);
 
-    // CHANGED: Use StockMovementRepository, our new single source of truth.
     @Autowired
     private StockMovementRepository stockMovementRepository;
 
-    // A simple cache to avoid recalculating the average cost for the same item within a single report.
+    // Cache to optimize performance during report generation
     private final Map<Long, BigDecimal> costCache = new ConcurrentHashMap<>();
 
     /**
@@ -40,11 +40,16 @@ public class COGSCalculationService {
      * @return Total COGS for the period
      */
     public BigDecimal calculateCOGS(List<Sale> sales) {
-        costCache.clear(); // Clear cache for each new report run.
+        costCache.clear();
+        if (sales == null || sales.isEmpty()) return BigDecimal.ZERO;
+
         return sales.stream()
+                .filter(sale -> sale.getSaleItems() != null)
                 .flatMap(sale -> sale.getSaleItems().stream())
                 .map(this::calculateItemCOGS)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                // Final rounding to 2 decimal places for the report total
+                .setScale(2, RoundingMode.HALF_UP);
     }
 
     /**
@@ -57,56 +62,59 @@ public class COGSCalculationService {
         if (saleItem.getItemVariant() == null || saleItem.getQty() == null) {
             return BigDecimal.ZERO;
         }
+
         Long itemVariantId = saleItem.getItemVariant().getId();
         BigDecimal quantitySold = saleItem.getQty();
 
-        // Use the cache to get the average cost. If not present, calculate it.
+        // Calculate average cost with higher precision (4 decimals) for accuracy
         BigDecimal averageCost = costCache.computeIfAbsent(itemVariantId, this::calculateWeightedAverageCost);
 
         return quantitySold.multiply(averageCost);
     }
 
     /**
-     * Calculate the weighted average cost for an item variant from all its 'ADD' stock movements.
-     * This is the core of our new, correct COGS logic.
-     *
-     * @param itemVariantId The item variant ID
-     * @return Weighted average cost per unit
+     * Core Logic: WAC = (Sum of all Purchase Costs) / (Sum of all Purchased Quantities)
      */
     private BigDecimal calculateWeightedAverageCost(Long itemVariantId) {
-        // 1. Fetch all historical purchase ('ADD') movements for this item.
-        List<StockMovement> addMovements = stockMovementRepository.findByItemVariantIdAndMovementType(itemVariantId, StockMovementType.ADD);
+        // We include ADD (purchases) and we should also check ADJUSTMENTS that added stock
+        List<StockMovement> movements = stockMovementRepository.findByItemVariantIdAndMovementTypeIn(
+                itemVariantId,
+                Arrays.asList(StockMovementType.ADD, StockMovementType.ADJUST)
+        );
 
-        if (addMovements.isEmpty()) {
-            logger.warn("No 'ADD' stock movements found for itemVariantId: {}. Cannot calculate COGS. Returning ZERO.", itemVariantId);
+        if (movements.isEmpty()) {
+            logger.warn("No stock movements found for itemVariantId: {}. COGS will be ZERO.", itemVariantId);
             return BigDecimal.ZERO;
         }
 
-        BigDecimal totalCost = BigDecimal.ZERO;
-        BigDecimal totalQuantity = BigDecimal.ZERO;
+        BigDecimal totalCostAmount = BigDecimal.ZERO;
+        BigDecimal totalQuantityCount = BigDecimal.ZERO;
 
-        // 2. Sum the total cost and total quantity from all historical purchases.
-        for (StockMovement movement : addMovements) {
-            if (movement.getCostPerUnit() != null && movement.getQuantity() != null && movement.getQuantity().compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal entryTotalCost = movement.getCostPerUnit().multiply(movement.getQuantity());
-                totalCost = totalCost.add(entryTotalCost);
-                totalQuantity = totalQuantity.add(movement.getQuantity());
+        for (StockMovement movement : movements) {
+            BigDecimal qty = movement.getQuantity();
+            BigDecimal cost = movement.getCostPerUnit();
+
+            // Only factor in movements that added value/stock to the warehouse
+            if (qty != null && cost != null && qty.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal entryValue = cost.multiply(qty);
+                totalCostAmount = totalCostAmount.add(entryValue);
+                totalQuantityCount = totalQuantityCount.add(qty);
             }
         }
 
-        if (totalQuantity.compareTo(BigDecimal.ZERO) == 0) {
+        if (totalQuantityCount.compareTo(BigDecimal.ZERO) <= 0) {
             return BigDecimal.ZERO;
         }
 
-        // 3. Return weighted average cost = Total Cost of Purchases / Total Quantity Purchased
-        return totalCost.divide(totalQuantity, 2, RoundingMode.HALF_UP);
+        // Use scale of 4 for intermediate WAC to prevent precision loss (e.g., 188.2642)
+        return totalCostAmount.divide(totalQuantityCount, 4, RoundingMode.HALF_UP);
     }
 
     /**
      * A helper method for logging, which delegates to the main calculateCOGS method.
      */
     public BigDecimal calculateCOGSForPeriod(List<Sale> sales, LocalDate fromDate, LocalDate toDate) {
-        logger.info("Calculating COGS for period: {} to {}", fromDate, toDate);
+        logger.info("Generating COGS Report: {} to {}", fromDate, toDate);
         return calculateCOGS(sales);
     }
 }

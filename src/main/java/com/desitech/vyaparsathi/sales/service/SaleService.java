@@ -1,6 +1,6 @@
 package com.desitech.vyaparsathi.sales.service;
 
-import com.desitech.vyaparsathi.audit.annotation.LogAudit;
+import com.desitech.vyaparsathi.common.annotations.LogAudit;
 import com.desitech.vyaparsathi.audit.helper.AuditHelper;
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
 import com.desitech.vyaparsathi.changelog.service.ChangeLogService;
@@ -253,64 +253,84 @@ public class SaleService {
 
         return resultDto;
     }
+
     @Transactional
     public void processSaleReturn(SaleReturnDto returnDto) {
         Sale sale = saleRepository.findById(returnDto.getSaleId())
                 .orElseThrow(() -> new EntityNotFoundAppException("Sale", returnDto.getSaleId()));
 
-        BigDecimal totalReturnAmount = ZERO;
+        BigDecimal totalReturnAmount = BigDecimal.ZERO;
 
+        // 1. Process Items and Inventory
         for (SaleReturnDto.SaleReturnItemDto returnItem : returnDto.getReturnItems()) {
             SaleItem saleItem = sale.getSaleItems().stream()
-                    .filter(si -> si.getId().equals(returnItem.getSaleItemId()))
+                    .filter(si -> si.getItemVariant().getId().equals(returnItem.getSaleItemId()))
                     .findFirst()
-                    .orElseThrow(() -> new EntityNotFoundAppException("Sale item", returnItem.getSaleItemId()));
+                    .orElseThrow(() -> new EntityNotFoundAppException("Sale Item", returnItem.getSaleItemId()));
 
-            if (returnItem.getReturnQuantity().compareTo(saleItem.getQty()) > 0) {
-                throw new BusinessValidationException("Return quantity cannot exceed original quantity");
-            }
+            BigDecimal currentReturned = saleItem.getReturnedQty() != null ? saleItem.getReturnedQty() : BigDecimal.ZERO;
+            BigDecimal requestedQty = returnItem.getReturnQuantity();
 
-            BigDecimal itemReturnAmount = saleItem.getUnitPrice().multiply(returnItem.getReturnQuantity());
-            totalReturnAmount = totalReturnAmount.add(itemReturnAmount);
+            totalReturnAmount = totalReturnAmount.add(saleItem.getUnitPrice().multiply(requestedQty));
+            saleItem.setReturnedQty(currentReturned.add(requestedQty));
+            saleItem.setReturned(true);
 
-            // Stock Adjustment
             StockAdjustmentDto adjustment = new StockAdjustmentDto();
             adjustment.setItemVariantId(saleItem.getItemVariant().getId());
-            adjustment.setAdjustmentQuantity(returnItem.getReturnQuantity());
-            adjustment.setReason("Return from Sale #" + sale.getInvoiceNo());
+            adjustment.setAdjustmentQuantity(requestedQty);
+            adjustment.setReason("Return: Inv #" + sale.getInvoiceNo());
             stockService.adjustStock(adjustment);
-
-            saleItem.setQty(saleItem.getQty().subtract(returnItem.getReturnQuantity()));
         }
 
-        sale.setTotalAmount(sale.getTotalAmount().subtract(totalReturnAmount));
+        // 2. Calculate the Debt vs. Cash situation
+        BigDecimal totalOriginalAmount = sale.getTotalAmount();
+        BigDecimal paidBeforeReturn = paymentService.getTotalPaidBySaleIds(Set.of(sale.getId())).getOrDefault(sale.getId(), BigDecimal.ZERO);
+        BigDecimal unpaidDebtBeforeReturn = totalOriginalAmount.subtract(paidBeforeReturn).max(BigDecimal.ZERO);
+
+        // 3. Update Sale Header
+        sale.setTotalAmount(totalOriginalAmount.subtract(totalReturnAmount).max(BigDecimal.ZERO));
+        if (sale.getSaleItems().stream().allMatch(item -> item.getReturnedQty().compareTo(item.getQty()) >= 0)) {
+            sale.setStatus(SaleStatus.RETURNED);
+        }
         saleRepository.save(sale);
 
-        if (sale.getCustomer() != null) {
-            // 1. Record the reduction in debt in Customer Ledger
-            CustomerLedgerDto ledgerDto = new CustomerLedgerDto();
-            ledgerDto.setAmount(totalReturnAmount);
-            ledgerDto.setType(CustomerLedgerType.DEBIT);
-            ledgerDto.setDescription("Return Credit for Sale #" + sale.getInvoiceNo());
-            ledgerService.addEntry(sale.getCustomer().getId(), ledgerDto);
+        // 4. Financial Adjustments (The Fix is Here)
+        if (sale.getCustomer() != null && totalReturnAmount.compareTo(BigDecimal.ZERO) > 0) {
 
-            // 2. If Refund/Credit is required, use bulkPayment to trigger Advance logic
+            // A. Handle the Unpaid Portion (Credit Note)
+            // This clears the debt the customer NEVER paid.
+            BigDecimal debtToCancel = totalReturnAmount.min(unpaidDebtBeforeReturn);
+            if (debtToCancel.compareTo(BigDecimal.ZERO) > 0) {
+                CustomerLedgerDto creditNote = new CustomerLedgerDto();
+                creditNote.setAmount(debtToCancel);
+                creditNote.setType(CustomerLedgerType.DEBIT);
+                creditNote.setDescription("Sales Return (Debt Cancel) - Inv #" + sale.getInvoiceNo());
+                ledgerService.addEntry(sale.getCustomer().getId(), creditNote);
+            }
+
+            // B. Handle the Paid Portion (Refund/Advance)
+            // This moves REAL CASH to the customer's advance balance.
             if (returnDto.isRefundPayment()) {
-                BulkPaymentRequest bulkRequest = new BulkPaymentRequest();
-                bulkRequest.setCustomerId(sale.getCustomer().getId());
-                bulkRequest.setTotalAmount(totalReturnAmount);
-                bulkRequest.setPaymentMethod(PaymentMethod.OTHER);
-                bulkRequest.setPaymentDate(LocalDateTime.now());
-                bulkRequest.setReference("RETURN-REFUND-" + sale.getInvoiceNo());
-                bulkRequest.setSelectedSaleIds(new ArrayList<>()); // Empty list ensures it hits saveAdvancePayment internally
+                BigDecimal cashToMoveToAdvance = totalReturnAmount.subtract(debtToCancel).max(BigDecimal.ZERO);
 
-                paymentService.bulkPayment(bulkRequest);
+                if (cashToMoveToAdvance.compareTo(BigDecimal.ZERO) > 0) {
+                    BulkPaymentRequest bulkRequest = new BulkPaymentRequest();
+                    bulkRequest.setCustomerId(sale.getCustomer().getId());
+                    bulkRequest.setTotalAmount(cashToMoveToAdvance);
+                    bulkRequest.setPaymentMethod(PaymentMethod.OTHER);
+                    bulkRequest.setPaymentDate(LocalDateTime.now());
+                    bulkRequest.setReference("Return Refund to Advance - Inv #" + sale.getInvoiceNo());
+                    bulkRequest.setSelectedSaleIds(new ArrayList<>());
+
+                    paymentService.bulkPayment(bulkRequest);
+                }
             }
         }
-
-        auditHelper.log("PROCESS_RETURN", "SALE", returnDto.getSaleId().toString(), "Return Reason: " + returnDto.getReason());
-        changeLogService.append("SALE_RETURN", sale.getId(), com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.RETURN, returnDto, "LOCAL_DEVICE");
+        auditHelper.log("PROCESS_RETURN", "SALE", sale.getId().toString(), "Returned: " + totalReturnAmount);
+        changeLogService.append("SALE_RETURN", sale.getId(),
+                com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.RETURN, returnDto, "LOCAL_DEVICE");
     }
+
     @Transactional
     public void cancelSale(Long saleId, String reason) {
         BigDecimal totalPaid = ZERO;
@@ -383,23 +403,38 @@ public class SaleService {
                 .map(sale -> {
                     SaleDto dto = mapper.toDto(sale);
 
-                    deliveryRepository.findBySaleIdOrderByCreatedAtDesc(saleId)
-                            .stream()
-                            .findFirst()
-                            .ifPresent(delivery ->
-                                    dto.setDelivery(deliveryMapper.toDto(delivery))
-                            );
+                    // Populate History for each item
+                    if (dto.getItems() != null) {
+                        for (SaleItemDto itemDto : dto.getItems()) {
+                            sale.getSaleItems().stream()
+                                    .filter(si -> si.getItemVariant().getId().equals(itemDto.getItemVariantId()))
+                                    .findFirst()
+                                    .ifPresent(si -> {
+                                        BigDecimal purchased = si.getQty() != null ? si.getQty() : BigDecimal.ZERO;
+                                        BigDecimal returned = si.getReturnedQty() != null ? si.getReturnedQty() : BigDecimal.ZERO;
 
-                    // Optional: add paid/due if needed
+                                        // Set both history fields in the DTO
+                                        itemDto.setReturnedQty(returned);
+                                        itemDto.setNetQty(purchased.subtract(returned));
+                                    });
+                        }
+                    }
+
+                    // Standard Delivery & Payment logic
+                    deliveryRepository.findBySaleIdOrderByCreatedAtDesc(saleId)
+                            .stream().findFirst()
+                            .ifPresent(d -> dto.setDelivery(deliveryMapper.toDto(d)));
+
                     Map<Long, BigDecimal> paidMap = paymentService.getTotalPaidBySaleIds(Set.of(saleId));
                     BigDecimal paid = paidMap.getOrDefault(saleId, ZERO);
+
                     dto.setPaidAmount(paid);
+                    // Important: totalAmount was already reduced in processSaleReturn
                     dto.setDueAmount(sale.getTotalAmount().subtract(paid));
 
                     return dto;
                 });
     }
-
     public List<SaleDto> listSales(LocalDateTime startDate, LocalDateTime endDate) {
         if (startDate == null) {
             startDate = LocalDateTime.of(1970, 1, 1, 0, 0);
@@ -443,7 +478,7 @@ public class SaleService {
 
         return sales.stream()
                 .map(sale -> mapToDueDto(sale, paidBySale.getOrDefault(sale.getId(), ZERO)))
-                .filter(dto -> dto.getDueAmount().compareTo(ZERO) > 0) // Only show actual dues
+                .filter(dto -> dto.getDueAmount().compareTo(ZERO) > 0)
                 .collect(Collectors.toList());
     }
 

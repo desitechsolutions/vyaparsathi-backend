@@ -1,0 +1,34 @@
+services:
+  db:
+    image: mysql:9.4
+    container_name: vyaparsathi-db
+    restart: always
+    environment:
+      MYSQL_DATABASE: vyaparsathi
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_USER: vuser
+      MYSQL_PASSWORD: vpassword
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: vyaparsathi-app
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://db:3306/vyaparsathi?allowPublicKeyRetrieval=true&useSSL=false
+      - SPRING_DATASOURCE_USERNAME=vuser
+      - SPRING_DATASOURCE_PASSWORD=vpassword
+      - SPRING_FLYWAY_ENABLED=true
+      # Add your mail and jwt secrets here
+      - APP_RESET_PASSWORD_URL=http://localhost:3000/reset-password
+    restart: on-failure

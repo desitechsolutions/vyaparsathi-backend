@@ -11,6 +11,7 @@ import com.desitech.vyaparsathi.shop.dto.ShopDto;
 import com.desitech.vyaparsathi.shop.service.ShopService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -111,5 +112,25 @@ public class ShopOnboardingController {
             logger.error("Unexpected error fetching shop details", e);
             throw new ApplicationException("Failed to fetch shop details", e);
         }
+    }
+
+    /**
+     * Checks if a shop code (slug) is already taken.
+     * Used during onboarding to prevent duplicate shop URLs.
+     * @param code The slug to check.
+     * @return 200 OK if available, 409 Conflict if taken.
+     */
+    @GetMapping("/check-code")
+    @PreAuthorize("hasRole('PENDING_OWNER') or hasRole('OWNER')")
+    public ResponseEntity<Boolean> checkShopCode(@RequestParam("code") String code) {
+        logger.debug("Checking availability for shop code: {}", code);
+
+        boolean exists = shopService.existsByCode(code);
+
+        if (exists) {
+            logger.warn("Shop code collision detected: {}", code);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(true);
+        }
+        return ResponseEntity.ok(false);
     }
 }

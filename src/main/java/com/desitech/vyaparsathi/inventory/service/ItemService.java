@@ -86,8 +86,8 @@ public class ItemService {
         existingItem.setName(itemDto.getName());
         existingItem.setDescription(itemDto.getDescription());
         existingItem.setBrandName(itemDto.getBrandName());
-        existingItem.setFabric(itemDto.getFabric());
-        existingItem.setSeason(itemDto.getSeason());
+        existingItem.setAttribute1(itemDto.getAttribute1() != null ? itemDto.getAttribute1() : itemDto.getFabric());
+        existingItem.setAttribute2(itemDto.getAttribute2() != null ? itemDto.getAttribute2() : itemDto.getSeason());
         if (itemDto.getCategoryId() != null) {
             // Check if the category has changed
             if (existingItem.getCategory() == null || !existingItem.getCategory().getId().equals(itemDto.getCategoryId())) {

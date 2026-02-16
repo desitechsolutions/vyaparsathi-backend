@@ -1,0 +1,3 @@
+ALTER TABLE item
+ADD COLUMN attribute_1 VARCHAR(255),
+ADD COLUMN attribute_2 VARCHAR(255);

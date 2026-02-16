@@ -1,5 +1,5 @@
 package com.desitech.vyaparsathi.sales.enums;
 
 public enum SaleStatus {
-    COMPLETED,DRAFT,CANCELLED
+    COMPLETED,DRAFT,CANCELLED, RETURNED
 }

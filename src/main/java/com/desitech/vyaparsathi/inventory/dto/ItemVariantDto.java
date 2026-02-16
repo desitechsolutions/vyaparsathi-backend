@@ -29,4 +29,6 @@ public class ItemVariantDto {
     private String categoryName; // Added for completeness
     private String fabric; // Added from parent
     private String season; // Added
+    private String attribute1;
+    private String attribute2;
 }

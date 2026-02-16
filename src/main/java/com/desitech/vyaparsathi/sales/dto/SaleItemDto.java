@@ -25,4 +25,6 @@ public class SaleItemDto {
     private BigDecimal discount = BigDecimal.ZERO;
     private int gstRate;
     private BigDecimal taxableValue;
+    private BigDecimal returnedQty;
+    private BigDecimal netQty;
 }

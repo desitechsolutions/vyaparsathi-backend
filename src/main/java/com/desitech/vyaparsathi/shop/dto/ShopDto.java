@@ -23,4 +23,7 @@ public class ShopDto {
     private String code;
 
     private String locale;
+
+    @NotBlank(message = "Industry type is required")
+    private String industryType;
 }

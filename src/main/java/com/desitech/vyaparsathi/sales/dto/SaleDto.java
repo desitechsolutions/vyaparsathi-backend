@@ -1,6 +1,6 @@
 package com.desitech.vyaparsathi.sales.dto;
 
-import com.desitech.vyaparsathi.audit.annotation.AuditValue;
+import com.desitech.vyaparsathi.common.annotations.AuditValue;
 import com.desitech.vyaparsathi.common.util.CustomLocalDateTimeDeserializer;
 import com.desitech.vyaparsathi.customer.dto.CustomerDto;
 import com.desitech.vyaparsathi.delivery.dto.DeliveryDTO;

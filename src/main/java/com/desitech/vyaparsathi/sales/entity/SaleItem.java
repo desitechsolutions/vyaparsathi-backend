@@ -51,4 +51,10 @@ public class SaleItem extends ShopAwareEntity {
 
     @Column(name = "discount", precision = 12, scale = 2)
     private BigDecimal discount = BigDecimal.ZERO;
+
+    @Column(name = "returned_qty", precision = 10, scale = 2)
+    private BigDecimal returnedQty = BigDecimal.ZERO;
+
+    @Column(name = "is_returned", nullable = false)
+    private boolean isReturned = false;
 }

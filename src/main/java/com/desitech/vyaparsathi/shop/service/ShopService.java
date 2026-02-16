@@ -50,13 +50,13 @@ public class ShopService {
             throw new IllegalStateException("Shop already exists for this user");
         }
 
-        // Validate unique shop code
         if (shopRepository.existsByCode(dto.getCode())) {
             throw new IllegalArgumentException("Shop code '" + dto.getCode() + "' is already in use");
         }
 
         // 1. Create shop
         Shop shop = shopMapper.toEntity(dto);
+
         // Handle Logo Storage
         if (logo != null && !logo.isEmpty()) {
             String fileName = UUID.randomUUID().toString() + "_" + logo.getOriginalFilename();
@@ -64,33 +64,31 @@ public class ShopService {
                 Path path = Paths.get(uploadDir);
                 if (!Files.exists(path)) Files.createDirectories(path);
                 Files.copy(logo.getInputStream(), path.resolve(fileName), StandardCopyOption.REPLACE_EXISTING);
-                shop.setLogoPath(fileName); // Save filename/path to DB
+                shop.setLogoPath(fileName);
             } catch (IOException e) {
+                logger.error("Failed to save shop logo", e);
                 throw new RuntimeException("Could not save logo file", e);
             }
         }
+
         shop = shopRepository.saveAndFlush(shop);
 
+        // 2. Set Context and Seed
         TenantContext.setCurrentShopId(shop.getId());
-        // 2. Assign shop to user & upgrade role
         try {
-            // Assign to user
             currentUser.setShop(shop);
             currentUser.setRole(Role.OWNER);
             userRepository.save(currentUser);
 
-            // Seed categories (listener will now auto-set shop if needed)
-            seedDefaultClothingCategories(shop);
-        }
-        finally {
-            // Always clear after seeding
+            // Seed based on selected industry
+            seedDefaultCategories(shop, dto.getIndustryType());
+        } finally {
+            // ALWAYS clear to prevent context pollution
             TenantContext.clear();
         }
 
-        // 3. Seed default clothing categories
-        seedDefaultClothingCategories(shop);
-
-        logger.info("Onboarding completed - Shop created: id={}, name={}", shop.getId(), shop.getName());
+        logger.info("Onboarding completed - Shop created: id={}, name={}, industry={}",
+                shop.getId(), shop.getName(), dto.getIndustryType());
 
         return shopMapper.toDto(shop);
     }
@@ -135,43 +133,46 @@ public class ShopService {
                 .orElseThrow(() -> new EntityNotFoundException("Shop not found"));
     }
 
-    private void seedDefaultClothingCategories(Shop shop) {
-        if (shop.getId() == null) {
-            throw new IllegalStateException("Shop has no ID during seeding");
+    private void seedDefaultCategories(Shop shop, String industryType) {
+        if (shop.getId() == null) throw new IllegalStateException("Shop has no ID");
+
+        logger.info("Seeding categories for industry: {} in shop {}", industryType, shop.getId());
+
+        if (industryType == null) industryType = "GENERAL";
+
+        switch (industryType.toUpperCase()) {
+            case "CLOTHING":
+                Category men = createCategoryManually("MEN", null, shop);
+                Category women = createCategoryManually("WOMEN", null, shop);
+                createCategoryManually("CASUAL", men, shop);
+                createCategoryManually("FORMAL", men, shop);
+                createCategoryManually("ETHNIC / SAREES", women, shop);
+                createCategoryManually("FOOTWEAR", null, shop);
+                break;
+
+            case "ELECTRONICS":
+                Category electronics = createCategoryManually("ELECTRONICS", null, shop);
+                createCategoryManually("MOBILE & ACCESSORIES", electronics, shop);
+                createCategoryManually("LAPTOPS & COMPUTING", electronics, shop);
+                createCategoryManually("HOME APPLIANCES", electronics, shop);
+                createCategoryManually("AUDIO & WEARABLES", electronics, shop);
+                break;
+
+            case "HARDWARE":
+                Category hardware = createCategoryManually("HARDWARE", null, shop);
+                createCategoryManually("ELECTRICAL FITTINGS", hardware, shop);
+                createCategoryManually("PLUMBING & SANITARY", hardware, shop);
+                createCategoryManually("PAINTS & ADHESIVES", hardware, shop);
+                createCategoryManually("HAND & POWER TOOLS", hardware, shop);
+                break;
+
+            default: // GENERAL
+                Category others = createCategoryManually("OTHERS", null, shop);
+                createCategoryManually("STATIONERY", others, shop);
+                createCategoryManually("TOYS & GAMES", others, shop);
+                createCategoryManually("HOME DECOR", others, shop);
+                break;
         }
-
-        logger.info("Seeding default categories for shop {}", shop.getId());
-
-        // Root categories
-        Category men = createCategoryManually("MEN", null, shop);
-        Category women = createCategoryManually("WOMEN", null, shop);
-        Category kids = createCategoryManually("KIDS", null, shop);
-        Category unisex = createCategoryManually("UNISEX / ACCESSORIES", null, shop);
-
-        // MEN sub-categories
-        createCategoryManually("CASUAL", men, shop);
-        createCategoryManually("FORMAL", men, shop);
-        createCategoryManually("ETHNIC / FESTIVE", men, shop);
-        createCategoryManually("ACTIVEWEAR / SPORTS", men, shop);
-        createCategoryManually("INNERWEAR", men, shop);
-
-        // WOMEN sub-categories
-        createCategoryManually("ETHNIC / SAREES", women, shop);
-        createCategoryManually("WESTERN / FUSION", women, shop);
-        createCategoryManually("KURTIS & TOPS", women, shop);
-        createCategoryManually("LEGGINGS & BOTTOMS", women, shop);
-
-        // KIDS sub-categories
-        createCategoryManually("BOYS", kids, shop);
-        createCategoryManually("GIRLS", kids, shop);
-        createCategoryManually("INFANT / TODDLER", kids, shop);
-
-        // Unisex / Accessories
-        createCategoryManually("FOOTWEAR", unisex, shop);
-        createCategoryManually("BAGS & WALLETS", unisex, shop);
-        createCategoryManually("JEWELLERY & WATCHES", unisex, shop);
-
-        logger.info("Seeded default categories for shop {}", shop.getId());
     }
 
     private Category createCategoryManually(String name, Category parent, Shop shop) {
@@ -192,34 +193,8 @@ public class ShopService {
 
         return categoryRepository.save(category);
     }
-
-/*    private Category createCategory(String name, Category parent, Shop shop) {
-        Long shopId = shop.getId();
-
-        // 1. Idempotent check (fast existence check)
-        if (categoryRepository.existsByNameAndShop(name, shop)) {
-            logger.debug("Category '{}' already exists for shop {}", name, shopId);
-            // Return existing (fetch only when needed)
-            return categoryRepository.findByNameAndShop(name, shop)
-                    .orElseThrow(() -> new IllegalStateException("Category existence check failed after positive result"));
-        }
-
-        // 2. Prepare DTO for creation
-        CategoryCreateDto dto = CategoryCreateDto.builder()
-                .name(name)
-                .parentId(parent != null ? parent.getId() : null)
-                .build();
-
-        // 3. Create via service (handles mapping, shop assignment via listener, validation)
-        CategoryDto savedDto = categoryService.createCategory(dto);
-
-        // 4. Convert back to entity if caller needs full entity (optional)
-        //    - If you only need ID or basic info, return DTO instead
-        Category savedEntity = categoryMapper.toEntity(savedDto);
-
-        logger.info("Created category: name='{}', id={}, parentId={}, shopId={}",
-                name, savedEntity.getId(), parent != null ? parent.getId() : null, shopId);
-
-        return savedEntity;
-    }*/
+public boolean existsByCode(String code) {
+    Long count = shopRepository.countByCodeGlobal(code);
+    return count != null && count > 0;
+}
 }

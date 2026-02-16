@@ -9,6 +9,7 @@ public enum Role {
     OWNER,
     STAFF,
     ADMIN,
+    SUPER_ADMIN,
     PENDING_OWNER;
 
     @JsonCreator

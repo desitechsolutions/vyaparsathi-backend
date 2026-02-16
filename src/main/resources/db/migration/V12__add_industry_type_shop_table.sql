@@ -1,0 +1,2 @@
+ALTER TABLE `shop`
+ADD COLUMN `industry_type` VARCHAR(50) DEFAULT 'GENERAL' AFTER `code`;

@@ -34,6 +34,12 @@ public class Item extends ShopAwareEntity {
     @Column
     private String season;
 
+    @Column(name = "attribute_1")
+    private String attribute1;
+
+    @Column(name = "attribute_2")
+    private String attribute2;
+
     // A Item can have many variants (e.g., T-Shirt can be size M, L)
     @OneToMany(mappedBy = "item", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference

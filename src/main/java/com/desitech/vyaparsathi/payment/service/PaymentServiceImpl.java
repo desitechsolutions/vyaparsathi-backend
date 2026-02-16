@@ -511,4 +511,30 @@ public class PaymentServiceImpl implements PaymentService {
 
         return totalApplied;
     }
+
+/*    @Transactional
+    public void processCashRefund(Long customerId, BigDecimal amount, String reason) {
+        // 1. Verify they have enough 'Advance' to refund
+        BigDecimal currentAdvance = customerService.getCustomerAdvanceBalance(customerId);
+        if (amount.compareTo(currentAdvance) > 0) {
+            throw new BusinessValidationException("Refund amount exceeds available customer credit.");
+        }
+
+        // 2. Create a Negative Payment (The Payout)
+        Payment refundPayout = new Payment();
+        refundPayout.setCustomerId(customerId);
+        refundPayout.setAmount(amount.negate()); // IMPORTANT: Negative amount reduces the balance
+        refundPayout.setPaymentMethod(PaymentMethod.CASH); // Or however you paid them back
+        refundPayout.setPaymentDate(LocalDateTime.now());
+        refundPayout.setReference("CASH_REFUND: " + reason);
+        refundPayout.setSourceType(PaymentSourceType.ADVANCE); // Mark as advance withdrawal
+        paymentRepository.save(refundPayout);
+
+        // 3. Record in Ledger
+        CustomerLedgerDto ledgerDto = new CustomerLedgerDto();
+        ledgerDto.setAmount(amount);
+        ledgerDto.setType(CustomerLedgerType.CREDIT); // Or a new type 'REFUND_PAYOUT'
+        ledgerDto.setDescription("Cash Refund Paid to Customer: " + reason);
+        ledgerService.addEntry(customerId, ledgerDto);
+    }*/
 }

@@ -43,4 +43,9 @@ public class Shop {
 
     @Column(nullable = true)
     String logoPath;
+
+    @Column(name = "industry_type")
+    private String industryType;
+
+    private String signaturePath;
 }

@@ -65,8 +65,8 @@ public class ItemMapper {
         item.setDescription(dto.getDescription());
         item.setBrandName(dto.getBrandName());
         // Map new attributes
-        item.setFabric(dto.getFabric());
-        item.setSeason(dto.getSeason());
+        item.setAttribute1(dto.getAttribute1() != null ? dto.getAttribute1() : dto.getFabric());
+        item.setAttribute2(dto.getAttribute2() != null ? dto.getAttribute2() : dto.getSeason());
 
         // Map the category relationship using the repository
         if (dto.getCategoryId() != null) {
@@ -118,8 +118,8 @@ public class ItemMapper {
             dto.setItemId(parentItem.getId());
             dto.setDescription(parentItem.getDescription());
             // Map new parent attributes
-            dto.setFabric(parentItem.getFabric());
-            dto.setSeason(parentItem.getSeason());
+            dto.setAttribute1(parentItem.getAttribute1() != null ? parentItem.getAttribute1() : parentItem.getFabric());
+            dto.setAttribute2(parentItem.getAttribute2() != null ? parentItem.getAttribute2() : parentItem.getSeason());
 
             // Map parent category relationship
             if (parentItem.getCategory() != null) {

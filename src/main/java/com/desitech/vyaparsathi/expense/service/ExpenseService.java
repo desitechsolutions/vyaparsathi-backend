@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.expense.service;
 
 import com.desitech.vyaparsathi.changelog.service.ChangeLogService;
 import com.desitech.vyaparsathi.changelog.model.ChangeLogOperation;
+import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.expense.dto.ExpenseDto;
 import com.desitech.vyaparsathi.expense.dto.UpdateExpenseDto;
 import com.desitech.vyaparsathi.expense.entity.Expense;
@@ -39,10 +40,13 @@ public class ExpenseService {
         return mapper.toDto(expense);
     }
 
-    public Page<ExpenseDto> list(Pageable pageable, Long shopId) {
-        return repository.findByShopIdAndNotDeleted(shopId, pageable).map(mapper::toDto);
+    public Page<ExpenseDto> list(Pageable pageable) {
+        Long currentShopId = TenantContext.getCurrentShopId();
+        if (currentShopId == null) {
+            throw new IllegalStateException("No shop context available");
+        }
+        return repository.findByShopIdAndNotDeleted(currentShopId, pageable).map(mapper::toDto);
     }
-
     public ExpenseDto get(Long id) {
         Expense expense = repository.findByIdAndDeletedFalse(id)
                 .orElseThrow(() -> new EntityNotFoundException("Expense with id " + id + " not found or is deleted"));

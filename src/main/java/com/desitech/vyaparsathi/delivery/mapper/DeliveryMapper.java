@@ -12,9 +12,11 @@ public interface DeliveryMapper {
     @Mapping(source = "statusHistory", target = "statusHistory")
     @Mapping(source = "createdAt", target = "createdAt")
     @Mapping(source = "updatedAt", target = "updatedAt")
+    @Mapping(source = "sale.id", target = "saleId")
     DeliveryDTO toDto(Delivery entity);
 
     @Mapping(source = "deliveryPerson", target = "deliveryPerson")
     @Mapping(source = "statusHistory", target = "statusHistory")
+    @Mapping(source = "saleId", target = "sale.id")
     Delivery toEntity(DeliveryDTO dto);
 }

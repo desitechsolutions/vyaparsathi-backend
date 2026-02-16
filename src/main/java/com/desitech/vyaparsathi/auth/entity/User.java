@@ -10,6 +10,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.LocalDateTime;
+
 @Entity
 @Table(name = "users")
 @Getter
@@ -27,6 +29,8 @@ public class User extends ShopAwareEntity {
     @Column(unique = true, length = 255)
     private String email;
 
+    private String phone;
+
     @NotBlank(message = "Username is required")
     @Column(unique = true, nullable = false, length = 100)
     private String username;
@@ -41,6 +45,12 @@ public class User extends ShopAwareEntity {
 
     @Column(nullable = false)
     private boolean active = true;
+
+    @Column
+    private LocalDateTime lastLoginAt;
+
+    @Column
+    private LocalDateTime lastPasswordChangeAt;
 
     // Critical fix: Allow null during registration/onboarding
     @ManyToOne(fetch = FetchType.LAZY)

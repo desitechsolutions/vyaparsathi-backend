@@ -3,20 +3,22 @@ package com.desitech.vyaparsathi.auth.controller;
 import com.desitech.vyaparsathi.auth.dto.*;
 import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
+import com.desitech.vyaparsathi.auth.service.PasswordResetTokenService;
 import com.desitech.vyaparsathi.auth.service.RefreshTokenService;
 import com.desitech.vyaparsathi.auth.service.UserManagementService;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
+import com.desitech.vyaparsathi.common.payload.ApiResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.desitech.vyaparsathi.auth.service.AuthService;
-import com.desitech.vyaparsathi.auth.service.ResetTokenService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -30,7 +32,7 @@ public class AuthController {
     private AuthService authService;
 
     @Autowired
-    private ResetTokenService resetTokenService;
+    private PasswordResetTokenService resetTokenService;
     @Autowired
     private UserManagementService userManagementService;
     @Autowired
@@ -83,31 +85,6 @@ public class AuthController {
         }
     }
 
-    @PostMapping("/forgot-pin")
-    public ResponseEntity<String> forgotPin(@Valid @RequestBody ForgotPinRequest request) {
-        try {
-            String token = resetTokenService.createResetToken(request.getUsername());
-            logger.info("Reset token created for user {}", request.getUsername());
-            // In a real application, you would send this token via SMS or email.
-            return ResponseEntity.ok("Reset token created: " + token);
-        } catch (Exception e) {
-            logger.error("Failed to create reset token for user {}: {}", request.getUsername(), e.getMessage(), e);
-            throw new ApplicationException("Failed to create reset token", e);
-        }
-    }
-
-    @PostMapping("/reset-pin")
-    public ResponseEntity<String> resetPin(@Valid @RequestBody ResetPinRequest request) {
-        try {
-            authService.resetUserPin(request.getUsername(), request.getToken(), request.getNewPin());
-            logger.info("PIN reset for user {}", request.getUsername());
-            return ResponseEntity.ok("PIN reset successful.");
-        } catch (Exception e) {
-            logger.error("Failed to reset PIN for user {}: {}", request.getUsername(), e.getMessage(), e);
-            throw new ApplicationException("Failed to reset PIN", e);
-        }
-    }
-
     @PostMapping("/refresh")
     public ResponseEntity<AuthResponse> refreshToken(@RequestBody Map<String, String> body) {
         try {
@@ -118,6 +95,54 @@ public class AuthController {
         } catch (Exception e) {
             logger.error("Failed to refresh access token: {}", e.getMessage(), e);
             throw new ApplicationException("Failed to refresh access token", e);
+        }
+    }
+
+    @PostMapping("/forget-password")
+    public ResponseEntity<ApiResponse<String>> requestPasswordReset(@RequestBody ForgotPasswordRequest forgotPasswordRequest) {
+        try {
+            authService.processForgotPassword(forgotPasswordRequest.getEmail());
+            ApiResponse<String> response = new ApiResponse<>(
+                    "success",
+                    "If the email is registered, a password reset link has been sent.",
+                    null
+            );
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error requesting password reset for email: {}", forgotPasswordRequest.getEmail(), e);
+            return ResponseEntity.badRequest().body(new ApiResponse<>("error", e.getMessage(), null));
+        }
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<ApiResponse<String>> resetPassword(@RequestBody ResetPasswordRequest resetPasswordRequest) {
+        try {
+            authService.resetPassword(resetPasswordRequest.getToken(), resetPasswordRequest.getNewPassword());
+            ApiResponse<String> response = new ApiResponse<>(
+                    "success",
+                    "Password reset successfully.",
+                    null
+            );
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error resetting password with token: {}", resetPasswordRequest.getToken(), e);
+            return ResponseEntity.badRequest().body(new ApiResponse<>("error", e.getMessage(), null));
+        }
+    }
+
+    @PostMapping("/validate-reset-token")
+    public ResponseEntity<Map<String, Boolean>> validateResetToken(@RequestBody ResetTokenRequest resetTokenRequest) {
+        logger.info("Received validation request for token: {}", resetTokenRequest != null ? resetTokenRequest.getToken() : "NULL REQUEST");
+        try {
+            boolean isValid = resetTokenService.validateResetToken(resetTokenRequest.getToken());
+            Map<String, Boolean> response = new HashMap<>();
+            response.put("valid", isValid);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error validating reset token: {}", resetTokenRequest.getToken(), e);
+            Map<String, Boolean> response = new HashMap<>();
+            response.put("valid", false);
+            return ResponseEntity.badRequest().body(response);
         }
     }
 }

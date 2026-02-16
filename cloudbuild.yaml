@@ -1,0 +1,61 @@
+steps:
+  # Step 1: Build the JAR
+  - name: 'maven:3.9-eclipse-temurin-17'
+    entrypoint: 'mvn'
+    args: ['clean', 'package', '-DskipTests']
+
+  # Step 2: Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'asia-south2-docker.pkg.dev/optimum-phalanx-454818-v6/cloud-run-source-deploy/desifix-user-service:$COMMIT_SHA',
+      '.'
+    ]
+
+  # Step 3: Push the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'push',
+      'asia-south2-docker.pkg.dev/optimum-phalanx-454818-v6/cloud-run-source-deploy/desifix-user-service:$COMMIT_SHA'
+    ]
+
+  # Step 4: Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'desifix-user-service'
+      - '--image'
+      - 'asia-south2-docker.pkg.dev/optimum-phalanx-454818-v6/cloud-run-source-deploy/desifix-user-service:$COMMIT_SHA'
+      - '--platform'
+      - 'managed'
+      - '--region'
+      - 'asia-south2'
+      - '--set-env-vars=JAVA_TOOL_OPTIONS=-Dspring.profiles.active=prod,SPRING_PROFILES_ACTIVE=prod,JWT_EXPIRATION=86400'
+      - '--set-env-vars=APP_ALLOWED_ORIGINS=https://desifix-app-916096373650.asia-south2.run.app'
+      - '--service-account'
+      - 'desifix-user-service-sa@optimum-phalanx-454818-v6.iam.gserviceaccount.com'
+      - '--set-secrets'
+      - 'JWT_SECRET=jwt-secret:latest'
+      - '--set-secrets'
+      - 'SPRING_DATASOURCE_USERNAME=db-username:latest'
+      - '--set-secrets'
+      - 'SPRING_DATASOURCE_PASSWORD=db-password:latest'
+      - '--set-secrets'
+      - '/secrets/service-account-key.json=service-account-key:latest'
+      - '--set-secrets'
+      - 'SPRING_MAIL_USERNAME=email-username:latest'
+      - '--set-secrets'
+      - 'SPRING_MAIL_PASSWORD=email-password:latest'
+      - '--set-secrets'
+      - 'GOOGLE_MAPS_API_KEY=map-api-key:latest'
+      - '--add-cloudsql-instances'
+      - 'optimum-phalanx-454818-v6:asia-south2:desifix-user-db'
+      - '--allow-unauthenticated'
+
+images:
+  - 'asia-south2-docker.pkg.dev/optimum-phalanx-454818-v6/cloud-run-source-deploy/desifix-user-service:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -1,16 +1,18 @@
 package com.desitech.vyaparsathi.purchaseorder.events;
 
-import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrder;
 import com.desitech.vyaparsathi.purchaseorder.enums.EventType;
 import com.desitech.vyaparsathi.purchaseorder.events.dto.PurchaseOrderEventDto;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.Getter;
+import org.springframework.context.ApplicationEvent;
 
-@Data
-@AllArgsConstructor
-@NoArgsConstructor
-public class PurchaseOrderEvent {
-    private EventType eventType; // CREATED, PLACED, APPROVED, UPDATED, DELETED
-    private PurchaseOrderEventDto purchaseOrder;
+@Getter
+public class PurchaseOrderEvent extends ApplicationEvent {
+    private final EventType eventType;
+    private final PurchaseOrderEventDto purchaseOrder;
+
+    public PurchaseOrderEvent(Object source, EventType eventType, PurchaseOrderEventDto eventDto) {
+        super(source);
+        this.eventType = eventType;
+        this.purchaseOrder = eventDto;
+    }
 }

@@ -13,5 +13,7 @@ public class ItemDto {
     private String brandName;
     private String fabric;
     private String season;
+    private String attribute1;
+    private String attribute2;
     private List<ItemVariantDto> variants;
 }

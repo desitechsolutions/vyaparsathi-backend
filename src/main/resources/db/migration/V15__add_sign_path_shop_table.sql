@@ -1,0 +1,2 @@
+ALTER TABLE `shop`
+ADD COLUMN `signature_path` VARCHAR(255) DEFAULT NULL

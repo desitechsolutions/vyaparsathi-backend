@@ -121,15 +121,20 @@ public class InvoiceService {
 
         // Badge using nested 1-cell table
         PdfPTable badgeTable = new PdfPTable(1);
-        badgeTable.setWidthPercentage(100);
+        badgeTable.setHorizontalAlignment(Element.ALIGN_RIGHT); // Align to right
+        badgeTable.setTotalWidth(90); // Fixed width so it's not "sticky"
+        badgeTable.setLockedWidth(true);
 
-        PdfPCell badgeCell = new PdfPCell(new Phrase(" STATUS: " + status + " ",
-                FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9, Font.NORMAL, Color.WHITE)));
+        PdfPCell badgeCell = new PdfPCell(new Phrase(status,
+                FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8, Font.NORMAL, Color.WHITE)));
+
         badgeCell.setBackgroundColor(statusColor);
-        badgeCell.setBorder(Rectangle.NO_BORDER);
-        badgeCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
-        badgeCell.setPadding(4);
-        badgeCell.setFixedHeight(20f); // makes it look like a badge
+        badgeCell.setBorderColor(Color.WHITE);
+        badgeCell.setBorderWidth(1f);
+        badgeCell.setPaddingTop(3);
+        badgeCell.setPaddingBottom(5);
+        badgeCell.setHorizontalAlignment(Element.ALIGN_CENTER);
+        badgeCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
 
         badgeTable.addCell(badgeCell);
         right.addElement(badgeTable);
@@ -209,6 +214,9 @@ public class InvoiceService {
         int count = 1;
         for (SaleItem item : sale.getSaleItems()) {
             BigDecimal qty = item.getQty() != null ? item.getQty() : BigDecimal.ZERO;
+            // Get Returned Quantity
+            BigDecimal retQty = item.getReturnedQty() != null ? item.getReturnedQty() : BigDecimal.ZERO;
+
             BigDecimal rate = item.getUnitPrice() != null ? item.getUnitPrice() : BigDecimal.ZERO;
             BigDecimal discount = item.getDiscount() != null ? item.getDiscount() : BigDecimal.ZERO;
             BigDecimal taxable = item.getTaxableValue() != null ? item.getTaxableValue() : BigDecimal.ZERO;
@@ -219,13 +227,23 @@ public class InvoiceService {
             BigDecimal taxes = cgst.add(sgst).add(igst);
 
             BigDecimal lineTotal = taxable.add(taxes);
-
             grandTotalCheck = grandTotalCheck.add(lineTotal);
 
             table.addCell(createCell(String.valueOf(count++), normalFont, Element.ALIGN_CENTER));
-            table.addCell(createCell(item.getItemVariant().getItem().getName(), normalFont, Element.ALIGN_LEFT));
+
+            // 1. If item is returned, add a note to the Description
+            String description = item.getItemVariant().getItem().getName();
+            if (retQty.compareTo(BigDecimal.ZERO) > 0) {
+                description += " (Returned: " + retQty + ")";
+            }
+            table.addCell(createCell(description, normalFont, Element.ALIGN_LEFT));
+
             table.addCell(createCell(item.getItemVariant().getHsn(), normalFont, Element.ALIGN_CENTER));
+
+            // 2. Adjust the display of Qty to show current effective quantity
+            // If 5 were bought and 5 returned, it shows "5" but the description says "(Returned: 5)"
             table.addCell(createCell(qty.toString(), normalFont, Element.ALIGN_CENTER));
+
             table.addCell(createCell(currency.format(rate), normalFont, Element.ALIGN_RIGHT));
             table.addCell(createCell(item.getGstType().getRate() + "%", normalFont, Element.ALIGN_CENTER));
             table.addCell(createCell(currency.format(discount), normalFont, Element.ALIGN_RIGHT));
@@ -331,29 +349,55 @@ public class InvoiceService {
 
         PdfPTable footer = new PdfPTable(2);
         footer.setWidthPercentage(100);
+        footer.setWidths(new float[]{60, 40});
 
+        // --- Left Side: Bank & Terms (Existing) ---
         PdfPCell left = new PdfPCell();
         left.setBorder(Rectangle.NO_BORDER);
         left.addElement(new Phrase("BANKING DETAILS", boldFont));
-        left.addElement(new Phrase(bankingDetails, smallFont));
-
+        left.addElement(new Phrase("\n" + bankingDetails, smallFont));
         left.addElement(new Phrase("\n\nTERMS & CONDITIONS", boldFont));
         String[] terms = termsAndConditions.split("\n");
         for (String t : terms) {
-            left.addElement(new Phrase("• " + t.trim(), smallFont));
+            left.addElement(new Phrase("\n• " + t.trim(), smallFont));
         }
         footer.addCell(left);
 
+        // --- Right Side: Uploaded Signature ---
         PdfPCell right = new PdfPCell();
         right.setBorder(Rectangle.NO_BORDER);
+        right.setHorizontalAlignment(Element.ALIGN_RIGHT);
         right.setVerticalAlignment(Element.ALIGN_BOTTOM);
-        right.addElement(new Paragraph("\n\n\nFor " + sale.getShop().getName(), boldFont));
-        right.addElement(new Paragraph("Authorized Signatory", normalFont));
-        footer.addCell(right);
 
+        // Add "For Shop Name"
+        Paragraph shopName = new Paragraph("For " + sale.getShop().getName().toUpperCase(), boldFont);
+        shopName.setAlignment(Element.ALIGN_RIGHT);
+        right.addElement(shopName);
+
+        // Load Signature Image
+        String sigPath = sale.getShop().getSignaturePath();
+        if (sigPath != null && !sigPath.isEmpty()) {
+            try {
+                Image signature = Image.getInstance(sigPath);
+                signature.setAlignment(Image.RIGHT);
+                signature.scaleToFit(100, 50); // Adjust size to fit nicely
+                right.addElement(signature);
+            } catch (Exception e) {
+                logger.warn("Could not load signature image at {}. Falling back to blank space.", sigPath);
+                right.addElement(new Phrase("\n\n\n")); // Fallback space
+            }
+        } else {
+            right.addElement(new Phrase("\n\n\n")); // Manual sign space if no image
+        }
+
+        // Add Label
+        Paragraph label = new Paragraph("Authorized Signatory", normalFont);
+        label.setAlignment(Element.ALIGN_RIGHT);
+        right.addElement(label);
+
+        footer.addCell(right);
         document.add(footer);
     }
-
     // ────────────────────────────────────────────────
     // Helpers
     // ────────────────────────────────────────────────

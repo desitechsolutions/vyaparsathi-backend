@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.common.listener;
 
+import com.desitech.vyaparsathi.auth.entity.PasswordResetToken;
 import com.desitech.vyaparsathi.auth.entity.RefreshToken;
 import com.desitech.vyaparsathi.auth.entity.User;  // ← import your User class
 import com.desitech.vyaparsathi.common.configs.TenantContext;
@@ -22,7 +23,7 @@ public class ShopEntityListener {
 
         // Allow saving without shop during registration/login/onboarding for specific entities
         if (currentShopId == null) {
-            if (entity instanceof User || entity instanceof RefreshToken) {
+            if (entity instanceof User || entity instanceof RefreshToken || entity instanceof PasswordResetToken) {
                 log.debug("Skipping shop enforcement for {} (no TenantContext – onboarding/login flow)",
                         entity.getClass().getSimpleName());
                 return;  // ← Skip completely

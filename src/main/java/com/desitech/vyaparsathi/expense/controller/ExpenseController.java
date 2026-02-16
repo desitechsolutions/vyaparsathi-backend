@@ -35,9 +35,8 @@ public class ExpenseController {
 
     @GetMapping
     @Operation(summary = "List operational expenses", description = "Retrieve paginated list of operational expenses for a shop")
-    public ResponseEntity<Page<ExpenseDto>> list(Pageable pageable, 
-            @Parameter(description = "Shop ID to filter expenses") @RequestParam(required = false, defaultValue = "1") Long shopId) {
-        return ResponseEntity.ok(service.list(pageable, shopId));
+    public ResponseEntity<Page<ExpenseDto>> list(Pageable pageable) {
+        return ResponseEntity.ok(service.list(pageable));
     }
 
     @GetMapping("/{id}")

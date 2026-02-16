@@ -4,6 +4,7 @@ import com.desitech.vyaparsathi.auth.model.Role;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -22,6 +23,10 @@ public class RegisterRequest {
 
     @Email(message = "Please provide a valid email address")
     private String email;
+
+    @NotBlank(message = "Phone number is required")
+    @Size(min = 10, max = 15)
+    private String phone;
 
     private Long shopId;
 

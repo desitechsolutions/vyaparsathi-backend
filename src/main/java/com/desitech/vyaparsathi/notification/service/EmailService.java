@@ -24,7 +24,7 @@ public class EmailService {
             MimeMessageHelper helper = new MimeMessageHelper(message, true);
 
             helper.setTo(to);
-            helper.setFrom("info@desitechsolutions.com");
+            helper.setFrom("noreply@desitechsolutions.com");
             helper.setSubject(subject);
             helper.setText(htmlContent, true);
 

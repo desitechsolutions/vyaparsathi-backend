@@ -1,34 +1,47 @@
+version: '3.8'
+
 services:
-  db:
-    image: mysql:9.4
-    container_name: vyaparsathi-db
+
+  mysql:
+    image: mysql:8.4
+    container_name: vyaparsathi-mysql
+    platform: linux/arm64
     restart: always
     environment:
-      MYSQL_DATABASE: vyaparsathi
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_USER: vuser
-      MYSQL_PASSWORD: vpassword
+      MYSQL_ROOT_PASSWORD: vyaparsathi@123
+      MYSQL_DATABASE: vyaparsathi_db
     ports:
       - "3306:3306"
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - vyaparsathi-network
 
-  app:
-    build: .
-    container_name: vyaparsathi-app
+  vyaparsathi-backend:
+    image: asia-south1-docker.pkg.dev/vyaparsathi-backend/cloud-run-source-deploy/vyaparsathi-backend-service:latest
+    platform: linux/amd64
+    container_name: vyaparsathi-backend
     depends_on:
-      db:
-        condition: service_healthy
+      - mysql
     ports:
       - "8080:8080"
+    restart: always
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:mysql://db:3306/vyaparsathi?allowPublicKeyRetrieval=true&useSSL=false
-      - SPRING_DATASOURCE_USERNAME=vuser
-      - SPRING_DATASOURCE_PASSWORD=vpassword
-      - SPRING_FLYWAY_ENABLED=true
-      # Add your mail and jwt secrets here
-      - APP_RESET_PASSWORD_URL=http://localhost:3000/reset-password
-    restart: on-failure
+      SPRING_PROFILES_ACTIVE: dev
+      PORT: 8080
+
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/vyaparsathi_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: vyaparsathi@123
+
+      JWT_SECRET: local-dev-secret-change-in-prod
+
+    networks:
+      - vyaparsathi-network
+
+networks:
+  vyaparsathi-network:
+    driver: bridge
+
+volumes:
+  mysql-data:

@@ -36,6 +36,7 @@ public class PasswordResetTokenService {
     public String createResetToken(User user) {
         Shop userShop = user.getShop();
         if (userShop == null) {
+            logger.warn("Password reset attempted for user {} with no associated shop", user.getUsername());
             throw new ApplicationException("User is not associated with any shop.");
         }
         TenantContext.setCurrentShopId(userShop.getId());

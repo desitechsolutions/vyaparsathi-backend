@@ -32,10 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 public class AuthService {
@@ -172,6 +169,7 @@ public class AuthService {
         Map<String, String> variables = new HashMap<>();
         variables.put("name", user.getFirstName());
         variables.put("resetLink", resetPasswordUrl + "?token=" + token);
+        variables.put("currentYear",String.valueOf(LocalDateTime.now().getYear()));
 
         // Load and populate the email template
         String htmlContent = TemplateUtil.loadTemplate("templates/reset-password.html", variables);

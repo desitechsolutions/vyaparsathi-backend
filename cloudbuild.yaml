@@ -42,6 +42,8 @@ steps:
       - --set-env-vars
       - SPRING_PROFILES_ACTIVE=prod
       - --set-secrets
+      - --set-secrets
+      - SPRING_DATASOURCE_URL=db-url:latest
       - SPRING_DATASOURCE_USERNAME=db-username:latest
       - --set-secrets
       - SPRING_DATASOURCE_PASSWORD=db-password:latest

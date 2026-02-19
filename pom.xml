@@ -164,16 +164,6 @@
       <artifactId>mysql-connector-j</artifactId>
       <version>8.4.0</version>
     </dependency>
-    <dependency>
-      <groupId>com.google.cloud</groupId>
-      <artifactId>spring-cloud-gcp-starter-sql-mysql</artifactId>
-      <version>5.6.0</version>
-    </dependency>
-    <dependency>
-      <groupId>com.google.cloud.sql</groupId>
-      <artifactId>mysql-socket-factory-connector-j-8</artifactId>
-      <version>1.18.1</version>
-    </dependency>
 
     <!-- GCP Services -->
     <dependency>

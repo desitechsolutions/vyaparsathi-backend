@@ -1,28 +1,16 @@
 steps:
-  # Step 1: Build the JAR
+  # Step 1 & 2 & 3 remain the same as yours...
   - name: 'maven:3.9-eclipse-temurin-17'
     entrypoint: 'mvn'
     args: ['clean', 'package', '-DskipTests']
 
-  # Step 2: Build the Docker image
   - name: 'gcr.io/cloud-builders/docker'
-    args:
-      [
-        'build',
-        '-t',
-        'asia-south1-docker.pkg.dev/vyaparsathi-backend/cloud-run-source-deploy/vyaparsathi-backend-service:$COMMIT_SHA',
-        '.'
-      ]
+    args: ['build', '-t', 'asia-south1-docker.pkg.dev/vyaparsathi-backend/cloud-run-source-deploy/vyaparsathi-backend-service:$COMMIT_SHA', '.']
 
-  # Step 3: Push the Docker image
   - name: 'gcr.io/cloud-builders/docker'
-    args:
-      [
-        'push',
-        'asia-south1-docker.pkg.dev/vyaparsathi-backend/cloud-run-source-deploy/vyaparsathi-backend-service:$COMMIT_SHA'
-      ]
+    args: ['push', 'asia-south1-docker.pkg.dev/vyaparsathi-backend/cloud-run-source-deploy/vyaparsathi-backend-service:$COMMIT_SHA']
 
-  # Step 4: Deploy Cloud Run
+  # Step 4: Fixed Syntax
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args:
@@ -40,21 +28,9 @@ steps:
       - --add-cloudsql-instances
       - vyaparsathi-backend:asia-south1:vyaparsathi-db
       - --set-env-vars
-      - SPRING_PROFILES_ACTIVE=prod
+      - "SPRING_PROFILES_ACTIVE=prod,SPRING_CLOUD_GCP_SQL_DATABASE_NAME=vyaparsathi_db"
       - --set-secrets
-      - SPRING_DATASOURCE_URL=db-url:latest
-      - --set-secrets
-      - SPRING_DATASOURCE_USERNAME=db-username:latest
-      - --set-secrets
-      - SPRING_DATASOURCE_PASSWORD=db-password:latest
-      - --set-secrets
-      - SPRING_MAIL_USERNAME=email-username:latest
-      - --set-secrets
-      - SPRING_MAIL_PASSWORD=email-password:latest
-      - --set-secrets
-      - APP_ALLOWED_ORIGINS=app-allowed-origin:latest
-      - --set-secrets
-      - JWT_SECRET=jwt-secret:latest
+      - "SPRING_DATASOURCE_URL=db-url:latest,SPRING_DATASOURCE_USERNAME=db-username:latest,SPRING_DATASOURCE_PASSWORD=db-password:latest,SPRING_MAIL_USERNAME=email-username:latest,SPRING_MAIL_PASSWORD=email-password:latest,APP_ALLOWED_ORIGINS=app-allowed-origin:latest,JWT_SECRET=jwt-secret:latest"
       - --allow-unauthenticated
 
 images:

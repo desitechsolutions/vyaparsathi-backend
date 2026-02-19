@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.auth.repository;
 
 import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.model.Role;
+import com.desitech.vyaparsathi.common.annotations.SkipShopFilter;
 import com.desitech.vyaparsathi.common.repository.BaseRepository;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -12,6 +13,7 @@ import java.util.Optional;
 
 @Repository
 public interface UserRepository extends BaseRepository<User, Long> {
+    @SkipShopFilter
     Optional<User> findByUsername(String username);
     boolean existsByRole(Role role);
     boolean existsByEmail(String email);

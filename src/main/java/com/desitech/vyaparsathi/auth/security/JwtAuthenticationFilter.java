@@ -57,7 +57,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             logger.info("Allowing login without shopId for PENDING_OWNER: {}", username);
                             // Proceed — do not return 401
                         }
-                        if ("SUPER_ADMIN".equals(roleFromToken)) {
+                        else if ("SUPER_ADMIN".equals(roleFromToken)) {
                             logger.info("Allowing login for SUPER_ADMIN: {}", username);
                             // Proceed — do not return 401
                         }

@@ -45,7 +45,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         this.userDetailsService = userDetailsService;
     }
 
-    @Value("${allowed.origins:http://localhost:3000}")
+    @Value("${app.allowed-origins:http://localhost:3000}")
     private String allowedOrigins;
 
     // ================= ENDPOINT =================

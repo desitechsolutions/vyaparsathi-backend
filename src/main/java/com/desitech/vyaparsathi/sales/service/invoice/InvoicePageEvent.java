@@ -16,8 +16,8 @@ public class InvoicePageEvent extends PdfPageEventHelper {
     private final Image logo;
     private final Font footerFont = new Font(Font.HELVETICA, 7, Font.NORMAL, Color.GRAY);
 
-    public InvoicePageEvent(String logoPath) throws IOException, BadElementException {
-        this.logo = Image.getInstance(logoPath);
+    public InvoicePageEvent(byte[] logoData) throws IOException, BadElementException {
+        this.logo = Image.getInstance(logoData);
         this.logo.scaleToFit(75, 75);
     }
 

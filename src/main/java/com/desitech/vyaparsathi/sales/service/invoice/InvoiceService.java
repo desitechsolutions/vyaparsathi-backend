@@ -51,14 +51,23 @@ public class InvoiceService {
 
     public byte[] generatePdf(Sale sale) {
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            Document document = new Document(PageSize.A4, 36, 36, 65, 45);
+            Document document = new Document(PageSize.A4, 36, 36, 75, 45);
             PdfWriter writer = PdfWriter.getInstance(document, baos);
 
-            String logoPath = sale.getShop().getLogoPath() != null
-                    ? sale.getShop().getLogoPath()
-                    : "src/main/resources/static/logo.png";
+            byte[] logoBytes = null;
+            String logoPath = sale.getShop().getLogoPath();
+            try {
+                if (logoPath != null && !logoPath.isEmpty()) {
+                    logoBytes = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(logoPath));
+                } else {
+                    var resource = new org.springframework.core.io.ClassPathResource("static/logo.png");
+                    logoBytes = resource.getInputStream().readAllBytes();
+                }
+            } catch (Exception e) {
+                logger.warn("Could not load logo, proceeding without it: {}", e.getMessage());
+            }
 
-            writer.setPageEvent(new InvoicePageEvent(logoPath));
+            writer.setPageEvent(new InvoicePageEvent(logoBytes));
             document.open();
 
             // Fonts (fixed: added Font.NORMAL where missing)

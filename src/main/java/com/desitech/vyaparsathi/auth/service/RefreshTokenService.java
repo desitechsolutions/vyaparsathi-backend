@@ -63,15 +63,20 @@ public class RefreshTokenService {
     /**
      * Finds a token by string value. Throws exception if expired.
      */
+    @Transactional
     public RefreshToken validateAndGet(String token) {
         RefreshToken refreshToken = refreshTokenRepository.findByToken(token)
                 .orElseThrow(() -> new IllegalArgumentException("Invalid refresh token"));
 
         if (isExpired(refreshToken)) {
-            refreshTokenRepository.deleteByUsername(refreshToken.getUsername());
+            refreshTokenRepository.delete(refreshToken);
             throw new TokenExpiredException("Refresh token expired. Please log in again.");
         }
-
+        if (refreshToken.getShop() != null) {
+            TenantContext.setCurrentShopId(refreshToken.getShop().getId());
+        } else {
+            TenantContext.clear();
+        }
         return refreshToken;
     }
 
@@ -85,7 +90,20 @@ public class RefreshTokenService {
     /**
      * Deletes refresh token by username (e.g. on logout).
      */
+    @Transactional
     public void deleteByUsername(String username) {
         refreshTokenRepository.deleteByUsername(username);
     }
+
+    @Transactional
+    public void delete(RefreshToken token) {
+        refreshTokenRepository.delete(token);
+    }
+
+    @Transactional
+    public void deleteByToken(String token) {
+        refreshTokenRepository.findByToken(token)
+                .ifPresent(refreshTokenRepository::delete);
+    }
+
 }

@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class TenantContext {
-    private static final ThreadLocal<Long> currentShopId = new ThreadLocal<>();
+    private static final ThreadLocal<Long> currentShopId = new InheritableThreadLocal<>();
 
     public static void setCurrentShopId(Long shopId) {
         currentShopId.set(shopId);

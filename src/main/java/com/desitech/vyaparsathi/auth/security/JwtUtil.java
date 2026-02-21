@@ -17,7 +17,7 @@ import java.util.logging.Logger;
 public class JwtUtil {
 
     private static final Logger logger = Logger.getLogger(JwtUtil.class.getName());
-    @Value("${jwt.invoice.expiration:1800000}") // 30 minutes default
+    @Value("${jwt.invoice.expiration:1800000}")
     private long invoiceExpirationMs;
 
     @Value("${jwt.secret}")

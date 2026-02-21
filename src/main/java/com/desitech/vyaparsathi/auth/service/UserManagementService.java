@@ -7,6 +7,7 @@ import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.model.Role;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
+import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -45,10 +46,14 @@ public class UserManagementService {
             throw new IllegalArgumentException("Email address is already in use");
         }
         User user = new User();
+        user.setFirstName(request.getFirstName());
+        user.setLastName(request.getLastName());
+        user.setPhone(request.getPhone());
+        user.setEmail(request.getEmail());
         user.setUsername(request.getUsername());
         user.setPinHash(passwordEncoder.encode(request.getPin()));
         user.setRole(request.getRole());
-        user.setActive(true); // Default to active
+        user.setActive(true);
         if (TenantContext.getCurrentShopId() != null) {
             Shop shop = shopRepository.findById(TenantContext.getCurrentShopId())
                 .orElseThrow(() -> new EntityNotFoundException("Shop not found with id: " + TenantContext.getCurrentShopId()));
@@ -79,6 +84,7 @@ public class UserManagementService {
 
         user.setFirstName(request.getFirstName());
         user.setLastName(request.getLastName());
+        user.setPhone(request.getPhone());
 
         if (request.getShopId() != null) {
             Shop shop = shopRepository.findById(request.getShopId())
@@ -157,6 +163,7 @@ public class UserManagementService {
         dto.setLastName(user.getLastName());
         dto.setEmail(user.getEmail());
         dto.setCreatedAt(user.getCreatedAt());
+        dto.setPhone(user.getPhone());
 
         if (user.getShop() != null) {
             dto.setShopId(user.getShop().getId());
@@ -169,18 +176,20 @@ public class UserManagementService {
     @Transactional
     public User createInitialUser(RegisterRequest request) {
         if (userRepository.findByUsername(request.getUsername()).isPresent()) {
-            throw new IllegalArgumentException("Username already exists");
+            throw new ApplicationException("Username already exists");
         }
-
+        if (request.getEmail() != null && userRepository.findByEmail(request.getEmail()).isPresent()) {
+            throw new ApplicationException("Email is already registered. Please use a different email or login.");
+        }
         User user = new User();
         user.setUsername(request.getUsername());
         user.setPinHash(passwordEncoder.encode(request.getPin()));
         user.setFirstName(request.getFirstName());
         user.setLastName(request.getLastName());
         user.setEmail(request.getEmail());
-        user.setRole(Role.PENDING_OWNER); // new temporary role
+        user.setPhone(request.getPhone());
+        user.setRole(Role.PENDING_OWNER);
         user.setActive(true);
-        // shop = null here - allowed now
 
         return userRepository.save(user);
     }

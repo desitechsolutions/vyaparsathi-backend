@@ -7,6 +7,7 @@ import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.model.Role;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
+import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -175,9 +176,11 @@ public class UserManagementService {
     @Transactional
     public User createInitialUser(RegisterRequest request) {
         if (userRepository.findByUsername(request.getUsername()).isPresent()) {
-            throw new IllegalArgumentException("Username already exists");
+            throw new ApplicationException("Username already exists");
         }
-
+        if (request.getEmail() != null && userRepository.findByEmail(request.getEmail()).isPresent()) {
+            throw new ApplicationException("Email is already registered. Please use a different email or login.");
+        }
         User user = new User();
         user.setUsername(request.getUsername());
         user.setPinHash(passwordEncoder.encode(request.getPin()));
@@ -185,9 +188,8 @@ public class UserManagementService {
         user.setLastName(request.getLastName());
         user.setEmail(request.getEmail());
         user.setPhone(request.getPhone());
-        user.setRole(Role.PENDING_OWNER); // new temporary role
+        user.setRole(Role.PENDING_OWNER);
         user.setActive(true);
-        // shop = null here - allowed now
 
         return userRepository.save(user);
     }

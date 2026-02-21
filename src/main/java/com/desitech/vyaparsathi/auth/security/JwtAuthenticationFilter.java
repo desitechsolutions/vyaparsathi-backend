@@ -43,6 +43,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
                 jwt = authHeader.substring(7);
                 logger.debug("Processing JWT for request: {}", request.getRequestURI());
+                // Validate token
                 if (jwtUtil.validateToken(jwt)) {
                     username = jwtUtil.extractUsername(jwt);
                     shopId = jwtUtil.extractShopId(jwt);
@@ -50,20 +51,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     // 1. Set TenantContext if shopId exists
                     if (shopId != null) {
                         TenantContext.setCurrentShopId(shopId);
-                        logger.debug("TenantContext set for ShopId: {}", shopId);
-                    } else {
-                        logger.warn("JWT processed for {}, but no shopId present.", username);
                     }
                 } else {
-                    // Token is expired or tampered with
-                    logger.warn("Invalid/Expired JWT token for request: {}", request.getRequestURI());
-                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                    response.getWriter().write("Session Expired");
-                    return;
+                    logger.debug("Invalid or expired JWT encountered for: {}", request.getRequestURI());
                 }
             }
 
-            // 2. Set Spring Security Authentication
+            // 2. Set Spring Security Authentication if we have a username and no existing auth
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
@@ -81,13 +75,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
 
         } catch (Exception e) {
-            logger.error("Security Filter Error: {}", e.getMessage());
-            // Clear context on error to be safe
+            logger.error("Security Filter Error for URI {}: {}", request.getRequestURI(), e.getMessage());
+            // Clear context on error
             SecurityContextHolder.clearContext();
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            response.getWriter().write("Authentication failed: " + e.getMessage());
+            response.setContentType("application/json");
+            response.getWriter().write("{\"error\": \"Authentication failed\", \"message\": \"" + e.getMessage() + "\"}");
         } finally {
-            // 4. CRITICAL for Multi-tenancy: Clear TenantContext after every request
             TenantContext.clear();
         }
     }

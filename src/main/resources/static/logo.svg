@@ -1,0 +1,32 @@
+<svg width="250" height="60" viewBox="0 0 250 60" xmlns="http://www.w3.org/2000/svg">
+  <!-- 
+    Definitive Logo for DesiTech Solutions (Cohesive Mark)
+    - Addresses: Balance, Scalability, Color Adaptability, and Story.
+    - Mark: Fully integrated cornerstone block, creating a single cohesive unit.
+  -->
+  <defs>
+    <linearGradient id="desitechFinalGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#005BEA;" />
+      <stop offset="100%" style="stop-color:#00C6E0;" />
+    </linearGradient>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&amp;display=swap');
+    </style>
+  </defs>
+  
+  <!-- Logo Mark (Single, Cohesive Path) -->
+  <path fill-rule="evenodd" clip-rule="evenodd" 
+    d="M0 5V55H12V5H0ZM22 15V23H42V15H22ZM34 23H26V45H34V23ZM12 5H28C37.9411 5 46 13.0589 46 23V33H36C27.3726 33 21 26.6274 21 18V10H12V5ZM12 55V50C21 41.3726 27.3726 35 36 35H46V45H34C34 45 30.8333 48.3333 26 50.5C21.1667 52.6667 12 55 12 55Z" 
+    fill="url(#desitechFinalGradient)"
+  />
+  
+  <!-- Wordmark -->
+  <g transform="translate(68, 5)">
+    <text x="0" y="28" font-family="'Poppins', sans-serif" font-size="22" font-weight="700" fill="#172B4D">
+      DesiTech
+    </text>
+    <text x="0" y="48" font-family="'Poppins', sans-serif" font-size="16" font-weight="400" fill="#5E6C84" letter-spacing="0.5">
+      Solutions
+    </text>
+  </g>
+</svg>

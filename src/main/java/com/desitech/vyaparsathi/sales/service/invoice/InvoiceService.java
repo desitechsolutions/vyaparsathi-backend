@@ -56,7 +56,7 @@ public class InvoiceService {
 
             String logoPath = sale.getShop().getLogoPath() != null
                     ? sale.getShop().getLogoPath()
-                    : "src/main/resources/static/logo.png";
+                    : "src/main/resources/static/logo.svg";
 
             writer.setPageEvent(new InvoicePageEvent(logoPath));
             document.open();

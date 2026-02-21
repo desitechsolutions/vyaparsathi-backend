@@ -88,27 +88,23 @@ public class InvoiceController {
                 )
                 .body(pdf);
     }
-    @GetMapping(value = "/signed", produces = MediaType.APPLICATION_PDF_VALUE)
-    public ResponseEntity<byte[]> getSignedInvoice(
-            @RequestParam String token,
-            @RequestParam(defaultValue = "false") boolean download,
-            HttpServletResponse response) {
+    @GetMapping(value = "/signed")
+    public ResponseEntity<?> getSignedInvoice(
+                                               @RequestParam String token,
+                                               @RequestParam(defaultValue = "false") boolean download) {
 
         try {
             InvoiceTokenData data = jwtUtil.validateInvoiceToken(token);
+            byte[] pdf = invoiceService.generatePdfBySaleIdOrInvoiceNo(data.saleId, data.invoiceNo);
 
-            Long saleId = data.saleId;
-            String invoiceNo = data.invoiceNo;
-
-            byte[] pdf = invoiceService.generatePdfBySaleIdOrInvoiceNo(saleId, invoiceNo);
-
-            String filename = "invoice_" + (invoiceNo != null ? invoiceNo : saleId) + ".pdf";
+            String filename = "invoice_" + (data.invoiceNo != null ? data.invoiceNo : data.saleId) + ".pdf";
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentLength(pdf.length);
+
             headers.set(HttpHeaders.CACHE_CONTROL, "no-store, no-cache, must-revalidate");
 
-            // Force download if ?download=true
             String disposition = download ? "attachment" : "inline";
             headers.set(HttpHeaders.CONTENT_DISPOSITION, disposition + "; filename=\"" + filename + "\"");
 
@@ -117,7 +113,8 @@ public class InvoiceController {
         } catch (Exception e) {
             logger.error("Invalid or expired signed invoice token", e);
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body("Invalid or expired access".getBytes());
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("Invalid or expired access");
         }
     }
 }

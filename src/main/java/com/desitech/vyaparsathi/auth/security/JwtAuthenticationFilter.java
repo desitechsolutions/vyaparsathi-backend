@@ -22,14 +22,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final Logger logger = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
     private final JwtUtil jwtUtil;
     private final CustomUserDetailsService userDetailsService;
-    //private final ShopFilterEnabler shopFilterEnabler;
 
-    public JwtAuthenticationFilter(JwtUtil jwtUtil,
-                                   CustomUserDetailsService userDetailsService
-                                   ) {
+    public JwtAuthenticationFilter(JwtUtil jwtUtil, CustomUserDetailsService userDetailsService) {
         this.jwtUtil = jwtUtil;
         this.userDetailsService = userDetailsService;
-        //this.shopFilterEnabler = shopFilterEnabler;
     }
 
     @Override
@@ -37,11 +33,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain)
             throws ServletException, IOException {
+
         String authHeader = request.getHeader("Authorization");
         String username = null;
         String jwt = null;
         Long shopId = null;
-        String roleFromToken = null;
 
         try {
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
@@ -50,57 +46,49 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 if (jwtUtil.validateToken(jwt)) {
                     username = jwtUtil.extractUsername(jwt);
                     shopId = jwtUtil.extractShopId(jwt);
-                    roleFromToken = jwtUtil.extractRole(jwt);
-                    logger.info("Extracted username: {}, shopId: {} from JWT", username, shopId);
-                    if (shopId == null) {
-                        if ("PENDING_OWNER".equals(roleFromToken)) {
-                            logger.info("Allowing login without shopId for PENDING_OWNER: {}", username);
-                            // Proceed — do not return 401
-                        }
-                        else if ("SUPER_ADMIN".equals(roleFromToken)) {
-                            logger.info("Allowing login for SUPER_ADMIN: {}", username);
-                            // Proceed — do not return 401
-                        }
-                        else{
-                            logger.error("No shopId found in JWT for username: {}", username);
-                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                            response.getWriter().write("Missing shopId in token");
-                            return;
-                        }
 
+                    // 1. Set TenantContext if shopId exists
+                    if (shopId != null) {
+                        TenantContext.setCurrentShopId(shopId);
+                        logger.debug("TenantContext set for ShopId: {}", shopId);
+                    } else {
+                        logger.warn("JWT processed for {}, but no shopId present.", username);
                     }
-                    TenantContext.setCurrentShopId(shopId);
-                    logger.info("Set shopId {} in TenantContext", shopId);
-                    logger.info("Enabled shopFilter for shopId: {}", shopId);
                 } else {
-                    logger.warn("Invalid JWT token for request: {}", request.getRequestURI());
+                    // Token is expired or tampered with
+                    logger.warn("Invalid/Expired JWT token for request: {}", request.getRequestURI());
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                    response.getWriter().write("Invalid token");
+                    response.getWriter().write("Session Expired");
                     return;
                 }
-            } else {
-                logger.debug("No Bearer token found in request: {}", request.getRequestURI());
             }
 
+            // 2. Set Spring Security Authentication
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-                UsernamePasswordAuthenticationToken authToken =
-                        new UsernamePasswordAuthenticationToken(
-                                userDetails, null, userDetails.getAuthorities()
-                        );
-                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(authToken);
-                logger.debug("Set authentication for username: {}", username);
+
+                if (userDetails != null) {
+                    UsernamePasswordAuthenticationToken authToken =
+                            new UsernamePasswordAuthenticationToken(
+                                    userDetails, null, userDetails.getAuthorities()
+                            );
+                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(authToken);
+                }
             }
+
+            // 3. Continue the filter chain
             filterChain.doFilter(request, response);
 
         } catch (Exception e) {
-            logger.error("Error processing JWT filter for request: {}", request.getRequestURI(), e);
+            logger.error("Security Filter Error: {}", e.getMessage());
+            // Clear context on error to be safe
+            SecurityContextHolder.clearContext();
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            response.getWriter().write("Authentication error: " + e.getMessage());
+            response.getWriter().write("Authentication failed: " + e.getMessage());
         } finally {
+            // 4. CRITICAL for Multi-tenancy: Clear TenantContext after every request
             TenantContext.clear();
-            logger.debug("Cleared TenantContext for request: {}", request.getRequestURI());
         }
     }
 }

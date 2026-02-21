@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.notification.controller;
 
+import com.desitech.vyaparsathi.notification.dto.ContactRequestDto;
 import com.desitech.vyaparsathi.notification.dto.NotificationDto;
 import com.desitech.vyaparsathi.notification.service.NotificationService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -44,6 +45,14 @@ public class NotificationController {
     @Operation(summary = "Delete all notifications for a recipient")
     public ResponseEntity<Void> clearAll(@RequestParam String recipient) {
         service.clearAll(recipient);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/public/contact")
+    @PreAuthorize("permitAll()")
+    @Operation(summary = "Process public contact/demo requests")
+    public ResponseEntity<Void> handlePublicContact(@RequestBody ContactRequestDto request) {
+        service.processContactRequest(request);
         return ResponseEntity.ok().build();
     }
 }

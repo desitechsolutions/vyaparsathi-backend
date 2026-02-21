@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.notification.service;
 
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.event.NotificationEvent;
+import com.desitech.vyaparsathi.notification.dto.ContactRequestDto;
 import com.desitech.vyaparsathi.notification.dto.NotificationDto;
 import com.desitech.vyaparsathi.notification.entity.Notification;
 import com.desitech.vyaparsathi.notification.repository.NotificationRepository;
@@ -28,6 +29,9 @@ public class NotificationService {
 
     @Autowired
     private SimpMessagingTemplate messagingTemplate;
+
+    @Autowired
+    private EmailService emailService;
 
     /**
      * Listen for internal Spring Events.
@@ -142,5 +146,48 @@ public class NotificationService {
                 n.getPriority(),
                 n.getTimestamp()
         );
+    }
+
+    /**
+     * Processes public demo/contact requests.
+     * 1. Sends email to admin.
+     * 2. Saves notification for persistent record.
+     * 3. (Optional) Pushes real-time alert to all online Admins.
+     */
+    @Transactional
+    public void processContactRequest(ContactRequestDto request) {
+        String adminEmail = "sales@desitechsolutions.com";
+        String subject = "New Demo Request: " + request.getServiceType();
+
+        String htmlContent = String.format(
+                "<h3>New Lead from Website</h3>" +
+                        "<p><b>Name:</b> %s</p>" +
+                        "<p><b>Email:</b> %s</p>" +
+                        "<p><b>Phone:</b> %s</p>" +
+                        "<p><b>Company:</b> %s</p>" +
+                        "<p><b>Message:</b> %s</p>",
+                request.getName(), request.getEmail(), request.getPhone(),
+                request.getCompany(), request.getMessage()
+        );
+
+        try {
+            // 1. Send Email
+            emailService.sendEmail(adminEmail, subject, htmlContent);
+
+            // 2. Save as System Notification for internal tracking (Recipient = 'ADMIN')
+            /*sendNotification(
+                    "LEAD",
+                    "New Demo Request",
+                    "Lead from " + request.getName() + " (" + request.getCompany() + ")",
+                    "ADMIN",
+                    null,
+                    "high"
+            );*/
+
+            logger.info("Public contact request processed for: {}", request.getEmail());
+        } catch (Exception e) {
+            logger.error("Error processing contact request", e);
+            throw new RuntimeException("Failed to process request");
+        }
     }
 }

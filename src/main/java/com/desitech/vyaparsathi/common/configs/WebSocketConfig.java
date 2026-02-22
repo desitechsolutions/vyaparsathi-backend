@@ -2,9 +2,12 @@ package com.desitech.vyaparsathi.common.configs;
 
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
 import com.desitech.vyaparsathi.auth.security.CustomUserDetailsService;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.servlet.server.Session;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.server.ServerHttpRequest;
@@ -80,6 +83,16 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                                            ServerHttpResponse response,
                                            WebSocketHandler wsHandler,
                                            Map<String, Object> attributes) {
+                if (request instanceof org.springframework.http.server.ServletServerHttpRequest servletRequest) {
+                    jakarta.servlet.http.Cookie[] cookies = servletRequest.getServletRequest().getCookies();
+                    if (cookies != null) {
+                        for (var cookie : cookies) {
+                            if ("AUTH-TOKEN".equals(cookie.getName())) {
+                                attributes.put("JWT_TOKEN", cookie.getValue());
+                            }
+                        }
+                    }
+                }
 
                 try {
                     Long shopId = TenantContext.getCurrentShopId();
@@ -141,18 +154,21 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
             // ================= AUTH =================
             private void authenticateWebSocket(StompHeaderAccessor accessor) {
+                String jwt = (String) accessor.getSessionAttributes().get("JWT_TOKEN");
 
-                String authHeader = accessor.getFirstNativeHeader("Authorization");
+                if (jwt == null) {
+                    String authHeader = accessor.getFirstNativeHeader("Authorization");
+                    if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                        jwt = authHeader.substring(7);
+                    }
+                }
 
-                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                    logger.warn("WS CONNECT without Authorization");
-                    throw new AccessDeniedException("Missing Authorization header");
+                if (jwt == null) {
+                    logger.warn("WS CONNECT attempt without token");
+                    throw new AccessDeniedException("Authentication token required");
                 }
 
                 try {
-
-                    String jwt = authHeader.substring(7);
-
                     if (!jwtUtil.validateToken(jwt)) {
                         throw new AccessDeniedException("Invalid WS Token");
                     }

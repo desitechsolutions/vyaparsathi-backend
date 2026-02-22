@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.support.controller;
 
 import com.desitech.vyaparsathi.common.configs.TenantContext;
+import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.support.dto.SupportMessage;
 import com.desitech.vyaparsathi.support.service.ChatService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,10 +36,11 @@ public class SupportController {
         Long shopId = (Long) headerAccessor
                 .getSessionAttributes()
                 .get("shopId");
-
+        if (shopId == null) {
+            throw new ApplicationException("No shopId in WS session");
+        }
         try {
             TenantContext.setCurrentShopId(shopId);
-
             message.setTimestamp(LocalDateTime.now());
             message.setFromAdmin(false);
             message.setShopId(shopId);
@@ -46,9 +48,10 @@ public class SupportController {
             SupportMessage saved = chatService.saveMessage(message);
 
             messagingTemplate.convertAndSend("/topic/admin/support", saved);
+            messagingTemplate.convertAndSend("/topic/admin/support/" + shopId, saved);
             messagingTemplate.convertAndSend("/topic/shop/" + shopId + "/notifications", saved);
-
-        } finally {
+        }
+        finally {
             TenantContext.clear();
         }
     }

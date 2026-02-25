@@ -113,4 +113,10 @@ public class GlobalExceptionHandler {
         error.put("message", errors);
         return ResponseEntity.badRequest().body(error);
     }
+    @ExceptionHandler(SubscriptionException.class)
+    public ResponseEntity<Map<String, String>> handleSubscriptionException(SubscriptionException ex) {
+        Map<String, String> error = new HashMap<>();
+        error.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
 }

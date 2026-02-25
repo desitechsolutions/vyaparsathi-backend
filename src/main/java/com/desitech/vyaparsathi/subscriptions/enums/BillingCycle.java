@@ -1,5 +1,5 @@
 package com.desitech.vyaparsathi.subscriptions.enums;
 
-public enum Tier {
-    STARTER, PRO, ENTERPRISE, FREE
+public enum BillingCycle {
+    MONTHLY, YEARLY
 }

@@ -45,7 +45,8 @@ public class SecurityConfig {
                                 "/media/**",
                                 "/api/invoices/signed",
                                 "/ws/**",
-                                "/api/notifications/public/**"
+                                "/api/notifications/public/**",
+                                "/uploads/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

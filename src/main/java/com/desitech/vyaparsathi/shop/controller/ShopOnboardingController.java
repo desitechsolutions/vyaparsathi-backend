@@ -66,21 +66,37 @@ public class ShopOnboardingController {
     }
 
     /**
-     * Endpoint to update an existing shop's details.
+     * Endpoint to update an existing shop's details including branding.
      * Accessible only to the 'OWNER' role.
      * @param dto The DTO containing updated shop details.
      * @return The updated ShopDto.
      */
-    @PutMapping
+    @PutMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('OWNER')")
-    public ResponseEntity<ShopDto> updateShop(@Valid @RequestBody ShopDto dto) {
+    public ResponseEntity<ShopDto> updateShop(
+            @RequestPart("shop") @Valid ShopDto dto,
+            @RequestPart(value = "logo", required = false) MultipartFile logo,
+            @RequestPart(value = "signature", required = false) MultipartFile signature,
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+
         try {
-            ShopDto result = shopService.updateShop(dto);
-            logger.info("Updated shop with name={}", dto.getName());
+            User currentUser = userDetails.getUser();
+
+            // Ensure the user actually has a shop to update
+            if (currentUser.getShop() == null) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+
+            // Delegate to service to handle DB updates and File Storage
+            ShopDto result = shopService.updateShop(currentUser.getShop().getId(), dto, logo, signature);
+
+            logger.info("Shop settings updated for shopId={} by user={}",
+                    currentUser.getShop().getId(), currentUser.getUsername());
+
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error updating shop with name={}: {}", dto.getName(), e.getMessage(), e);
-            throw new ApplicationException("Failed to update shop", e);
+            logger.error("Error updating shop settings: {}", e.getMessage(), e);
+            throw new ApplicationException("Failed to update shop settings", e);
         }
     }
 

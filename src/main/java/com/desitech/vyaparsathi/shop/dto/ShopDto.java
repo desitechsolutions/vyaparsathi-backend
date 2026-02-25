@@ -7,6 +7,7 @@ import lombok.Data;
 public class ShopDto {
 
     private Long id;
+
     @NotBlank(message = "Shop name is required")
     private String name;
 
@@ -26,4 +27,17 @@ public class ShopDto {
 
     @NotBlank(message = "Industry type is required")
     private String industryType;
+
+    // --- New Fields for Settings ---
+    private String phone;
+    private String email;
+
+    private String logoPath;
+    private String signaturePath;
+
+    private Boolean isCompositionScheme;
+    private String brandColor;
+
+    private String termsAndConditions;
+    private String bankDetails;
 }

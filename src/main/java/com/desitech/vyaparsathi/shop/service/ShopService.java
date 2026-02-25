@@ -4,6 +4,8 @@ import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.model.Role;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
+import com.desitech.vyaparsathi.common.exception.ApplicationException;
+import com.desitech.vyaparsathi.common.util.FileStorageService;
 import com.desitech.vyaparsathi.inventory.entity.Category;
 import com.desitech.vyaparsathi.inventory.repository.CategoryRepository;
 import com.desitech.vyaparsathi.shop.dto.ShopDto;
@@ -37,6 +39,9 @@ public class ShopService {
     @Autowired private UserRepository userRepository;
     @Autowired private CategoryRepository categoryRepository;
     @Autowired private ShopMapper shopMapper;
+
+    @Autowired
+    private FileStorageService fileStorageService;
 
     @Transactional
     public ShopDto completeOnboarding(ShopDto dto, User currentUser, MultipartFile logo) {
@@ -192,17 +197,37 @@ public class ShopService {
     }
 
     @Transactional
-    public ShopDto updateShop(ShopDto dto) {
-        // Get current shop from security context
-        Long currentShopId = TenantContext.getCurrentShopId();
-        if (currentShopId == null) {
-            throw new IllegalStateException("No active shop context");
+    public ShopDto updateShop(Long shopId, ShopDto dto, MultipartFile logo, MultipartFile signature) throws Exception {
+        // 1. Fetch shop
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new EntityNotFoundException("Shop not found with id: " + shopId));
+
+        // 2. Update basic fields (ignores logoPath/signaturePath as per our Mapper config)
+        shopMapper.updateShopFromDto(dto, shop);
+
+        // We need a UUID for your utility.
+        // If your Shop entity doesn't have a UUID, we generate one from the ID or use random.
+        UUID contextUuid = UUID.nameUUIDFromBytes(shopId.toString().getBytes());
+
+        try {
+            // 3. Handle Logo
+            if (logo != null && !logo.isEmpty()) {
+                // Using your utility: storeFile(file, folder, userId)
+                String logoUrl = fileStorageService.storeFile(logo, "logos", contextUuid);
+                shop.setLogoPath(logoUrl);
+            }
+
+            // 4. Handle Signature
+            if (signature != null && !signature.isEmpty()) {
+                String signatureUrl = fileStorageService.storeFile(signature, "signatures", contextUuid);
+                shop.setSignaturePath(signatureUrl);
+            }
+        } catch (IOException e) {
+            logger.error("File upload failed for shop settings update", e);
+            throw new ApplicationException("Failed to save branding images: " + e.getMessage());
         }
 
-        Shop shop = shopRepository.findById(currentShopId)
-                .orElseThrow(() -> new EntityNotFoundException("Shop not found"));
-
-        shopMapper.updateShopFromDto(dto, shop);
+        // 5. Save and Return
         shop = shopRepository.save(shop);
         return shopMapper.toDto(shop);
     }

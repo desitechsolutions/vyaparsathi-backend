@@ -140,28 +140,26 @@ public class InvoiceUtil {
     }
 
     public byte[] loadImageBytes(String path, String type) {
-
         if (path == null || path.isBlank()) {
             return null;
         }
 
         try {
-
             // ===============================
             // 1. GCS STORAGE (PRIMARY - PROD)
             // ===============================
             if (storage != null && !path.startsWith("http")) {
+                String bucketName = extractBucketName(uploadDir);
 
-                Blob blob = storage.get(extractBucketName(uploadDir), path);
+                // Ensure we aren't passing a full gs:// path if the database already stored one
+                String objectPath = path.startsWith("gs://") ? extractObjectPath(path) : path;
+
+                logger.info("Attempting to load {} from GCS. Bucket: {}, Path: {}", type, bucketName, objectPath);
+
+                Blob blob = storage.get(bucketName, objectPath);
 
                 if (blob == null || !blob.exists()) {
-                    logger.warn("{} not found in GCS: {}", type, path);
-                    return null;
-                }
-
-                // Optional safety limit (5MB)
-                if (blob.getSize() > 5 * 1024 * 1024) {
-                    logger.warn("{} too large: {}", type, path);
+                    logger.warn("{} not found in GCS bucket '{}': {}", type, bucketName, objectPath);
                     return null;
                 }
 
@@ -196,10 +194,20 @@ public class InvoiceUtil {
     }
 
     private String extractBucketName(String gsUri) {
-        if (!gsUri.startsWith("gs://")) return gsUri;
-        String cleaned = gsUri.substring(5); // remove gs://
-        int slash = cleaned.indexOf('/');
-        return (slash == -1) ? cleaned : cleaned.substring(0, slash);
+        if (gsUri == null || !gsUri.startsWith("gs://")) return gsUri;
+        String bucket = gsUri.substring(5);
+        if (bucket.contains("/")) {
+            bucket = bucket.substring(0, bucket.indexOf("/"));
+        }
+        return bucket;
+    }
+
+    private String extractObjectPath(String gsUri) {
+        if (gsUri == null || !gsUri.startsWith("gs://")) return gsUri;
+        String withoutProtocol = gsUri.substring(5);
+        int firstSlash = withoutProtocol.indexOf("/");
+        if (firstSlash == -1) return "";
+        return withoutProtocol.substring(firstSlash + 1);
     }
 
     public static Color parseColor(String hex, Color fallback) {

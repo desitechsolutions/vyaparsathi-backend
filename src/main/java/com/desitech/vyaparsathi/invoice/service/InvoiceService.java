@@ -1,13 +1,13 @@
-package com.desitech.vyaparsathi.sales.service.invoice;
+package com.desitech.vyaparsathi.invoice.service;
 
 import com.desitech.vyaparsathi.common.exception.ExportAppException;
 import com.desitech.vyaparsathi.delivery.entity.Delivery;
+import com.desitech.vyaparsathi.invoice.dto.GstSummary;
+import com.desitech.vyaparsathi.invoice.utils.InvoiceUtil;
 import com.desitech.vyaparsathi.payment.service.PaymentService;
 import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.entity.SaleItem;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
-import com.google.cloud.storage.BlobInfo;
-import com.google.cloud.storage.Storage;
 import com.lowagie.text.*;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
@@ -20,14 +20,12 @@ import org.springframework.stereotype.Service;
 
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.math.BigDecimal;
-import java.net.URL;
 import java.text.NumberFormat;
 import java.util.*;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
+import static com.desitech.vyaparsathi.invoice.utils.InvoiceUtil.*;
 import static java.math.BigDecimal.ZERO;
 
 @Service
@@ -47,12 +45,10 @@ public class InvoiceService {
 
     @Autowired
     private SaleRepository saleRepository;
+    @Autowired
+    private InvoiceUtil invoiceUtil;
 
-    @Autowired(required = false)
-    private Storage storage;  // injected only in prod profile with GCP config
 
-    @Value("${spring.file.upload.dir:gs://vyaparsathi_s3_bucket/}")
-    private String uploadDir;
 
     @Value("${shop.banking.details:Bank Name: XYZ Bank\nAccount: 123456789\nIFSC: XYZB0001234}")
     private String defaultBankingDetails;
@@ -65,7 +61,7 @@ public class InvoiceService {
             Document document = new Document(PageSize.A4, 36, 36, 75, 45);
             PdfWriter writer = PdfWriter.getInstance(document, baos);
 
-            byte[] logoBytes = loadImageBytes(sale.getShop().getLogoPath(), "logo");
+            byte[] logoBytes = invoiceUtil.loadImageBytes(sale.getShop().getLogoPath(), "logo");
             Color brandColor = parseColor(sale.getShop().getBrandColor(), new Color(41, 128, 185));
 
             writer.setPageEvent(new InvoicePageEvent(logoBytes, brandColor));
@@ -91,50 +87,6 @@ public class InvoiceService {
         }
     }
 
-    // ────────────────────────────────────────────────
-    // Image Loading (supports GCS, HTTP, local fallback)
-    // ────────────────────────────────────────────────
-    private byte[] loadImageBytes(String path, String type) {
-        if (path == null || path.trim().isEmpty()) {
-            return null;
-        }
-
-        try {
-            // 1. GCP signed URL (prod)
-            if (storage != null && !path.startsWith("http")) {
-                String bucket = extractBucketName(uploadDir);
-                BlobInfo blob = BlobInfo.newBuilder(bucket, path).build();
-                URL signed = storage.signUrl(blob, 15, TimeUnit.MINUTES, Storage.SignUrlOption.withV4Signature());
-                try (InputStream is = signed.openStream()) {
-                    return is.readAllBytes();
-                }
-            }
-
-            // 2. Direct HTTP (legacy URLs)
-            if (path.startsWith("http")) {
-                try (InputStream is = new URL(path).openStream()) {
-                    return is.readAllBytes();
-                }
-            }
-
-            // 3. Local file fallback
-            return java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path));
-        } catch (Exception e) {
-            logger.warn("Failed to load {} image from path: {}. Error: {}", type, path, e.getMessage());
-            return null;
-        }
-    }
-
-    private String extractBucketName(String gsUri) {
-        if (!gsUri.startsWith("gs://")) return gsUri;
-        String cleaned = gsUri.substring(5); // remove gs://
-        int slash = cleaned.indexOf('/');
-        return (slash == -1) ? cleaned : cleaned.substring(0, slash);
-    }
-
-    // ────────────────────────────────────────────────
-    // Header (shop info + invoice meta + status badge)
-    // ────────────────────────────────────────────────
     private void addProfessionalHeader(Document document, Sale sale, Font titleFont, Font normalFont, Font boldFont)
             throws DocumentException {
 
@@ -142,7 +94,6 @@ public class InvoiceService {
         table.setWidthPercentage(100);
         table.setWidths(new float[]{60, 40});
 
-        // Left - Shop details
         PdfPCell left = new PdfPCell();
         left.setBorder(Rectangle.NO_BORDER);
         left.addElement(new Phrase(sale.getShop().getName().toUpperCase(), boldFont));
@@ -152,7 +103,6 @@ public class InvoiceService {
         }
         table.addCell(left);
 
-        // Right - Invoice title + meta + status
         PdfPCell right = new PdfPCell();
         right.setBorder(Rectangle.NO_BORDER);
         right.setHorizontalAlignment(Element.ALIGN_RIGHT);
@@ -200,10 +150,6 @@ public class InvoiceService {
         document.add(table);
         document.add(new Paragraph("\n"));
     }
-
-    // ────────────────────────────────────────────────
-    // Bill To / Ship To
-    // ────────────────────────────────────────────────
     private void addAddressSection(Document document, Sale sale, Font normalFont, Font boldFont, Color brandColor)
             throws DocumentException {
 
@@ -221,7 +167,6 @@ public class InvoiceService {
         shipHeader.setPadding(6);
         table.addCell(shipHeader);
 
-        // Bill To
         PdfPCell billCell = new PdfPCell();
         billCell.setPadding(8);
         billCell.addElement(new Phrase(sale.getCustomer().getName(), boldFont));
@@ -232,7 +177,6 @@ public class InvoiceService {
         }
         table.addCell(billCell);
 
-        // Ship To
         PdfPCell shipCell = new PdfPCell();
         shipCell.setPadding(8);
         Delivery latest = sale.getLatestDelivery();
@@ -247,10 +191,6 @@ public class InvoiceService {
         document.add(table);
         document.add(new Paragraph("\n"));
     }
-
-    // ────────────────────────────────────────────────
-    // Items Table (dynamic columns for composition scheme)
-    // ────────────────────────────────────────────────
     private void addItemTable(Document document, Sale sale, Font headerFont, Font normalFont, Font boldFont, Color brandColor)
             throws DocumentException {
 
@@ -316,10 +256,6 @@ public class InvoiceService {
 
         document.add(table);
     }
-
-    // ────────────────────────────────────────────────
-    // GST Summary + Totals + Amount in Words
-    // ────────────────────────────────────────────────
     private void addCalculationSection(Document document, Sale sale, Font normalFont, Font boldFont) throws DocumentException {
         boolean isComposition = Boolean.TRUE.equals(sale.getShop().getIsCompositionScheme());
 
@@ -341,8 +277,7 @@ public class InvoiceService {
             PdfPTable gstTable = new PdfPTable(4);
             gstTable.setWidthPercentage(100);
 
-            // Headers — you can choose full or short names
-            String[] gstHeaders = {"GST Rate", "CGST Amt", "SGST Amt", "IGST Amt"}; // or {"Rate", "CGST", "SGST", "IGST"}
+            String[] gstHeaders = {"GST Rate", "CGST Amt", "SGST Amt", "IGST Amt"};
             for (String h : gstHeaders) {
                 PdfPCell c = new PdfPCell(new Phrase(h, boldFont));
                 c.setBackgroundColor(LIGHT_GREY);
@@ -350,7 +285,6 @@ public class InvoiceService {
                 gstTable.addCell(c);
             }
 
-            // Corrected: use gstMap, not gstTable
             Map<BigDecimal, GstSummary> gstMap = new LinkedHashMap<>();
             for (SaleItem item : sale.getSaleItems()) {
                 BigDecimal rate = BigDecimal.valueOf(item.getGstType().getRate());
@@ -360,27 +294,22 @@ public class InvoiceService {
                 summary.addIgst(item.getIgstAmt());
             }
 
-            // Fill table + accumulate totals
             for (GstSummary s : gstMap.values()) {
-                gstTable.addCell(createCell(s.rate + "%", normalFont, Element.ALIGN_CENTER));
-                gstTable.addCell(createCell(currency.format(s.cgst), normalFont, Element.ALIGN_RIGHT));
-                gstTable.addCell(createCell(currency.format(s.sgst), normalFont, Element.ALIGN_RIGHT));
-                gstTable.addCell(createCell(currency.format(s.igst), normalFont, Element.ALIGN_RIGHT));
+                gstTable.addCell(createCell(s.getRate() + "%", normalFont, Element.ALIGN_CENTER));
+                gstTable.addCell(createCell(currency.format(s.getCgst()), normalFont, Element.ALIGN_RIGHT));
+                gstTable.addCell(createCell(currency.format(s.getSgst()), normalFont, Element.ALIGN_RIGHT));
+                gstTable.addCell(createCell(currency.format(s.getIgst()), normalFont, Element.ALIGN_RIGHT));
 
-                totalCgst = totalCgst.add(s.cgst);
-                totalSgst = totalSgst.add(s.sgst);
-                totalIgst = totalIgst.add(s.igst);
+                totalCgst = totalCgst.add(s.getCgst());
+                totalSgst = totalSgst.add(s.getSgst());
+                totalIgst = totalIgst.add(s.getIgst());
             }
 
             left.addElement(gstTable);
         }
 
-        // Amount in Words (always shown)
-        left.addElement(new Paragraph("\nAmount in Words: " + numberToWords(sale.getTotalAmount()) + " Only", normalFont));
+        left.addElement(new Paragraph("\nAmount in Words: " + InvoiceUtil.numberToWords(sale.getTotalAmount()) + " Only", normalFont));
 
-        // ────────────────────────────────────────────────
-        // Right side: Totals table
-        // ────────────────────────────────────────────────
         PdfPTable totals = new PdfPTable(2);
         totals.setWidthPercentage(100);
 
@@ -389,7 +318,6 @@ public class InvoiceService {
                 .filter(Objects::nonNull)
                 .reduce(ZERO, BigDecimal::add);
 
-        // Tax breakdown only for normal (non-composition) invoices
         if (!isComposition) {
             addTotalRow(totals, "Taxable Amount:", currency.format(taxableTotal), normalFont);
             addTotalRow(totals, "Total CGST:",     currency.format(totalCgst),   normalFont);
@@ -397,7 +325,6 @@ public class InvoiceService {
             addTotalRow(totals, "Total IGST:",     currency.format(totalIgst),   normalFont);
         }
 
-        // Always show final totals
         addTotalRow(totals, "Grand Total:", currency.format(sale.getTotalAmount()), boldFont);
 
         BigDecimal paid = paymentService.getTotalPaidBySaleIds(Set.of(sale.getId()))
@@ -417,9 +344,6 @@ public class InvoiceService {
         main.addCell(right);
         document.add(main);
     }
-    // ────────────────────────────────────────────────
-    // Footer (Bank + Terms + Signature)
-    // ────────────────────────────────────────────────
     private void addFinalFooter(Document document, Sale sale, Font normalFont, Font boldFont, Font smallFont)
             throws DocumentException {
 
@@ -430,9 +354,6 @@ public class InvoiceService {
         footer.setWidths(new float[]{65, 35});
         footer.setSpacingBefore(20);
 
-        // ─────────────────────────────
-        // Left: Bank + Terms
-        // ─────────────────────────────
         PdfPCell left = new PdfPCell();
         left.setBorder(Rectangle.NO_BORDER);
 
@@ -442,7 +363,7 @@ public class InvoiceService {
                 ? sale.getShop().getBankDetails()
                 : defaultBankingDetails;
 
-        left.addElement(new Phrase("\n" + formatBankDetails(bankDetails), smallFont));
+        left.addElement(new Phrase("\n" + InvoiceUtil.formatBankDetails(bankDetails), smallFont));
 
         left.addElement(new Phrase("\n\nTERMS & CONDITIONS", boldFont));
 
@@ -456,9 +377,6 @@ public class InvoiceService {
 
         footer.addCell(left);
 
-        // ─────────────────────────────
-        // Right: Signature
-        // ─────────────────────────────
         PdfPCell right = new PdfPCell();
         right.setBorder(Rectangle.NO_BORDER);
         right.setHorizontalAlignment(Element.ALIGN_RIGHT);
@@ -468,7 +386,7 @@ public class InvoiceService {
         shopName.setAlignment(Element.ALIGN_RIGHT);
         right.addElement(shopName);
 
-        byte[] sigBytes = loadImageBytes(sale.getShop().getSignaturePath(), "signature");
+        byte[] sigBytes = invoiceUtil.loadImageBytes(sale.getShop().getSignaturePath(), "signature");
 
         if (sigBytes != null) {
             try {
@@ -490,138 +408,6 @@ public class InvoiceService {
         document.add(footer);
     }
 
-    // ────────────────────────────────────────────────
-    // Bank details formatter (improved heuristic)
-    // ────────────────────────────────────────────────
-    private String formatBankDetails(String raw) {
-        if (raw == null || raw.trim().isEmpty()) return "";
-
-        // 1. If it already contains newlines, user likely formatted it manually; return as is.
-        if (raw.contains("\n")) return raw.trim();
-
-        String bankName = "";
-        String accNo = "";
-        String ifsc = "";
-        String upi = "";
-
-        // Normalize: remove extra spaces and common labels/colons to clean the search area
-        String workingStr = raw.trim().replaceAll("(?i)(Bank Name|Account No|A/C No|IFSC Code|Bank|A/C|IFSC|:)", " ")
-                .replaceAll("\\s+", " ");
-
-        // 2. Extract IFSC (Standard: 4 alpha + 0 + 6 alphanumeric)
-        java.util.regex.Matcher ifscMatcher =
-                java.util.regex.Pattern.compile("(?i)([A-Z]{4}0[A-Z0-9]{6})").matcher(workingStr);
-        if (ifscMatcher.find()) {
-            ifsc = ifscMatcher.group().toUpperCase();
-            workingStr = workingStr.replace(ifscMatcher.group(), " ");
-        }
-
-        // 3. Extract UPI ID (Contains @)
-        java.util.regex.Matcher upiMatcher =
-                java.util.regex.Pattern.compile("([a-zA-Z0-9.\\-_]{2,}@[a-zA-Z]{2,})").matcher(workingStr);
-        if (upiMatcher.find()) {
-            upi = upiMatcher.group().toLowerCase();
-            workingStr = workingStr.replace(upiMatcher.group(), " ");
-        }
-
-        // 4. Extract Account Number (9 to 18 digits)
-        // We use word boundaries \\b to ensure we don't grab part of a phone number or IFSC
-        java.util.regex.Matcher accMatcher =
-                java.util.regex.Pattern.compile("\\b\\d{9,18}\\b").matcher(workingStr);
-        if (accMatcher.find()) {
-            accNo = accMatcher.group();
-            workingStr = workingStr.replace(accNo, " ");
-        }
-
-        // 5. Remaining text is the Bank Name
-        bankName = workingStr.trim().replaceAll("\\s{2,}", " ");
-
-        // Build the formatted string
-        StringJoiner sj = new StringJoiner("\n");
-        if (!bankName.isEmpty()) sj.add("Bank: " + bankName.toUpperCase());
-        if (!accNo.isEmpty())    sj.add("A/C: " + accNo);
-        if (!ifsc.isEmpty())     sj.add("IFSC: " + ifsc);
-        if (!upi.isEmpty())      sj.add("UPI: " + upi);
-
-        return sj.toString();
-    }
-    private Color parseColor(String hex, Color fallback) {
-        if (hex == null || hex.isEmpty()) return fallback;
-        try {
-            String color = hex.startsWith("#") ? hex : "#" + hex;
-            return Color.decode(color);
-        } catch (Exception e) {
-            return fallback;
-        }
-    }
-
-    private PdfPCell createCell(String text, Font font, int align) {
-        PdfPCell cell = new PdfPCell(new Phrase(text != null ? text : "", font));
-        cell.setPadding(5);
-        cell.setHorizontalAlignment(align);
-        cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-        return cell;
-    }
-
-    private void addTotalRow(PdfPTable table, String label, String value, Font font) {
-        PdfPCell lCell = new PdfPCell(new Phrase(label, font));
-        lCell.setBorder(Rectangle.NO_BORDER);
-        table.addCell(lCell);
-
-        PdfPCell vCell = new PdfPCell(new Phrase(value, font));
-        vCell.setBorder(Rectangle.NO_BORDER);
-        vCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
-        table.addCell(vCell);
-    }
-
-    public String numberToWords(BigDecimal number) {
-        if (number == null || number.compareTo(ZERO) == 0) return "Zero";
-
-        String[] units = {"", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
-                "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"};
-        String[] tens = {"", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"};
-        String[] scales = {"", "Thousand", "Lakh", "Crore"};
-
-        long whole = number.longValue();
-        StringBuilder sb = new StringBuilder();
-        int scaleIdx = 0;
-
-        while (whole > 0) {
-            long chunk = whole % 1000;
-            if (chunk > 0) {
-                String chunkText = convertChunk((int) chunk, units, tens);
-                if (scaleIdx > 0) chunkText += " " + scales[scaleIdx];
-                sb.insert(0, chunkText + (sb.length() > 0 ? " " : ""));
-            }
-            whole /= 1000;
-            scaleIdx++;
-        }
-
-        int paise = number.subtract(new BigDecimal(number.longValue())).movePointRight(2).abs().intValue();
-        if (paise > 0) {
-            sb.append(" and ").append(convertChunk(paise, units, tens)).append(" Paise");
-        }
-
-        return sb.toString().trim() + " Rupees";
-    }
-
-    private String convertChunk(int n, String[] units, String[] tens) {
-        StringBuilder sb = new StringBuilder();
-        if (n >= 100) {
-            sb.append(units[n / 100]).append(" Hundred");
-            n %= 100;
-            if (n > 0) sb.append(" and ");
-        }
-        if (n >= 20) {
-            sb.append(tens[n / 10]);
-            n %= 10;
-            if (n > 0) sb.append(" ").append(units[n]);
-        } else if (n > 0) {
-            sb.append(units[n]);
-        }
-        return sb.toString();
-    }
-
     public byte[] generatePdfBySaleIdOrInvoiceNo(Long saleId, String invoiceNo) {
         Sale sale;
         if (saleId != null) {
@@ -634,18 +420,5 @@ public class InvoiceService {
             throw new IllegalArgumentException("Either saleId or invoiceNo must be provided");
         }
         return generatePdf(sale);
-    }
-
-    private static class GstSummary {
-        final BigDecimal rate;
-        BigDecimal cgst = ZERO;
-        BigDecimal sgst = ZERO;
-        BigDecimal igst = ZERO;
-
-        GstSummary(BigDecimal rate) { this.rate = rate; }
-
-        void addCgst(BigDecimal amt) { if (amt != null) cgst = cgst.add(amt); }
-        void addSgst(BigDecimal amt) { if (amt != null) sgst = sgst.add(amt); }
-        void addIgst(BigDecimal amt) { if (amt != null) igst = igst.add(amt); }
     }
 }

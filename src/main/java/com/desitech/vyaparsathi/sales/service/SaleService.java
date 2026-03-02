@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.sales.service;
 
+import com.desitech.vyaparsathi.common.annotations.CheckSubscriptionLimit;
 import com.desitech.vyaparsathi.common.annotations.LogAudit;
 import com.desitech.vyaparsathi.audit.helper.AuditHelper;
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
@@ -36,7 +37,7 @@ import com.desitech.vyaparsathi.sales.entity.SaleItem;
 import com.desitech.vyaparsathi.sales.enums.SaleStatus;
 import com.desitech.vyaparsathi.sales.mapper.SaleMapper;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
-import com.desitech.vyaparsathi.sales.service.invoice.InvoiceService;
+import com.desitech.vyaparsathi.invoice.service.InvoiceService;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import org.slf4j.Logger;
@@ -98,6 +99,7 @@ public class SaleService {
 
     @Transactional
     @LogAudit(action = "CREATE_SALE", entity = "SALE")
+    @CheckSubscriptionLimit("SALES")
     public SaleDto createSale(SaleDto dto) {
         // 1. Fetch Context (Shop and Customer)
         Shop shop = shopRepository.findById(TenantContext.getCurrentShopId())

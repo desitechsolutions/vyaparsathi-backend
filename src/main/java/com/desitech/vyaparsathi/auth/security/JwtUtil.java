@@ -1,7 +1,7 @@
 package com.desitech.vyaparsathi.auth.security;
 
 import com.desitech.vyaparsathi.auth.entity.User;
-import com.desitech.vyaparsathi.sales.dto.InvoiceTokenData;
+import com.desitech.vyaparsathi.invoice.dto.InvoiceTokenData;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;

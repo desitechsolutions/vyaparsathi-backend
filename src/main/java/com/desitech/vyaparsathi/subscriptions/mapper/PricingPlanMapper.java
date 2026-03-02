@@ -2,13 +2,19 @@ package com.desitech.vyaparsathi.subscriptions.mapper;
 
 import com.desitech.vyaparsathi.subscriptions.dto.PricingPlanDTO;
 import com.desitech.vyaparsathi.subscriptions.entity.PricingPlanConfig;
+import org.mapstruct.CollectionMappingStrategy;
 import org.mapstruct.Mapper;
 import org.mapstruct.MappingTarget;
+import org.mapstruct.NullValueCheckStrategy;
 import org.mapstruct.factory.Mappers;
 
 import java.util.List;
 
-@Mapper(componentModel = "spring")
+@Mapper(
+        componentModel = "spring",
+        collectionMappingStrategy = CollectionMappingStrategy.TARGET_IMMUTABLE,
+        nullValueCheckStrategy = NullValueCheckStrategy.ALWAYS
+)
 public interface PricingPlanMapper {
 
     PricingPlanDTO toDto(PricingPlanConfig entity);

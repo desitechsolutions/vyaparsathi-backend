@@ -51,4 +51,7 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     @Query("SELECT s FROM Sale s WHERE s.invoiceNo LIKE %:q%")
     List<Sale> searchByInvoicePartial(@Param("q") String q);
 
+    @Query("SELECT COUNT(s) FROM Sale s WHERE s.shop.id = :shopId AND s.date >= :startDate")
+    long countMonthlySalesByShop(@Param("shopId") Long shopId, @Param("startDate") LocalDateTime startDate);
+
 }

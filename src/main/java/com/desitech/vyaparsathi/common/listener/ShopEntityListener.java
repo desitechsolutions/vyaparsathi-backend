@@ -11,6 +11,8 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 @Slf4j
 public class ShopEntityListener {
@@ -20,15 +22,20 @@ public class ShopEntityListener {
     public void setShopBeforeSave(Object entity) {
 
         Long currentShopId = TenantContext.getCurrentShopId();
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean isSuperAdmin = auth != null && auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_SUPER_ADMIN"));
 
         // Allow saving without shop during registration/login/onboarding for specific entities
         if (currentShopId == null) {
             if (entity instanceof User || entity instanceof RefreshToken || entity instanceof PasswordResetToken) {
                 log.debug("Skipping shop enforcement for {} (no TenantContext – onboarding/login flow)",
                         entity.getClass().getSimpleName());
-                return;  // ← Skip completely
+                return;
             }
-
+            if (isSuperAdmin && entity instanceof ShopAwareEntity sae && sae.getShop() != null) {
+                return;
+            }
             // For all other entities → still fail if no context
             log.error("❌ No shopId found in TenantContext while saving {}", entity.getClass().getSimpleName());
             throw new IllegalStateException("No shopId in TenantContext");

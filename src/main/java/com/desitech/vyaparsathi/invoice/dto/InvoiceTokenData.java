@@ -1,4 +1,4 @@
-package com.desitech.vyaparsathi.sales.dto;
+package com.desitech.vyaparsathi.invoice.dto;
 
 import lombok.Data;
 

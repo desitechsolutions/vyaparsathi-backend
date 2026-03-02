@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.payment.service;
 
+import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.customer.dto.CustomerLedgerDto;
 import com.desitech.vyaparsathi.customer.entity.CustomerLedgerType;
 import com.desitech.vyaparsathi.customer.service.CustomerLedgerService;
@@ -195,7 +196,7 @@ class PaymentServiceImplTest {
 
         // 4. Act & Assert: Should throw because 1500 > 1000
         assertThatThrownBy(() -> paymentService.recordDuePayment(req))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(BusinessValidationException.class)
                 .hasMessageContaining("exceeds due amount");
     }
 

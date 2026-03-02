@@ -1,4 +1,4 @@
-package com.desitech.vyaparsathi.sales.service.invoice;
+package com.desitech.vyaparsathi.invoice.service;
 
 import com.lowagie.text.*;
 import com.lowagie.text.Font;

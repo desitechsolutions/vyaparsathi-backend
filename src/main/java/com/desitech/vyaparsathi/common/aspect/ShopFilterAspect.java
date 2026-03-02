@@ -25,13 +25,11 @@ public class ShopFilterAspect {
         Long shopId = TenantContext.getCurrentShopId();
 
         if (shopId == null) {
-            // Check if the authenticated user is Rakesh
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
             boolean isSuperAdmin = auth != null && auth.getAuthorities().stream()
                     .anyMatch(a -> a.getAuthority().equals("ROLE_SUPER_ADMIN"));
 
             if (isSuperAdmin) {
-                // Rakesh doesn't need a shop filter, let him see all data
                 return joinPoint.proceed();
             }
 

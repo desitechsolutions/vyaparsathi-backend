@@ -5,7 +5,6 @@ import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import com.desitech.vyaparsathi.subscriptions.dto.PaymentRequest;
 import com.desitech.vyaparsathi.subscriptions.dto.PendingPaymentDTO;
-import com.desitech.vyaparsathi.subscriptions.dto.SubscriptionStatusDTO;
 import com.desitech.vyaparsathi.subscriptions.entity.PricingPlanConfig;
 import com.desitech.vyaparsathi.subscriptions.entity.Subscription;
 import com.desitech.vyaparsathi.subscriptions.enums.BillingCycle;
@@ -55,18 +54,17 @@ public class SubscriptionIntegrationTest {
 
     @BeforeEach
     void initData() {
-        // 1. Mock Security Context for ROLE_ADMIN
-        // Admin role allows bypassing shop filters for initialization
+        // 1. Mock Security Context for ROLE_SUPER_ADMIN (Matches your ShopFilterAspect check)
         UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                "admin_user", null, Collections.singletonList(new SimpleGrantedAuthority("ROLE_ADMIN")));
+                "admin_user", null, Collections.singletonList(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN")));
         SecurityContextHolder.getContext().setAuthentication(auth);
 
-        // 2. Clear previous records to ensure clean slate
+        // 2. Clear records
         subscriptionPayRepository.deleteAll();
         subscriptionRepository.deleteAll();
         pricingPlanRepository.deleteAll();
 
-        // 3. Seed Starter Plan Configuration (Used by activateSubscription)
+        // 3. Seed Starter Plan Configuration
         PricingPlanConfig starterPlan = new PricingPlanConfig();
         starterPlan.setTier(Tier.STARTER);
         starterPlan.setDisplayName("Starter Plan");
@@ -88,12 +86,13 @@ public class SubscriptionIntegrationTest {
 
         shop = shopRepository.save(shop);
         savedShopId = shop.getId();
+
+        // Initial context set for Phase 1 & 2
         TenantContext.setCurrentShopId(savedShopId);
     }
 
     @AfterEach
     void tearDown() {
-        // Clean up context to avoid leaking into other tests
         TenantContext.clear();
         SecurityContextHolder.clearContext();
     }
@@ -103,11 +102,9 @@ public class SubscriptionIntegrationTest {
     void fullSubscriptionLifecycleTest() {
         // --- PHASE 1: TRIAL START ---
         subscriptionService.initiateTrial(savedShopId, Tier.STARTER);
-
-        // Ensure data is written to DB so next steps see the TRIAL status
         subscriptionRepository.flush();
 
-        Subscription trialSub = subscriptionRepository.findByShopId(savedShopId)
+        Subscription trialSub = subscriptionRepository.findByShopIdUnfiltered(savedShopId)
                 .orElseThrow(() -> new RuntimeException("Subscription not found"));
         LocalDateTime trialExpiry = trialSub.getTrialEndDate();
 
@@ -120,18 +117,32 @@ public class SubscriptionIntegrationTest {
 
         subscriptionService.processUtrSubmission(99L, savedShopId, request);
 
+        // IMPORTANT: Flush Phase 2 changes while TenantContext (savedShopId) is still active
+        // This prevents the Listener from failing when Admin triggers an auto-flush later
+        subscriptionRepository.flush();
+
         // --- PHASE 3: ADMIN APPROVAL ---
+        // Clear Shop Context to simulate a global Admin who isn't "logged in" to a specific shop
+        TenantContext.clear();
+
         List<PendingPaymentDTO> pending = subscriptionService.getAllPendingVerifications();
+        assertFalse(pending.isEmpty(), "Pending verification should exist");
+
+        // This will internally use TenantContext.setCurrentShopId(pv.getShopId())
         subscriptionService.activateSubscription(pending.get(0).getId(), "SuperAdmin_Birendra");
 
         // --- PHASE 4: VERIFY ---
-        Subscription activeSub = subscriptionRepository.findByShopId(savedShopId).get();
+        // Verify as admin (unfiltered)
+        Subscription activeSub = subscriptionRepository.findByShopIdUnfiltered(savedShopId)
+                .orElseThrow(() -> new RuntimeException("Active subscription not found"));
 
-        // Use 30 days logic as per your service
+        // Expected: Trial Expiry + 30 Days (Monthly)
         LocalDateTime expectedEnd = trialExpiry.plusDays(30).truncatedTo(ChronoUnit.SECONDS);
         LocalDateTime actualEnd = activeSub.getEndDate().truncatedTo(ChronoUnit.SECONDS);
 
+        assertEquals(SubscriptionStatus.ACTIVE, activeSub.getStatus());
         assertEquals(expectedEnd, actualEnd, "End date should stack: Trial Expiry + 30 Days");
         assertNull(activeSub.getTrialEndDate(), "Trial end date should be cleared");
+        assertEquals("UTR123456789", activeSub.getLastUtr());
     }
 }

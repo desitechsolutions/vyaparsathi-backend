@@ -14,4 +14,7 @@ public class PricingPlanDTO {
     private Boolean isPopular;
     private List<String> features;
     private Boolean isActive;
+    private Integer maxSalesPerMonth;
+    private Integer maxItems;
+    private Integer maxStaffUsers;
 }

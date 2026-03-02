@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.subscriptions.service;
 
 import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
+import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.SubscriptionException;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
@@ -124,88 +125,94 @@ public class SubscriptionService {
         if (pv.getStatus() != PaymentVerificationStatus.WAITING) {
             throw new SubscriptionException("Verification is already processed.");
         }
+        TenantContext.setCurrentShopId(pv.getShopId());
+        try{
 
-        // 2. Fetch subscription record (Unfiltered for Admin access)
-        Subscription sub = subscriptionRepository.findByShopIdUnfiltered(pv.getShopId())
-                .orElseThrow(() -> new SubscriptionException("Subscription record missing for shop: " + pv.getShopId()));
+            // 2. Fetch subscription record (Unfiltered for Admin access)
+            Subscription sub = subscriptionRepository.findByShopIdUnfiltered(pv.getShopId())
+                    .orElseThrow(() -> new SubscriptionException("Subscription record missing for shop: " + pv.getShopId()));
 
-        LocalDateTime now = LocalDateTime.now();
-        Tier currentTier = sub.getTier();
-        Tier requestedTier = pv.getPlanRequested();
-        boolean isAlreadyPremium = isShopPremium(pv.getShopId());
+            LocalDateTime now = LocalDateTime.now();
+            Tier currentTier = sub.getTier();
+            Tier requestedTier = pv.getPlanRequested();
+            boolean isAlreadyPremium = isShopPremium(pv.getShopId());
 
-        // 3. Fetch Plan Configurations for math logic
-        PricingPlanConfig newPlan = pricingPlanService.getPlanConfig(requestedTier);
+            // 3. Fetch Plan Configurations for math logic
+            PricingPlanConfig newPlan = pricingPlanService.getPlanConfig(requestedTier);
 
-        // 4. Determine Paid Days based on billing cycle
-        int paidDays = (pv.getBillingCycle() == BillingCycle.YEARLY) ? 365 : 30;
-        long creditDays = 0;
+            // 4. Determine Paid Days based on billing cycle
+            int paidDays = (pv.getBillingCycle() == BillingCycle.YEARLY) ? 365 : 30;
+            long creditDays = 0;
 
-        // 5. Pro-Rata / Value Conversion Logic
-        if (isAlreadyPremium && isUpgrade(currentTier, requestedTier)) {
-            // UPGRADE SCENARIO: Convert remaining low-tier value to high-tier days
-            PricingPlanConfig currentPlan = pricingPlanService.getPlanConfig(currentTier);
+            // 5. Pro-Rata / Value Conversion Logic
+            if (isAlreadyPremium && isUpgrade(currentTier, requestedTier)) {
+                // UPGRADE SCENARIO: Convert remaining low-tier value to high-tier days
+                PricingPlanConfig currentPlan = pricingPlanService.getPlanConfig(currentTier);
 
-            LocalDateTime currentExpiry = (sub.getStatus() == SubscriptionStatus.TRIAL)
-                    ? sub.getTrialEndDate() : sub.getEndDate();
+                LocalDateTime currentExpiry = (sub.getStatus() == SubscriptionStatus.TRIAL)
+                        ? sub.getTrialEndDate() : sub.getEndDate();
 
-            if (currentExpiry != null && currentExpiry.isAfter(now)) {
-                long remainingDays = ChronoUnit.DAYS.between(now, currentExpiry);
+                if (currentExpiry != null && currentExpiry.isAfter(now)) {
+                    long remainingDays = ChronoUnit.DAYS.between(now, currentExpiry);
 
-                // Calculate banked value: days * daily rate of old plan
-                boolean wasYearly = sub.getBillingCycle() == BillingCycle.YEARLY;
-                double remainingValue = remainingDays * currentPlan.getDailyRate(wasYearly);
+                    // Calculate banked value: days * daily rate of old plan
+                    boolean wasYearly = sub.getBillingCycle() == BillingCycle.YEARLY;
+                    double remainingValue = remainingDays * currentPlan.getDailyRate(wasYearly);
 
-                // Convert value to days of the new plan
-                boolean isNewYearly = pv.getBillingCycle() == BillingCycle.YEARLY;
-                creditDays = Math.round(remainingValue / newPlan.getDailyRate(isNewYearly));
+                    // Convert value to days of the new plan
+                    boolean isNewYearly = pv.getBillingCycle() == BillingCycle.YEARLY;
+                    creditDays = Math.round(remainingValue / newPlan.getDailyRate(isNewYearly));
+                }
+
+                // Upgrade specific updates
+                sub.setPreviousTier(currentTier);
+                sub.setLastUpgradeBonusDays((int) creditDays);
+                sub.setStartDate(now); // New tier usage starts now
+
+            } else if (isAlreadyPremium && currentTier == requestedTier) {
+                // RENEWAL SCENARIO: Simple stacking of time
+                sub.setLastUpgradeBonusDays(0);
+            } else {
+                // FRESH START / DOWNGRADE / POST-EXPIRY SCENARIO
+                sub.setStartDate(now);
+                sub.setLastUpgradeBonusDays(0);
             }
 
-            // Upgrade specific updates
-            sub.setPreviousTier(currentTier);
-            sub.setLastUpgradeBonusDays((int) creditDays);
-            sub.setStartDate(now); // New tier usage starts now
+            // 6. Calculate New Expiry Date
+            // Logic: Stack if same-tier renewal, otherwise start from Now/TrialEnd
+            LocalDateTime baseDate;
+            boolean isCurrentlyInTrial = sub.getTrialEndDate() != null && sub.getTrialEndDate().isAfter(now);
+            if (sub.getStatus() == SubscriptionStatus.ACTIVE && currentTier == requestedTier && sub.getEndDate() != null) {
+                // Existing paid member renewing same tier: stack on end date
+                baseDate = sub.getEndDate();
+            } else if (isCurrentlyInTrial && currentTier == requestedTier) {
+                // Trial member moving to paid on same tier: stack on trial end date
+                baseDate = sub.getTrialEndDate();
+            } else {
+                // Upgrade, Downgrade, or Fresh start: start from now
+                baseDate = now;
+            }
 
-        } else if (isAlreadyPremium && currentTier == requestedTier) {
-            // RENEWAL SCENARIO: Simple stacking of time
-            sub.setLastUpgradeBonusDays(0);
-        } else {
-            // FRESH START / DOWNGRADE / POST-EXPIRY SCENARIO
-            sub.setStartDate(now);
-            sub.setLastUpgradeBonusDays(0);
+            sub.setEndDate(baseDate.plusDays(paidDays).plusDays(creditDays));
+
+            // 7. Finalize Subscription State
+            sub.setTier(requestedTier);
+            sub.setStatus(SubscriptionStatus.ACTIVE);
+            sub.setLastUtr(pv.getUtrNumber());
+            sub.setBillingCycle(pv.getBillingCycle());
+            sub.setTrialEndDate(null); // Clear trial info once they are a paid member
+
+            subscriptionRepository.save(sub);
+
+            // 8. Update Payment Verification status
+            pv.setStatus(PaymentVerificationStatus.APPROVED);
+            pv.setVerifiedAt(now);
+            pv.setVerifiedBy(adminName);
+            subscriptionPayRepository.save(pv);
         }
-
-        // 6. Calculate New Expiry Date
-        // Logic: Stack if same-tier renewal, otherwise start from Now/TrialEnd
-        LocalDateTime baseDate;
-        boolean isCurrentlyInTrial = sub.getTrialEndDate() != null && sub.getTrialEndDate().isAfter(now);
-        if (sub.getStatus() == SubscriptionStatus.ACTIVE && currentTier == requestedTier && sub.getEndDate() != null) {
-            // Existing paid member renewing same tier: stack on end date
-            baseDate = sub.getEndDate();
-        } else if (isCurrentlyInTrial && currentTier == requestedTier) {
-            // Trial member moving to paid on same tier: stack on trial end date
-            baseDate = sub.getTrialEndDate();
-        } else {
-            // Upgrade, Downgrade, or Fresh start: start from now
-            baseDate = now;
+        finally {
+            TenantContext.clear();
         }
-
-        sub.setEndDate(baseDate.plusDays(paidDays).plusDays(creditDays));
-
-        // 7. Finalize Subscription State
-        sub.setTier(requestedTier);
-        sub.setStatus(SubscriptionStatus.ACTIVE);
-        sub.setLastUtr(pv.getUtrNumber());
-        sub.setBillingCycle(pv.getBillingCycle());
-        sub.setTrialEndDate(null); // Clear trial info once they are a paid member
-
-        subscriptionRepository.save(sub);
-
-        // 8. Update Payment Verification status
-        pv.setStatus(PaymentVerificationStatus.APPROVED);
-        pv.setVerifiedAt(now);
-        pv.setVerifiedBy(adminName);
-        subscriptionPayRepository.save(pv);
     }
     /**
      * Helper to determine if the move is an upgrade

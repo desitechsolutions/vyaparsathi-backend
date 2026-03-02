@@ -45,17 +45,20 @@ public class PricingPlanService {
     @Transactional
     public PricingPlanDTO saveOrUpdatePlan(PricingPlanDTO dto) {
         log.info("Updating configuration for tier: {}", dto.getTier());
-
         PricingPlanConfig entity = repository.findById(dto.getTier())
-                .orElse(new PricingPlanConfig());
-
-        // MapStruct updates the existing entity with new DTO values
+                .orElseGet(() -> {
+                    PricingPlanConfig newConfig = new PricingPlanConfig();
+                    newConfig.setTier(dto.getTier());
+                    newConfig.setSortOrder(99);
+                    return newConfig;
+                });
+        if (entity.getFeatures() != null && dto.getFeatures() != null) {
+            entity.getFeatures().clear();
+        }
         mapper.updateEntityFromDto(dto, entity);
 
-        // Ensure the ID is set correctly if it was a new plan
-        entity.setTier(dto.getTier());
+        PricingPlanConfig saved = repository.saveAndFlush(entity);
 
-        PricingPlanConfig saved = repository.save(entity);
         return mapper.toDto(saved);
     }
 

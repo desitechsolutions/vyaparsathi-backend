@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.invoice.utils;
 
 import com.desitech.vyaparsathi.invoice.service.InvoiceService;
+import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.Storage;
 import com.lowagie.text.Element;
@@ -18,6 +19,9 @@ import java.awt.*;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.StringJoiner;
 import java.util.concurrent.TimeUnit;
 
@@ -31,6 +35,7 @@ public class InvoiceUtil {
     private String uploadDir;
     @Autowired(required = false)
     private Storage storage;
+
 
 
     public static String formatBankDetails(String raw) {
@@ -135,32 +140,57 @@ public class InvoiceUtil {
     }
 
     public byte[] loadImageBytes(String path, String type) {
-        if (path == null || path.trim().isEmpty()) {
+
+        if (path == null || path.isBlank()) {
             return null;
         }
 
         try {
-            // 1. GCP signed URL (prod)
+
+            // ===============================
+            // 1. GCS STORAGE (PRIMARY - PROD)
+            // ===============================
             if (storage != null && !path.startsWith("http")) {
-                String bucket = extractBucketName(uploadDir);
-                BlobInfo blob = BlobInfo.newBuilder(bucket, path).build();
-                URL signed = storage.signUrl(blob, 15, TimeUnit.MINUTES, Storage.SignUrlOption.withV4Signature());
-                try (InputStream is = signed.openStream()) {
-                    return is.readAllBytes();
+
+                Blob blob = storage.get(extractBucketName(uploadDir), path);
+
+                if (blob == null || !blob.exists()) {
+                    logger.warn("{} not found in GCS: {}", type, path);
+                    return null;
                 }
+
+                // Optional safety limit (5MB)
+                if (blob.getSize() > 5 * 1024 * 1024) {
+                    logger.warn("{} too large: {}", type, path);
+                    return null;
+                }
+
+                return blob.getContent();
             }
 
-            // 2. Direct HTTP (legacy URLs)
+            // ===============================
+            // 2. HTTP URL (LEGACY SUPPORT)
+            // ===============================
             if (path.startsWith("http")) {
                 try (InputStream is = new URL(path).openStream()) {
                     return is.readAllBytes();
                 }
             }
 
-            // 3. Local file fallback
-            return java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path));
-        } catch (Exception e) {
-            logger.warn("Failed to load {} image from path: {}. Error: {}", type, path, e.getMessage());
+            // ===============================
+            // 3. LOCAL FILE (DEV MODE)
+            // ===============================
+            Path localPath = Paths.get(path);
+
+            if (!Files.exists(localPath)) {
+                logger.warn("{} local file missing: {}", type, path);
+                return null;
+            }
+
+            return Files.readAllBytes(localPath);
+
+        } catch (Exception ex) {
+            logger.error("Failed loading {} from {}", type, path, ex);
             return null;
         }
     }

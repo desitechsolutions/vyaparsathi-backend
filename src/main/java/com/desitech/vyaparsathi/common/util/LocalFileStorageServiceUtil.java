@@ -48,9 +48,7 @@ public class LocalFileStorageServiceUtil implements FileStorageService {
             log.info("File stored locally at: {}", filePath);
 
             // Construct the public URL
-            String publicUrl = String.format("%s/%s/%s/%s", baseUrl, uploadDir, folder, fileName);
-            log.info("Returning public URL: {}", publicUrl);
-            return publicUrl;
+            return folder + "/" + fileName;
         } catch (IOException e) {
             log.error("Failed to store file locally: uploadDir={}, folder={}, fileName={}", uploadDir, folder, fileName, e);
             throw new IOException("Failed to store file locally: " + e.getMessage(), e);

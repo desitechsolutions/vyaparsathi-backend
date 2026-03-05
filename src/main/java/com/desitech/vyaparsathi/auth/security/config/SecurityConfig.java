@@ -46,7 +46,8 @@ public class SecurityConfig {
                                 "/api/invoices/signed",
                                 "/ws/**",
                                 "/api/notifications/public/**",
-                                "/uploads/**"
+                                "/uploads/**",
+                                "/api/files/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

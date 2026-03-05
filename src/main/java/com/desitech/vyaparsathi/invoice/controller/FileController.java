@@ -10,6 +10,10 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
 @RestController
 @RequestMapping("/api/files")
 public class FileController {
@@ -19,47 +23,62 @@ public class FileController {
     @Autowired(required = false)
     private Storage storage;
 
-    @Value("${spring.file.upload.dir:gs://vyaparsathi_s3_bucket/}")
+    @Value("${spring.file.upload.dir:uploads}")
     private String uploadDir;
 
     @GetMapping("/display")
     public ResponseEntity<byte[]> displayFile(@RequestParam String path) {
-        if (storage == null) {
-            logger.error("GCS Storage bean is not initialized.");
-            return ResponseEntity.internalServerError().build();
-        }
-
         try {
-            // Robust extraction: removes gs:// and takes only the part before the first slash
-            String bucketName = uploadDir.replace("gs://", "");
-            if (bucketName.contains("/")) {
-                bucketName = bucketName.split("/")[0];
+            // --- 1. TRY CLOUD STORAGE (PROD) ---
+            if (storage != null && uploadDir.startsWith("gs://")) {
+                String bucketName = uploadDir.replace("gs://", "");
+                if (bucketName.contains("/")) {
+                    bucketName = bucketName.split("/")[0];
+                }
+
+                logger.debug("Cloud Mode: Fetching from GCS bucket: {}, path: {}", bucketName, path);
+                Blob blob = storage.get(bucketName, path);
+
+                if (blob != null && blob.exists()) {
+                    return ResponseEntity.ok()
+                            .contentType(MediaType.parseMediaType(determineContentType(path, blob.getContentType())))
+                            .body(blob.getContent());
+                }
             }
 
-            logger.debug("Fetching file from GCS: bucket={}, path={}", bucketName, path);
-            Blob blob = storage.get(bucketName, path);
+            // --- 2. TRY LOCAL FILE SYSTEM (LOCAL DEV / FALLBACK) ---
+            // On local, uploadDir will be something like "uploads/"
+            Path localFilePath = Paths.get("src/main/resources/static", uploadDir).resolve(path).normalize();
 
-            if (blob == null || !blob.exists()) {
-                logger.warn("File not found in GCS: {}", path);
-                return ResponseEntity.notFound().build();
+            if (Files.exists(localFilePath)) {
+                logger.debug("Local Mode: Fetching from disk: {}", localFilePath);
+                byte[] fileBytes = Files.readAllBytes(localFilePath);
+                return ResponseEntity.ok()
+                        .contentType(MediaType.parseMediaType(determineContentType(path, null)))
+                        .body(fileBytes);
             }
 
-            String contentType = blob.getContentType();
-            if (contentType == null) {
-                // Manual fallback detection
-                if (path.toLowerCase().endsWith(".png")) contentType = "image/png";
-                else if (path.toLowerCase().endsWith(".jpg") || path.toLowerCase().endsWith(".jpeg")) contentType = "image/jpeg";
-                else if (path.toLowerCase().endsWith(".svg")) contentType = "image/svg+xml";
-                else contentType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
-            }
-
-            return ResponseEntity.ok()
-                    .contentType(MediaType.parseMediaType(contentType))
-                    .body(blob.getContent());
+            logger.warn("File not found in Cloud or Local: {}", path);
+            return ResponseEntity.notFound().build();
 
         } catch (Exception e) {
-            logger.error("Error displaying file from GCS: {}", path, e);
+            logger.error("Error processing file request for path: {}", path, e);
             return ResponseEntity.internalServerError().build();
         }
+    }
+
+    /**
+     * Helper to determine content type based on file extension or GCS metadata
+     */
+    private String determineContentType(String path, String gcsContentType) {
+        if (gcsContentType != null) return gcsContentType;
+
+        String lowerPath = path.toLowerCase();
+        if (lowerPath.endsWith(".png")) return "image/png";
+        if (lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg")) return "image/jpeg";
+        if (lowerPath.endsWith(".svg")) return "image/svg+xml";
+        if (lowerPath.endsWith(".pdf")) return "application/pdf";
+
+        return MediaType.APPLICATION_OCTET_STREAM_VALUE;
     }
 }

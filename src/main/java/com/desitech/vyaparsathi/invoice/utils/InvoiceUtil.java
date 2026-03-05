@@ -1,8 +1,6 @@
 package com.desitech.vyaparsathi.invoice.utils;
 
-import com.desitech.vyaparsathi.invoice.service.InvoiceService;
 import com.google.cloud.storage.Blob;
-import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.Storage;
 import com.lowagie.text.Element;
 import com.lowagie.text.Phrase;
@@ -23,7 +21,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.StringJoiner;
-import java.util.concurrent.TimeUnit;
 
 import static java.math.BigDecimal.ZERO;
 
@@ -33,10 +30,78 @@ public class InvoiceUtil {
 
     @Value("${spring.file.upload.dir:gs://vyaparsathi_s3_bucket/}")
     private String uploadDir;
+
     @Autowired(required = false)
     private Storage storage;
 
+    public byte[] loadImageBytes(String dbPath, String type) {
+        if (dbPath == null || dbPath.isBlank()) {
+            return null;
+        }
 
+        try {
+            // ===============================
+            // 1. GCS STORAGE (PRIMARY - PROD)
+            // ===============================
+            if (storage != null && !dbPath.startsWith("http")) {
+                String bucketName = extractBucketName(uploadDir);
+
+                // Your DB stores: "logos/filename.png"
+                // We use that directly as the object path in GCS
+                String objectPath = dbPath.startsWith("gs://") ? extractObjectPath(dbPath) : dbPath;
+
+                logger.info("Attempting GCS Load | Type: {} | Bucket: {} | Object: {}", type, bucketName, objectPath);
+
+                Blob blob = storage.get(bucketName, objectPath);
+
+                if (blob != null && blob.exists()) {
+                    return blob.getContent();
+                } else {
+                    logger.warn("GCS Object Not Found: {}", objectPath);
+                }
+            }
+
+            // ===============================
+            // 2. HTTP URL (FALLBACK)
+            // ===============================
+            if (dbPath.startsWith("http")) {
+                try (InputStream is = new URL(dbPath).openStream()) {
+                    return is.readAllBytes();
+                }
+            }
+
+            // ===============================
+            // 3. LOCAL FILE (DEV MODE)
+            // ===============================
+            Path localPath = Paths.get(dbPath);
+            if (Files.exists(localPath)) {
+                return Files.readAllBytes(localPath);
+            }
+
+        } catch (Exception ex) {
+            logger.error("Failed loading {} from {}", type, dbPath, ex);
+        }
+        return null;
+    }
+
+    private String extractBucketName(String gsUri) {
+        if (gsUri == null || !gsUri.startsWith("gs://")) return "vyaparsathi_s3_bucket";
+        String bucket = gsUri.substring(5); // Remove gs://
+        if (bucket.contains("/")) {
+            bucket = bucket.split("/")[0]; // Get everything before the first slash
+        }
+        return bucket;
+    }
+
+    private String extractObjectPath(String gsUri) {
+        if (gsUri == null || !gsUri.startsWith("gs://")) return gsUri;
+        String withoutProtocol = gsUri.substring(5);
+        int firstSlash = withoutProtocol.indexOf("/");
+        if (firstSlash == -1) return "";
+        return withoutProtocol.substring(firstSlash + 1);
+    }
+
+    // --- Formatting Utils (Kept as is) ---
 
     public static String formatBankDetails(String raw) {
         if (raw == null || raw.trim().isEmpty()) return "";
@@ -139,105 +204,18 @@ public class InvoiceUtil {
         return sb.toString();
     }
 
-    public byte[] loadImageBytes(String path, String type) {
-        if (path == null || path.isBlank()) {
-            return null;
-        }
-
-        try {
-            // ===============================
-            // 1. GCS STORAGE (PRIMARY - PROD)
-            // ===============================
-            if (storage != null && !path.startsWith("http")) {
-                String bucketName = extractBucketName(uploadDir);
-
-                // Ensure we aren't passing a full gs:// path if the database already stored one
-                String objectPath = path.startsWith("gs://") ? extractObjectPath(path) : path;
-
-                logger.info("Attempting to load {} from GCS. Bucket: {}, Path: {}", type, bucketName, objectPath);
-
-                Blob blob = storage.get(bucketName, objectPath);
-
-                if (blob == null || !blob.exists()) {
-                    logger.warn("{} not found in GCS bucket '{}': {}", type, bucketName, objectPath);
-                    return null;
-                }
-
-                return blob.getContent();
-            }
-
-            // ===============================
-            // 2. HTTP URL (LEGACY SUPPORT)
-            // ===============================
-            if (path.startsWith("http")) {
-                try (InputStream is = new URL(path).openStream()) {
-                    return is.readAllBytes();
-                }
-            }
-
-            // ===============================
-            // 3. LOCAL FILE (DEV MODE)
-            // ===============================
-            Path localPath = Paths.get(path);
-
-            if (!Files.exists(localPath)) {
-                logger.warn("{} local file missing: {}", type, path);
-                return null;
-            }
-
-            return Files.readAllBytes(localPath);
-
-        } catch (Exception ex) {
-            logger.error("Failed loading {} from {}", type, path, ex);
-            return null;
-        }
-    }
-
-    private String extractBucketName(String gsUri) {
-        if (gsUri == null || !gsUri.startsWith("gs://")) return gsUri;
-        String bucket = gsUri.substring(5);
-        if (bucket.contains("/")) {
-            bucket = bucket.substring(0, bucket.indexOf("/"));
-        }
-        return bucket;
-    }
-
-    private String extractObjectPath(String gsUri) {
-        if (gsUri == null || !gsUri.startsWith("gs://")) return gsUri;
-        String withoutProtocol = gsUri.substring(5);
-        int firstSlash = withoutProtocol.indexOf("/");
-        if (firstSlash == -1) return "";
-        return withoutProtocol.substring(firstSlash + 1);
-    }
-
     public static Color parseColor(String hex, Color fallback) {
         if (hex == null || hex.isEmpty()) return fallback;
-        try {
-            String color = hex.startsWith("#") ? hex : "#" + hex;
-            return Color.decode(color);
-        } catch (Exception e) {
-            return fallback;
-        }
+        try { String color = hex.startsWith("#") ? hex : "#" + hex; return Color.decode(color); } catch (Exception e) { return fallback; }
     }
 
     public static PdfPCell createCell(String text, com.lowagie.text.Font font, int align) {
         PdfPCell cell = new PdfPCell(new Phrase(text != null ? text : "", font));
-        cell.setPadding(5);
-        cell.setHorizontalAlignment(align);
-        cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-        return cell;
+        cell.setPadding(5); cell.setHorizontalAlignment(align); cell.setVerticalAlignment(Element.ALIGN_MIDDLE); return cell;
     }
 
     public static void addTotalRow(PdfPTable table, String label, String value, com.lowagie.text.Font font) {
-        PdfPCell lCell = new PdfPCell(new Phrase(label, font));
-        lCell.setBorder(com.lowagie.text.Rectangle.NO_BORDER);
-        table.addCell(lCell);
-
-        PdfPCell vCell = new PdfPCell(new Phrase(value, font));
-        vCell.setBorder(Rectangle.NO_BORDER);
-        vCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
-        table.addCell(vCell);
+        PdfPCell lCell = new PdfPCell(new Phrase(label, font)); lCell.setBorder(Rectangle.NO_BORDER); table.addCell(lCell);
+        PdfPCell vCell = new PdfPCell(new Phrase(value, font)); vCell.setBorder(Rectangle.NO_BORDER); vCell.setHorizontalAlignment(Element.ALIGN_RIGHT); table.addCell(vCell);
     }
-
-
 }

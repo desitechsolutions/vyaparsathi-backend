@@ -9,13 +9,18 @@ import lombok.*;
 import java.util.List;
 
 @Entity
-@Table(name = "item")
+@Table(name = "item", uniqueConstraints = {
+        @UniqueConstraint(
+                name = "uk_item_name_brand_shop",
+                columnNames = {"name", "brand_name", "shop_id"}
+        )
+})
 @Getter
 @Setter
 @NoArgsConstructor
 public class Item extends ShopAwareEntity {
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private String name;
 
     @Column

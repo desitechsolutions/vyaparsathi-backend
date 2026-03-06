@@ -6,13 +6,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.io.InputStream;
 
 @RestController
 @RequestMapping("/api/files")
@@ -23,7 +23,8 @@ public class FileController {
     @Autowired(required = false)
     private Storage storage;
 
-    @Value("${spring.file.upload.dir:uploads}")
+    // Expected value in application.properties: static/uploads/
+    @Value("${spring.file.upload.dir:static/uploads/}")
     private String uploadDir;
 
     @GetMapping("/display")
@@ -46,19 +47,22 @@ public class FileController {
                 }
             }
 
-            // --- 2. TRY LOCAL FILE SYSTEM (LOCAL DEV / FALLBACK) ---
-            // On local, uploadDir will be something like "uploads/"
-            Path localFilePath = Paths.get("src/main/resources/static", uploadDir).resolve(path).normalize();
+            // --- 2. TRY CLASSPATH (LOCAL DEV) ---
+            // This bypasses the need for "src/main/resources" and works in both IDE and JAR
+            String fullResourcePath = uploadDir + path;
+            Resource resource = new ClassPathResource(fullResourcePath);
 
-            if (Files.exists(localFilePath)) {
-                logger.debug("Local Mode: Fetching from disk: {}", localFilePath);
-                byte[] fileBytes = Files.readAllBytes(localFilePath);
-                return ResponseEntity.ok()
-                        .contentType(MediaType.parseMediaType(determineContentType(path, null)))
-                        .body(fileBytes);
+            if (resource.exists()) {
+                logger.debug("Local Mode: Fetching from ClassPath: {}", fullResourcePath);
+                try (InputStream is = resource.getInputStream()) {
+                    byte[] fileBytes = is.readAllBytes();
+                    return ResponseEntity.ok()
+                            .contentType(MediaType.parseMediaType(determineContentType(path, null)))
+                            .body(fileBytes);
+                }
             }
 
-            logger.warn("File not found in Cloud or Local: {}", path);
+            logger.warn("File not found in Cloud or ClassPath: {}", fullResourcePath);
             return ResponseEntity.notFound().build();
 
         } catch (Exception e) {

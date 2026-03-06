@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 import java.awt.*;
@@ -40,42 +41,49 @@ public class InvoiceUtil {
         }
 
         try {
-            // ===============================
+            // ===========================================
             // 1. GCS STORAGE (PRIMARY - PROD)
-            // ===============================
-            if (storage != null && !dbPath.startsWith("http")) {
+            // ===========================================
+            if (storage != null && !dbPath.startsWith("http") && uploadDir.startsWith("gs://")) {
                 String bucketName = extractBucketName(uploadDir);
-
-                // Your DB stores: "logos/filename.png"
-                // We use that directly as the object path in GCS
                 String objectPath = dbPath.startsWith("gs://") ? extractObjectPath(dbPath) : dbPath;
 
                 logger.info("Attempting GCS Load | Type: {} | Bucket: {} | Object: {}", type, bucketName, objectPath);
-
                 Blob blob = storage.get(bucketName, objectPath);
 
                 if (blob != null && blob.exists()) {
                     return blob.getContent();
-                } else {
-                    logger.warn("GCS Object Not Found: {}", objectPath);
                 }
             }
 
-            // ===============================
-            // 2. HTTP URL (FALLBACK)
-            // ===============================
+            // ===========================================
+            // 2. HTTP URL (FALLBACK - Avoid calling localhost)
+            // ===========================================
             if (dbPath.startsWith("http")) {
-                try (InputStream is = new URL(dbPath).openStream()) {
+                // Logic to prevent the server from calling itself recursively
+                if (dbPath.contains("localhost") || dbPath.contains("127.0.0.1")) {
+                    logger.warn("Skipping local HTTP call for {} to avoid deadlock. Using ClassPath instead.", type);
+                } else {
+                    try (InputStream is = new URL(dbPath).openStream()) {
+                        return is.readAllBytes();
+                    }
+                }
+            }
+
+            // ===========================================
+            // 3. CLASSPATH LOOKUP (LOCAL DEV)
+            // ===========================================
+            // This combines "static/uploads/" + "logos/filename.png"
+            String fullResourcePath = uploadDir + (dbPath.contains("uploads/") ? dbPath.split("uploads/")[1] : dbPath);
+            org.springframework.core.io.Resource resource = new ClassPathResource(fullResourcePath);
+
+            if (resource.exists()) {
+                logger.info("Loading {} from ClassPath: {}", type, fullResourcePath);
+                try (InputStream is = resource.getInputStream()) {
                     return is.readAllBytes();
                 }
-            }
-
-            // ===============================
-            // 3. LOCAL FILE (DEV MODE)
-            // ===============================
-            Path localPath = Paths.get(dbPath);
-            if (Files.exists(localPath)) {
-                return Files.readAllBytes(localPath);
+            } else {
+                logger.warn("File not found in ClassPath: {}", fullResourcePath);
             }
 
         } catch (Exception ex) {

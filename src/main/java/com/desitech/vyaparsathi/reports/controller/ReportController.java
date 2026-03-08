@@ -247,4 +247,69 @@ public class ReportController {
             throw new ApplicationException("Failed to generate audit pack", e);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // PHARMACY-SPECIFIC REPORT ENDPOINTS
+    // -------------------------------------------------------------------------
+
+    @GetMapping("/expiry-report")
+    @Operation(
+            summary = "Get medicine expiry report",
+            description = "Returns all item variants whose expiry date falls within the next N days. " +
+                    "Items that are already expired are also included. Used for pharmacy stock clearance."
+    )
+    public ResponseEntity<List<ExpiryReportItemDto>> getExpiryReport(
+            @Parameter(description = "Number of days ahead to check for expiry (default 30)")
+            @RequestParam(defaultValue = "30") int days) {
+        try {
+            List<ExpiryReportItemDto> result = service.getExpiryReport(days);
+            logger.info("Fetched expiry report for next {} days, {} items found", days, result.size());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching expiry report: {}", e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch expiry report", e);
+        }
+    }
+
+    @GetMapping("/narcotics-register")
+    @Operation(
+            summary = "Get narcotics and controlled drug register",
+            description = "Returns a mandatory register of all Schedule H, H1, and X (narcotic) drug sales " +
+                    "for the given date range. Required for Drugs & Cosmetics Act compliance."
+    )
+    public ResponseEntity<List<NarcoticsRegisterEntryDto>> getNarcoticsRegister(
+            @Parameter(description = "Start date in YYYY-MM-DD format", example = "2024-01-01")
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @Parameter(description = "End date in YYYY-MM-DD format", example = "2024-01-31")
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        try {
+            List<NarcoticsRegisterEntryDto> result = service.getNarcoticsRegister(from, to);
+            logger.info("Fetched narcotics register from {} to {}, {} entries", from, to, result.size());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching narcotics register from {} to {}: {}", from, to, e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch narcotics register", e);
+        }
+    }
+
+    @GetMapping("/purchase-register")
+    @Operation(
+            summary = "Get batch-wise purchase register",
+            description = "Returns a batch-level purchase register linking each received batch to its supplier. " +
+                    "Required for drug recall traceability and pharmacy regulatory audits."
+    )
+    public ResponseEntity<List<PurchaseRegisterEntryDto>> getPurchaseRegister(
+            @Parameter(description = "Start date in YYYY-MM-DD format", example = "2024-01-01")
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @Parameter(description = "End date in YYYY-MM-DD format", example = "2024-01-31")
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        try {
+            List<PurchaseRegisterEntryDto> result = service.getPurchaseRegister(from, to);
+            logger.info("Fetched purchase register from {} to {}, {} entries", from, to, result.size());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching purchase register from {} to {}: {}", from, to, e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch purchase register", e);
+        }
+    }
 }

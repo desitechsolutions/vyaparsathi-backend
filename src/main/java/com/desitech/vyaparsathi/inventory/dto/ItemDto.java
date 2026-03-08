@@ -22,6 +22,8 @@ public class ItemDto {
     private DrugSchedule drugSchedule;
     /** Whether a valid prescription is required to sell this medicine. */
     private Boolean requiresPrescription;
+    /** Active pharmaceutical ingredient(s) and strength (e.g., "Paracetamol 500mg"). */
+    private String composition;
 
     private List<ItemVariantDto> variants;
 }

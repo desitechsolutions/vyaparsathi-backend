@@ -42,4 +42,6 @@ public class ItemVariantDto {
     private LocalDate expiryDate;
     /** Maximum Retail Price – selling price must not exceed this. */
     private BigDecimal mrp;
+    /** Active pharmaceutical ingredient(s) and strength – inherited from parent Item. */
+    private String composition;
 }

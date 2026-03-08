@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.inventory.entity;
 
 import com.desitech.vyaparsathi.common.entities.BaseEntity;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
+import com.desitech.vyaparsathi.inventory.enums.DrugSchedule;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.*;
@@ -44,6 +45,13 @@ public class Item extends ShopAwareEntity {
 
     @Column(name = "attribute_2")
     private String attribute2;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "drug_schedule")
+    private DrugSchedule drugSchedule;
+
+    @Column(name = "requires_prescription")
+    private Boolean requiresPrescription;
 
     // A Item can have many variants (e.g., T-Shirt can be size M, L)
     @OneToMany(mappedBy = "item", cascade = CascadeType.ALL, orphanRemoval = true)

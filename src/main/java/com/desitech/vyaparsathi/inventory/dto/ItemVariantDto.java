@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.inventory.dto;
 
 import lombok.Data;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Data
 public class ItemVariantDto {
@@ -19,6 +20,10 @@ public class ItemVariantDto {
     private String fit;
     private BigDecimal lowStockThreshold; // Changed to Integer for consistency with entity
     private BigDecimal currentStock;
+    private BigDecimal mrp;
+    private String batchNumber;
+    private LocalDate manufacturingDate;
+    private LocalDate expiryDate;
 
     // "Flattened" fields from the parent Item entity
     private Long itemId;

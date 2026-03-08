@@ -80,70 +80,69 @@ public class ItemService {
 
     @Transactional
     public ItemDto updateItem(Long id, ItemDto itemDto) {
+        // 1. Fetch existing item with variants (join fetch recommended in repo)
         Item existingItem = itemRepository.findByIdWithVariants(id)
                 .orElseThrow(() -> new EntityNotFoundException("Item not found with id: " + id));
 
+        // 2. Update Main Item Fields & Sync Legacy Attributes
         existingItem.setName(itemDto.getName());
         existingItem.setDescription(itemDto.getDescription());
         existingItem.setBrandName(itemDto.getBrandName());
-        existingItem.setAttribute1(itemDto.getAttribute1() != null ? itemDto.getAttribute1() : itemDto.getFabric());
-        existingItem.setAttribute2(itemDto.getAttribute2() != null ? itemDto.getAttribute2() : itemDto.getSeason());
+
+        // Sync logic: ensures both generic and specific columns stay identical
+        String attr1 = itemDto.getAttribute1() != null ? itemDto.getAttribute1() : itemDto.getFabric();
+        String attr2 = itemDto.getAttribute2() != null ? itemDto.getAttribute2() : itemDto.getSeason();
+        existingItem.setAttribute1(attr1);
+        existingItem.setFabric(attr1);
+        existingItem.setAttribute2(attr2);
+        existingItem.setSeason(attr2);
+
+        // 3. Category Update
         if (itemDto.getCategoryId() != null) {
-            // Check if the category has changed
             if (existingItem.getCategory() == null || !existingItem.getCategory().getId().equals(itemDto.getCategoryId())) {
                 Category newCategory = categoryRepository.findById(itemDto.getCategoryId())
-                        .orElseThrow(() -> new EntityNotFoundException("Category not found with id: " + itemDto.getCategoryId()));
+                        .orElseThrow(() -> new EntityNotFoundException("Category not found: " + itemDto.getCategoryId()));
                 existingItem.setCategory(newCategory);
             }
         } else {
-            existingItem.setCategory(null); // Allow un-setting the category
+            existingItem.setCategory(null);
         }
 
-        // Map of incoming variants by id (if exist)
+        // 4. Manage Variants without replacing the collection reference
         Map<Long, ItemVariantDto> incomingById = itemDto.getVariants().stream()
                 .filter(v -> v.getId() != null)
                 .collect(Collectors.toMap(ItemVariantDto::getId, v -> v));
 
-        // Prepare new list of variants
-        List<ItemVariant> updatedVariants = new ArrayList<>();
+        // A. Remove variants not present in the incoming DTO (Orphan Removal triggers here)
+        existingItem.getVariants().removeIf(variant -> !incomingById.containsKey(variant.getId()));
 
-        // 1. Update existing variants present in DTO
-        for (ItemVariant existingVariant : new ArrayList<>(existingItem.getVariants())) {
-            if (incomingById.containsKey(existingVariant.getId())) {
-                ItemVariantDto dto = incomingById.get(existingVariant.getId());
-                updateVariantFromDto(existingVariant, dto);
-                updatedVariants.add(existingVariant);
-            }
-            // If not present in DTO, drop from updatedVariants (effectively delete)
+        // B. Update existing managed variants
+        for (ItemVariant existingVariant : existingItem.getVariants()) {
+            ItemVariantDto dto = incomingById.get(existingVariant.getId());
+            updateVariantFromDto(existingVariant, dto);
         }
 
-        // 2. Add new variants from DTO (no id)
+        // C. Add new variants
         itemDto.getVariants().stream()
                 .filter(v -> v.getId() == null)
                 .forEach(dto -> {
-                    ItemVariant entity = mapper.toEntity(dto);
-                    entity.setItem(existingItem);
-                    updatedVariants.add(entity);
+                    // Ensure identifiers are generated before converting to entity
+                    if (dto.getSku() == null || dto.getSku().isEmpty()) {
+                        dto.setSku(generateSku(itemDto, dto));
+                    }
+                    if (dto.getHsn() == null || dto.getHsn().isEmpty()) {
+                        dto.setHsn(generateUniqueHsn());
+                    }
+
+                    ItemVariant newVariant = mapper.toEntity(dto);
+                    newVariant.setItem(existingItem); // Maintain back-reference
+                    existingItem.getVariants().add(newVariant);
                 });
 
-        // 3. Assign HSN/SKU to all updatedVariants if missing
-        for (ItemVariant v : updatedVariants) {
-            if (v.getSku() == null || v.getSku().isEmpty()) {
-                v.setSku(generateSku(mapper.toDto(existingItem), mapper.toDto(v)));
-            }
-            if (v.getHsn() == null || v.getHsn().isEmpty()) {
-                v.setHsn(generateUniqueHsn());
-            }
-        }
-
-        // 4. Replace old variants with the new list
-        existingItem.getVariants().clear();
-        existingItem.getVariants().addAll(updatedVariants);
-
-        itemRepository.save(existingItem);
-        return mapper.toDto(existingItem);
+        // 5. Save and return
+        Item savedItem = itemRepository.save(existingItem);
+        return mapper.toDto(savedItem);
     }
-
     @Transactional
     public void deleteItem(Long id) {
         if (!itemRepository.existsById(id)) {
@@ -234,16 +233,26 @@ public class ItemService {
     }
 
     private void updateVariantFromDto(ItemVariant variant, ItemVariantDto dto) {
-        variant.setSku(dto.getSku());
+        // 1. Critical Identifier Guard
+        // Only update SKU/HSN if they are provided and different to prevent accidental nulling
+        if (dto.getSku() != null && !dto.getSku().isBlank()) {
+            variant.setSku(dto.getSku());
+        }
+        if (dto.getHsn() != null && !dto.getHsn().isBlank()) {
+            variant.setHsn(dto.getHsn());
+        }
+
+        // 2. Core Pricing & Inventory
         variant.setUnit(dto.getUnit());
         variant.setPricePerUnit(dto.getPricePerUnit());
-        variant.setHsn(dto.getHsn());
         variant.setGstRate(dto.getGstRate());
+        variant.setLowStockThreshold(dto.getLowStockThreshold());
+
+        // 3. Visual & Attributes
         variant.setPhotoPath(dto.getPhotoPath());
         variant.setColor(dto.getColor());
         variant.setSize(dto.getSize());
         variant.setDesign(dto.getDesign());
-        variant.setFit(dto.getFit()); // **FIXED**: Added the missing 'fit' attribute
-        variant.setLowStockThreshold(dto.getLowStockThreshold());
+        variant.setFit(dto.getFit());
     }
 }

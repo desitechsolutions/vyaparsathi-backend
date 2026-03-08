@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.inventory.dto;
 
 import lombok.Data;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Data
 public class ItemVariantDto {
@@ -17,7 +18,7 @@ public class ItemVariantDto {
     private String size;
     private String design;
     private String fit;
-    private BigDecimal lowStockThreshold; // Changed to Integer for consistency with entity
+    private BigDecimal lowStockThreshold;
     private BigDecimal currentStock;
 
     // "Flattened" fields from the parent Item entity
@@ -25,10 +26,20 @@ public class ItemVariantDto {
     private String itemName;
     private String description;
     private String brand;
-    private Long categoryId; // Corrected from 'String category'
-    private String categoryName; // Added for completeness
-    private String fabric; // Added from parent
-    private String season; // Added
+    private Long categoryId;
+    private String categoryName;
+    private String fabric;
+    private String season;
     private String attribute1;
     private String attribute2;
+
+    // --- Pharmacy-specific fields ---
+    /** Batch/lot number for this medicine variant. */
+    private String batchNumber;
+    /** Date of manufacture printed on the packaging. */
+    private LocalDate manufacturingDate;
+    /** Expiry date printed on the packaging. */
+    private LocalDate expiryDate;
+    /** Maximum Retail Price – selling price must not exceed this. */
+    private BigDecimal mrp;
 }

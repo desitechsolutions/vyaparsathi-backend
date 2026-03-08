@@ -97,6 +97,10 @@ public class ItemService {
         existingItem.setAttribute2(attr2);
         existingItem.setSeason(attr2);
 
+        // Pharmacy fields
+        existingItem.setDrugSchedule(itemDto.getDrugSchedule());
+        existingItem.setRequiresPrescription(itemDto.getRequiresPrescription());
+
         // 3. Category Update
         if (itemDto.getCategoryId() != null) {
             if (existingItem.getCategory() == null || !existingItem.getCategory().getId().equals(itemDto.getCategoryId())) {
@@ -254,5 +258,11 @@ public class ItemService {
         variant.setSize(dto.getSize());
         variant.setDesign(dto.getDesign());
         variant.setFit(dto.getFit());
+
+        // 4. Pharmacy fields
+        variant.setBatchNumber(dto.getBatchNumber());
+        variant.setManufacturingDate(dto.getManufacturingDate());
+        variant.setExpiryDate(dto.getExpiryDate());
+        variant.setMrp(dto.getMrp());
     }
 }

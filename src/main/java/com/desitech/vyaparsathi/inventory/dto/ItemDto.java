@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.inventory.dto;
 
+import com.desitech.vyaparsathi.inventory.enums.DrugSchedule;
 import lombok.Data;
 import java.util.List;
 
@@ -15,5 +16,12 @@ public class ItemDto {
     private String season;
     private String attribute1;
     private String attribute2;
+
+    // --- Pharmacy-specific fields ---
+    /** Drug schedule classification (PHARMACY shops). */
+    private DrugSchedule drugSchedule;
+    /** Whether a valid prescription is required to sell this medicine. */
+    private Boolean requiresPrescription;
+
     private List<ItemVariantDto> variants;
 }

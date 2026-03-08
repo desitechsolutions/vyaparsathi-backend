@@ -38,6 +38,10 @@ public class ItemMapper {
         dto.setAttribute1(item.getAttribute1());
         dto.setAttribute2(item.getAttribute2());
 
+        // Pharmacy fields
+        dto.setDrugSchedule(item.getDrugSchedule());
+        dto.setRequiresPrescription(item.getRequiresPrescription());
+
         if (item.getCategory() != null) {
             dto.setCategoryId(item.getCategory().getId());
             dto.setCategoryName(item.getCategory().getName());
@@ -73,6 +77,10 @@ public class ItemMapper {
         item.setFabric(val1);
         item.setAttribute2(val2);
         item.setSeason(val2);
+
+        // Pharmacy fields
+        item.setDrugSchedule(dto.getDrugSchedule());
+        item.setRequiresPrescription(dto.getRequiresPrescription());
 
         if (dto.getCategoryId() != null) {
             Category category = categoryRepository.findById(dto.getCategoryId())
@@ -110,6 +118,12 @@ public class ItemMapper {
         dto.setFit(itemVariant.getFit());
         dto.setLowStockThreshold(itemVariant.getLowStockThreshold());
 
+        // Pharmacy fields
+        dto.setBatchNumber(itemVariant.getBatchNumber());
+        dto.setManufacturingDate(itemVariant.getManufacturingDate());
+        dto.setExpiryDate(itemVariant.getExpiryDate());
+        dto.setMrp(itemVariant.getMrp());
+
         if (itemVariant.getItem() != null) {
             Item parent = itemVariant.getItem();
             dto.setItemId(parent.getId());
@@ -140,6 +154,12 @@ public class ItemMapper {
         variant.setDesign(dto.getDesign());
         variant.setFit(dto.getFit());
         variant.setLowStockThreshold(dto.getLowStockThreshold());
+
+        // Pharmacy fields
+        variant.setBatchNumber(dto.getBatchNumber());
+        variant.setManufacturingDate(dto.getManufacturingDate());
+        variant.setExpiryDate(dto.getExpiryDate());
+        variant.setMrp(dto.getMrp());
 
         return variant;
     }

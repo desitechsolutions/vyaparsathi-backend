@@ -7,6 +7,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Entity
 @Table(name = "item_variant")
@@ -52,4 +53,16 @@ public class ItemVariant extends ShopAwareEntity {
 
     @Column(name = "low_stock_threshold")
     private BigDecimal lowStockThreshold; // Threshold for low stock alerts
+
+    @Column(name = "mrp")
+    private BigDecimal mrp;
+
+    @Column(name = "batch_number")
+    private String batchNumber;
+
+    @Column(name = "manufacturing_date")
+    private LocalDate manufacturingDate;
+
+    @Column(name = "expiry_date")
+    private LocalDate expiryDate;
 }

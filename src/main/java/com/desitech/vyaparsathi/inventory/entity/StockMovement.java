@@ -10,6 +10,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -36,6 +37,9 @@ public class StockMovement extends ShopAwareEntity {
     private String batch;
     private String reason;
     private String reference; // Reference to related transaction (e.g., Sale ID, Purchase Order ID)
+
+    @Column(name = "expiry_date")
+    private LocalDate expiryDate;
 
     @Convert(converter = LocalDateTimeAttributeConverter.class)
     @Column(name = "timestamp", nullable = false)

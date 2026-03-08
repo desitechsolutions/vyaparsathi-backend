@@ -15,5 +15,7 @@ public class ItemDto {
     private String season;
     private String attribute1;
     private String attribute2;
+    private String drugSchedule;
+    private Boolean requiresPrescription;
     private List<ItemVariantDto> variants;
 }

@@ -5,6 +5,7 @@ import com.desitech.vyaparsathi.inventory.dto.ItemVariantDto;
 import com.desitech.vyaparsathi.inventory.entity.Category;
 import com.desitech.vyaparsathi.inventory.entity.Item;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
+import com.desitech.vyaparsathi.inventory.enums.DrugSchedule;
 import com.desitech.vyaparsathi.inventory.repository.CategoryRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,6 +44,9 @@ public class ItemMapper {
             dto.setCategoryName(item.getCategory().getName());
         }
 
+        dto.setDrugSchedule(item.getDrugSchedule() != null ? item.getDrugSchedule().name() : null);
+        dto.setRequiresPrescription(item.getRequiresPrescription());
+
         if (item.getVariants() != null) {
             dto.setVariants(item.getVariants().stream()
                     .map(this::toDto)
@@ -80,6 +84,13 @@ public class ItemMapper {
             item.setCategory(category);
         }
 
+        if (dto.getDrugSchedule() != null && !dto.getDrugSchedule().isBlank()) {
+            item.setDrugSchedule(DrugSchedule.valueOf(dto.getDrugSchedule()));
+        } else {
+            item.setDrugSchedule(null);
+        }
+        item.setRequiresPrescription(dto.getRequiresPrescription());
+
         if (dto.getVariants() != null) {
             item.setVariants(dto.getVariants().stream()
                     .map(variantDto -> {
@@ -109,6 +120,10 @@ public class ItemMapper {
         dto.setDesign(itemVariant.getDesign());
         dto.setFit(itemVariant.getFit());
         dto.setLowStockThreshold(itemVariant.getLowStockThreshold());
+        dto.setMrp(itemVariant.getMrp());
+        dto.setBatchNumber(itemVariant.getBatchNumber());
+        dto.setManufacturingDate(itemVariant.getManufacturingDate());
+        dto.setExpiryDate(itemVariant.getExpiryDate());
 
         if (itemVariant.getItem() != null) {
             Item parent = itemVariant.getItem();

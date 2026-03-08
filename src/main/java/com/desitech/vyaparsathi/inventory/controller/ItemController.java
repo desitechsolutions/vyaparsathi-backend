@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 
 import com.desitech.vyaparsathi.inventory.dto.ItemDto;
 import com.desitech.vyaparsathi.inventory.service.ItemService;
+import com.desitech.vyaparsathi.inventory.service.ItemVariantService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -30,6 +31,9 @@ public class ItemController {
 
     @Autowired
     private ItemService itemService;
+
+    @Autowired
+    private ItemVariantService itemVariantService;
 
     @GetMapping
     public List<ItemDto> getAllItems() {
@@ -186,6 +190,20 @@ public class ItemController {
         } catch (Exception e) {
             logger.error("Error deleting catalog item variant id={}: {}", id, e.getMessage(), e);
             throw new ApplicationException("Failed to delete catalog item variant", e);
+        }
+    }
+
+    @GetMapping("/{itemId}/substitutes")
+    public ResponseEntity<List<com.desitech.vyaparsathi.inventory.dto.ItemVariantDto>> getSubstitutes(
+            @PathVariable Long itemId) {
+        try {
+            List<com.desitech.vyaparsathi.inventory.dto.ItemVariantDto> substitutes =
+                    itemVariantService.getSubstitutes(itemId);
+            logger.info("Fetched substitutes for item id={}, count={}", itemId, substitutes.size());
+            return ResponseEntity.ok(substitutes);
+        } catch (Exception e) {
+            logger.error("Error fetching substitutes for item id={}: {}", itemId, e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch item substitutes", e);
         }
     }
 }

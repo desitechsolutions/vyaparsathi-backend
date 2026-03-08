@@ -76,6 +76,27 @@ public class Sale extends ShopAwareEntity {
     @Column(name = "status", nullable = false)
     @Enumerated(EnumType.STRING)
     private SaleStatus status = SaleStatus.COMPLETED;
+
+    // --- Pharmacy-specific fields ---
+
+    /**
+     * Name of the prescribing doctor. Required for Schedule H1 and X (narcotic) drugs.
+     */
+    @Column(name = "doctor_name", length = 200)
+    private String doctorName;
+
+    /**
+     * Name of the patient (if different from the customer). Used in narcotics register.
+     */
+    @Column(name = "patient_name", length = 200)
+    private String patientName;
+
+    /**
+     * Prescription / Rx number provided by the customer. Used for pharmacy compliance tracking.
+     */
+    @Column(name = "prescription_number", length = 100)
+    private String prescriptionNumber;
+
     @PrePersist
     @Override
     public void onCreate() {

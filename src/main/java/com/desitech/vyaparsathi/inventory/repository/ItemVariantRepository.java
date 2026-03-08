@@ -31,7 +31,8 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
             "(:sku IS NULL OR iv.sku LIKE %:sku%) AND " +
             "(:fabric IS NULL OR i.fabric LIKE %:fabric%) AND " +
             "(:season IS NULL OR i.season LIKE %:season%) AND " +
-            "(:fit IS NULL OR iv.fit LIKE %:fit%)")
+            "(:fit IS NULL OR iv.fit LIKE %:fit%) AND " +
+            "(:composition IS NULL OR i.composition LIKE %:composition%)")
     List<ItemVariant> searchVariants(
             @Param("name") String name,
             @Param("categoryName") String categoryName,
@@ -41,7 +42,8 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
             @Param("sku") String sku,
             @Param("fabric") String fabric,
             @Param("season") String season,
-            @Param("fit") String fit
+            @Param("fit") String fit,
+            @Param("composition") String composition
     );
 
     /**
@@ -49,6 +51,20 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
      * This is used by the LowStockAlerts feature.
      */
     List<ItemVariant> findAllByLowStockThresholdIsNotNull();
+
+    /**
+     * Finds all variants of items sharing the same composition as the given item.
+     * Used to suggest therapeutic substitutes in pharmacy.
+     *
+     * @param composition the active pharmaceutical composition string
+     * @param excludeItemId the item ID to exclude (the reference item itself)
+     * @return list of variants from items with the same composition
+     */
+    @Query("SELECT iv FROM ItemVariant iv JOIN iv.item i WHERE i.composition = :composition AND i.id <> :excludeItemId")
+    List<ItemVariant> findSubstitutesByComposition(
+            @Param("composition") String composition,
+            @Param("excludeItemId") Long excludeItemId
+    );
 
     /**
      * Finds all variants with an expiry date set and expiry date before or on the given cutoff date.

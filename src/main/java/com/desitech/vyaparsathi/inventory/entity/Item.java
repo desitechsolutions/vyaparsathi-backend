@@ -63,6 +63,13 @@ public class Item extends ShopAwareEntity {
     @Column(name = "requires_prescription")
     private Boolean requiresPrescription = false;
 
+    /**
+     * Active pharmaceutical ingredient(s) and strength (e.g., "Paracetamol 500mg").
+     * Used to find therapeutic substitutes and for regulatory reporting.
+     */
+    @Column(name = "composition", length = 500)
+    private String composition;
+
     // A Item can have many variants (e.g., T-Shirt can be size M, L)
     @OneToMany(mappedBy = "item", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference

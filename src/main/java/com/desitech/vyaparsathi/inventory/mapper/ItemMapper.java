@@ -41,6 +41,7 @@ public class ItemMapper {
         // Pharmacy fields
         dto.setDrugSchedule(item.getDrugSchedule());
         dto.setRequiresPrescription(item.getRequiresPrescription());
+        dto.setComposition(item.getComposition());
 
         if (item.getCategory() != null) {
             dto.setCategoryId(item.getCategory().getId());
@@ -81,6 +82,7 @@ public class ItemMapper {
         // Pharmacy fields
         item.setDrugSchedule(dto.getDrugSchedule());
         item.setRequiresPrescription(dto.getRequiresPrescription());
+        item.setComposition(dto.getComposition());
 
         if (dto.getCategoryId() != null) {
             Category category = categoryRepository.findById(dto.getCategoryId())
@@ -132,6 +134,7 @@ public class ItemMapper {
 
             dto.setAttribute1(parent.getAttribute1() != null ? parent.getAttribute1() : parent.getFabric());
             dto.setAttribute2(parent.getAttribute2() != null ? parent.getAttribute2() : parent.getSeason());
+            dto.setComposition(parent.getComposition());
         }
 
         dto.setCurrentStock(BigDecimal.ZERO);

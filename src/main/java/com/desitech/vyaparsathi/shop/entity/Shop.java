@@ -62,4 +62,11 @@ public class Shop {
 
     @Column(name = "bank_details", columnDefinition = "TEXT")
     private String bankDetails;
+
+    /**
+     * Drug license number for pharmacy shops.
+     * Displayed on pharmacy invoices as required by regulatory compliance.
+     */
+    @Column(name = "drug_license_number")
+    private String drugLicenseNumber;
 }

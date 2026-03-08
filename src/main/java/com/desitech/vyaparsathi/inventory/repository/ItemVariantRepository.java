@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -48,5 +49,15 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
      * This is used by the LowStockAlerts feature.
      */
     List<ItemVariant> findAllByLowStockThresholdIsNotNull();
+
+    /**
+     * Finds all variants with an expiry date set and expiry date before or on the given cutoff date.
+     * Used to generate expiry alerts for pharmacy shops.
+     *
+     * @param cutoffDate the date up to which items are considered near-expiry or expired
+     * @return list of item variants expiring at or before cutoffDate
+     */
+    @Query("SELECT iv FROM ItemVariant iv WHERE iv.expiryDate IS NOT NULL AND iv.expiryDate <= :cutoffDate")
+    List<ItemVariant> findByExpiryDateOnOrBefore(@Param("cutoffDate") LocalDate cutoffDate);
 
 }

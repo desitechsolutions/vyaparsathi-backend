@@ -114,6 +114,25 @@ public class StockController {
         }
     }
 
+    @GetMapping("/expiry-alerts")
+    @Operation(summary = "Get medicine expiry alerts",
+               description = "Returns medicines/items expiring within the specified number of days. " +
+                       "Used by pharmacy shops to identify near-expiry or expired stock. " +
+                       "Default window is 90 days.")
+    @ApiResponse(responseCode = "200", description = "Expiry alerts retrieved successfully")
+    public ResponseEntity<List<ExpiryAlertDto>> getExpiryAlerts(
+            @Parameter(description = "Number of days ahead to check for expiry (default 90)")
+            @RequestParam(defaultValue = "90") int daysBeforeExpiry) {
+        try {
+            List<ExpiryAlertDto> result = service.getExpiryAlerts(daysBeforeExpiry);
+            logger.info("Fetched expiry alerts for next {} days", daysBeforeExpiry);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching expiry alerts: {}", e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch expiry alerts", e);
+        }
+    }
+
     @PostMapping("/adjust")
     @Operation(summary = "Manual stock adjustment",
             description = "Perform manual stock adjustment. Records a new stock movement.")

@@ -38,6 +38,7 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -212,6 +213,11 @@ public class ReceivingService {
             item.setNotes(itemDto.getNotes());
             item.setStatus(determineReceivingItemStatus(item));
 
+            // Pharmacy batch/expiry tracking
+            item.setBatchNumber(itemDto.getBatchNumber());
+            item.setManufacturingDate(itemDto.getManufacturingDate());
+            item.setExpiryDate(itemDto.getExpiryDate());
+
             items.add(item);
         }
         return items;
@@ -379,7 +385,8 @@ public class ReceivingService {
                 ItemVariant variant = item.getPurchaseOrderItem().getItemVariant();
                 BigDecimal cost = item.getPurchaseOrderItem().getUnitCost();
                 StockMovementType type = delta > 0 ? StockMovementType.ADD : StockMovementType.DEDUCT;
-                createStockMovement(variant, cost, type, Math.abs(delta), newReceiving.getId().toString());
+                createStockMovement(variant, cost, type, Math.abs(delta), newReceiving.getId().toString(),
+                        item.getBatchNumber(), item.getExpiryDate());
             }
         }
 
@@ -393,21 +400,24 @@ public class ReceivingService {
                 if (oldQty > 0) {
                     ItemVariant variant = oldVariants.get(removedId);
                     BigDecimal cost = oldCosts.get(removedId);
-                    createStockMovement(variant, cost, StockMovementType.DEDUCT, oldQty, newReceiving.getId().toString());
+                    createStockMovement(variant, cost, StockMovementType.DEDUCT, oldQty, newReceiving.getId().toString(), null, null);
                 }
             }
         }
     }
 
     /**
-     * Creates a stock movement.
+     * Creates a stock movement, including optional batch and expiry for pharmacy shops.
      */
-    private void createStockMovement(ItemVariant variant, BigDecimal cost, StockMovementType type, int quantity, String reference) {
+    private void createStockMovement(ItemVariant variant, BigDecimal cost, StockMovementType type, int quantity, String reference,
+                                     String batchNumber, LocalDate expiryDate) {
         StockMovement stockMovement = new StockMovement();
         stockMovement.setItemVariant(variant);
         stockMovement.setMovementType(type);
         stockMovement.setQuantity(BigDecimal.valueOf(quantity));
         stockMovement.setCostPerUnit(cost);
+        stockMovement.setBatch(batchNumber);
+        stockMovement.setExpiryDate(expiryDate);
         stockMovement.setReason("Purchase Order Receiving Adjustment");
         stockMovement.setReference(reference);
         stockMovementRepository.save(stockMovement);

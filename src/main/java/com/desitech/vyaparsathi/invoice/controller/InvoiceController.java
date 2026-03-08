@@ -1,9 +1,9 @@
-package com.desitech.vyaparsathi.sales.controller;
+package com.desitech.vyaparsathi.invoice.controller;
 
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
-import com.desitech.vyaparsathi.sales.dto.InvoiceTokenData;
-import com.desitech.vyaparsathi.sales.service.invoice.InvoiceService;
-import jakarta.servlet.http.HttpServletResponse;
+import com.desitech.vyaparsathi.invoice.dto.InvoiceTokenData;
+import com.desitech.vyaparsathi.invoice.service.InvoiceService;
+import com.desitech.vyaparsathi.invoice.service.SubscriptionInvoiceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +18,8 @@ public class InvoiceController {
     @Autowired
     private JwtUtil jwtUtil;
     private final InvoiceService invoiceService;
+    @Autowired
+    private SubscriptionInvoiceService subscriptionInvoiceService;
 
     public InvoiceController(InvoiceService invoiceService) {
         this.invoiceService = invoiceService;
@@ -115,6 +117,27 @@ public class InvoiceController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .contentType(MediaType.TEXT_PLAIN)
                     .body("Invalid or expired access");
+        }
+    }
+
+    // ===============================
+    // SUBSCRIPTION INVOICE DOWNLOAD
+    // ===============================
+    @GetMapping(value = "/subscription/{paymentId}", produces = MediaType.APPLICATION_PDF_VALUE)
+    public ResponseEntity<byte[]> downloadSubscriptionInvoice(@PathVariable Long paymentId) {
+        try {
+            byte[] pdf = subscriptionInvoiceService.generateSubscriptionInvoicePdf(paymentId);
+
+            String filename = "subscription_invoice_" + paymentId + ".pdf";
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_PDF)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                    .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, must-revalidate")
+                    .body(pdf);
+        } catch (Exception e) {
+            logger.error("Error generating subscription invoice for ID: " + paymentId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
 }

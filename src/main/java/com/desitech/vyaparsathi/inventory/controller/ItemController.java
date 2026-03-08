@@ -83,7 +83,7 @@ public class ItemController {
             return ResponseEntity.ok(created);
         } catch (Exception e) {
             logger.error("Error creating catalog item: {}", e.getMessage(), e);
-            throw new ApplicationException("Failed to create catalog item", e);
+            throw new ApplicationException(e.getMessage(), e);
         }
     }
 

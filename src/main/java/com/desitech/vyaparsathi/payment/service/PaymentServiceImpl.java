@@ -319,7 +319,7 @@ public class PaymentServiceImpl implements PaymentService {
         BigDecimal totalDue = totalAmount.subtract(totalPaidBefore).max(ZERO);
 
         if (request.getAmount().compareTo(totalDue) > 0) {
-            throw new IllegalArgumentException("Payment amount exceeds due amount of " + totalDue);
+            throw new BusinessValidationException("Payment amount exceeds due amount of " + totalDue);
         }
 
         // Create and populate Payment entity

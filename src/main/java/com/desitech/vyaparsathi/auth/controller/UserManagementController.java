@@ -24,7 +24,6 @@ public class UserManagementController {
     @Autowired
     private UserManagementService userManagementService;
 
-    // List all users (No changes needed)
     @GetMapping
     public List<UserDto> listUsers() {
         logger.info("Request to list all users received.");

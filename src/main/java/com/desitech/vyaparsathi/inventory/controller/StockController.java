@@ -15,6 +15,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -32,6 +34,8 @@ public class StockController {
 
     @Autowired
     private StockService service;
+    @Autowired
+    private StockExportService stockExportService;
 
     @PostMapping("/add")
     @Operation(summary = "Add stock manually",
@@ -125,35 +129,52 @@ public class StockController {
         }
     }
 
-    @Autowired
-    private StockExportService stockExportService;
-    @GetMapping("/movements/export")
-    @Operation(summary = "Export stock movements within date range",
-            description = "Export all stock movements within specified date range as CSV, Excel, or PDF for reporting purposes")
-    @ApiResponse(responseCode = "200", description = "Stock movements exported successfully")
-    public ResponseEntity<byte[]> exportStockMovements(
-            @Parameter(description = "Start date for the report") @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
-            @Parameter(description = "End date for the report") @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
-            @Parameter(description = "Export format: csv, excel, pdf") @RequestParam(defaultValue = "csv") String format) {
+    @GetMapping("/export")
+    @Operation(summary = "Export stock data",
+            description = "Exports current inventory if dates are null, otherwise exports movement history.")
+    public ResponseEntity<byte[]> exportStock(
+            @Parameter(description = "Start date (optional)")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
+            @Parameter(description = "End date (optional)")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
+            @Parameter(description = "Format: excel, csv, pdf")
+            @RequestParam(defaultValue = "excel") String format) {
         try {
-            List<StockMovementDto> data = service.getStockMovements(startDate, endDate);
-            byte[] file = stockExportService.exportStockMovements(data, format);
-            String contentType = "csv".equalsIgnoreCase(format) ? "text/csv" :
-                    ("excel".equalsIgnoreCase(format) ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :
-                            ("pdf".equalsIgnoreCase(format) ? "application/pdf" : "application/octet-stream"));
-            String fileName = "stock-movements-" + startDate.toLocalDate() + "-" + endDate.toLocalDate() + "." + ("csv".equalsIgnoreCase(format) ? "csv" : ("excel".equalsIgnoreCase(format) ? "xlsx" : ("pdf".equalsIgnoreCase(format) ? "pdf" : "dat")));
-            logger.info("Exported stock movements as {} ({} bytes)", format, file.length);
+            byte[] file;
+            String fileName;
+
+            if (startDate != null && endDate != null) {
+                // Scenario: Movement History Report
+                List<StockMovementDto> data = service.getStockMovements(startDate, endDate);
+                file = stockExportService.exportStockMovements(data, format);
+                fileName = "Stock_Movements_" + startDate.toLocalDate() + "_to_" + endDate.toLocalDate();
+            } else {
+                // Scenario: Current Inventory Summary
+                List<CurrentStockDto> data = service.getCurrentStock();
+                file = stockExportService.exportCurrentStock(data, format);
+                fileName = "Current_Stock_Summary_" + java.time.LocalDate.now();
+            }
+
+            String extension = "excel".equalsIgnoreCase(format) ? "xlsx" : format.toLowerCase();
+            MediaType mediaType = getMediaType(format);
+
             return ResponseEntity.ok()
-                    .header("Content-Disposition", "attachment; filename=" + fileName)
-                    .header("Content-Type", contentType)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + fileName + "." + extension)
+                    .contentType(mediaType)
                     .body(file);
+
         } catch (ExportAppException e) {
-            logger.error("Failed to export stock movements: {}", e.getMessage(), e);
             throw e;
         } catch (Exception e) {
-            logger.error("Unexpected error during stock movement export", e);
-            throw new ApplicationException("Failed to export stock movements", e);
+            logger.error("Export failed", e);
+            throw new ApplicationException("Failed to generate export file", e);
         }
+    }
+
+    private MediaType getMediaType(String format) {
+        if ("excel".equalsIgnoreCase(format)) return MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        if ("pdf".equalsIgnoreCase(format)) return MediaType.APPLICATION_PDF;
+        return MediaType.parseMediaType("text/csv");
     }
 
 }

@@ -14,12 +14,16 @@ import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @Service
 public class ReportService {
@@ -464,5 +468,95 @@ public class ReportService {
                 .sum();
 
         return new PaymentsSummaryDto(totalPayments, paymentCount);
+    }
+
+    public byte[] generateAuditZip(LocalDate from, LocalDate to) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (ZipOutputStream zos = new ZipOutputStream(baos)) {
+            // 1. Sales Register (GSTR-1 style)
+            addToZip(zos, "Sales_Register_" + from + "_to_" + to + ".csv", generateSalesRegisterCsv(from, to));
+
+            // 2. HSN Summary (Table 12 style)
+            addToZip(zos, "HSN_Summary_" + from + "_to_" + to + ".csv", generateHsnSummaryCsv(from, to));
+
+            // 3. Purchase Register (For ITC)
+            addToZip(zos, "Purchase_ITC_Register.csv", generatePurchaseRegisterCsv(from, to));
+
+            // 4. P&L Overview
+            addToZip(zos, "Financial_Summary.txt", generatePnLReport(from, to));
+        }
+        return baos.toByteArray();
+    }
+
+    private void addToZip(ZipOutputStream zos, String fileName, String content) throws IOException {
+        zos.putNextEntry(new ZipEntry(fileName));
+        zos.write(content.getBytes());
+        zos.closeEntry();
+    }
+
+    private String generateSalesRegisterCsv(LocalDate from, LocalDate to) {
+        List<Sale> sales = getSalesByDateRange(from, to);
+        StringBuilder csv = new StringBuilder("Invoice No,Date,Customer Name,Customer GSTIN,POS,Type,Taxable,CGST,SGST,IGST,Total\n");
+
+        for (Sale sale : sales) {
+            BigDecimal txbl = sale.getSaleItems().stream().map(si -> si.getTaxableValue() != null ? si.getTaxableValue() : ZERO).reduce(ZERO, BigDecimal::add);
+            BigDecimal cgst = sale.getSaleItems().stream().map(si -> si.getCgstAmt() != null ? si.getCgstAmt() : ZERO).reduce(ZERO, BigDecimal::add);
+            BigDecimal sgst = sale.getSaleItems().stream().map(si -> si.getSgstAmt() != null ? si.getSgstAmt() : ZERO).reduce(ZERO, BigDecimal::add);
+            BigDecimal igst = sale.getSaleItems().stream().map(si -> si.getIgstAmt() != null ? si.getIgstAmt() : ZERO).reduce(ZERO, BigDecimal::add);
+
+            String gstin = (sale.getCustomer().getGstNumber() != null) ? sale.getCustomer().getGstNumber() : "";
+            String type = gstin.isEmpty() ? "B2C" : "B2B";
+
+            csv.append(String.format("%s,%s,\"%s\",%s,%s,%s,%s,%s,%s,%s,%s\n",
+                    sale.getInvoiceNo(), sale.getDate().toLocalDate(), sale.getCustomer().getName(),
+                    gstin, (sale.getCustomer().getState() != null ? sale.getCustomer().getState() : ""),
+                    type, txbl, cgst, sgst, igst, sale.getTotalAmount()));
+        }
+        return csv.toString();
+    }
+
+    private String generateHsnSummaryCsv(LocalDate from, LocalDate to) {
+        List<Sale> sales = getSalesByDateRange(from, to);
+        Map<String, List<SaleItem>> hsnMap = sales.stream()
+                .flatMap(s -> s.getSaleItems().stream())
+                .collect(Collectors.groupingBy(si -> si.getItemVariant().getHsn() != null ? si.getItemVariant().getHsn() : "NA"));
+
+        StringBuilder csv = new StringBuilder("HSN,Description,UQC,Qty,Taxable,IGST,CGST,SGST\n");
+        hsnMap.forEach((hsn, items) -> {
+            BigDecimal qty = items.stream().map(SaleItem::getQty).reduce(ZERO, BigDecimal::add);
+            BigDecimal tx = items.stream().map(si -> si.getTaxableValue() != null ? si.getTaxableValue() : ZERO).reduce(ZERO, BigDecimal::add);
+            csv.append(String.format("%s,\"%s\",NOS,%s,%s,%s,%s,%s\n",
+                    hsn, items.get(0).getItemVariant().getItem().getName(), qty, tx,
+                    items.stream().map(si -> si.getIgstAmt() != null ? si.getIgstAmt() : ZERO).reduce(ZERO, BigDecimal::add),
+                    items.stream().map(si -> si.getCgstAmt() != null ? si.getCgstAmt() : ZERO).reduce(ZERO, BigDecimal::add),
+                    items.stream().map(si -> si.getSgstAmt() != null ? si.getSgstAmt() : ZERO).reduce(ZERO, BigDecimal::add)));
+        });
+        return csv.toString();
+    }
+
+    private String generatePurchaseRegisterCsv(LocalDate from, LocalDate to) {
+        List<Expense> expenses = getExpensesByDateRange(from, to).stream()
+                .filter(e -> {
+                    String t = e.getType() != null ? e.getType().toLowerCase() : "";
+                    return t.contains("inventory") || t.contains("purchase");
+                }).collect(Collectors.toList());
+
+        StringBuilder csv = new StringBuilder("Expense ID,Date,Vendor/Description,Amount,Type\n");
+        for (Expense e : expenses) {
+            csv.append(String.format("%d,%s,\"%s\",%s,%s\n",
+                    e.getId(), e.getDate().toLocalDate(), e.getNotes(), e.getAmount(), e.getType()));
+        }
+        return csv.toString();
+    }
+
+    private String generatePnLReport(LocalDate from, LocalDate to) {
+        SalesSummaryDto s = getSalesSummary(from, to);
+        return "VYAPARSATHI COMPLIANCE SUMMARY\nPeriod: " + from + " to " + to + "\n" +
+                "---------------------------------\n" +
+                "Net Sales: " + s.getNetRevenue() + "\n" +
+                "Total COGS: " + s.getTotalCOGS() + "\n" +
+                "Gross Profit: " + s.getNetRevenue().subtract(s.getTotalCOGS()) + "\n" +
+                "Operational Expenses: " + calculateOperationalExpenses(getExpensesByDateRange(from, to)) + "\n" +
+                "Estimated Net Profit: " + s.getNetProfit();
     }
 }

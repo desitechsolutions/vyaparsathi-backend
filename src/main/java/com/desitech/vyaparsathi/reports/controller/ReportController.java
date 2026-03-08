@@ -228,4 +228,23 @@ public class ReportController {
                         throw new ApplicationException("Failed to fetch payments summary", e);
                 }
     }
+
+    @GetMapping("/export-audit-pack")
+    @Operation(summary = "Export CA Audit Pack", description = "Generates a ZIP file containing GST Sales, HSN Summary, and Purchase registers.")
+    public ResponseEntity<byte[]> exportAuditPack(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        try {
+            byte[] zipContent = service.generateAuditZip(from, to);
+            String fileName = "Audit_Pack_" + from + "_to_" + to + ".zip";
+
+            return ResponseEntity.ok()
+                    .header("Content-Disposition", "attachment; filename=\"" + fileName + "\"")
+                    .header("Content-Type", "application/zip")
+                    .body(zipContent);
+        } catch (Exception e) {
+            logger.error("ZIP Export failed", e);
+            throw new ApplicationException("Failed to generate audit pack", e);
+        }
+    }
 }

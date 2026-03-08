@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.subscriptions.entity;
 
+import com.desitech.vyaparsathi.subscriptions.enums.BillingCycle;
 import com.desitech.vyaparsathi.subscriptions.enums.PaymentVerificationStatus;
 import com.desitech.vyaparsathi.subscriptions.enums.Tier;
 import jakarta.persistence.*;
@@ -37,4 +38,7 @@ public class PaymentVerification {
     private LocalDateTime verifiedAt;
 
     private String verifiedBy;
+
+    @Enumerated(EnumType.STRING)
+    private BillingCycle billingCycle;
 }

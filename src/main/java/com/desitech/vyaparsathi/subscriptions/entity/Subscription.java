@@ -1,5 +1,7 @@
 package com.desitech.vyaparsathi.subscriptions.entity;
 
+import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
+import com.desitech.vyaparsathi.subscriptions.enums.BillingCycle;
 import com.desitech.vyaparsathi.subscriptions.enums.SubscriptionStatus;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.subscriptions.enums.Tier;
@@ -12,14 +14,7 @@ import java.time.LocalDateTime;
 @Table(name = "subscriptions")
 @Getter
 @Setter
-public class Subscription {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "shop_id", nullable = false, unique = true)
-    private Shop shop;
+public class Subscription extends ShopAwareEntity {
 
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
@@ -38,4 +33,13 @@ public class Subscription {
     private String lastUtr;
 
     private Long lastUpdatedByUserId;
+
+    @Column(name = "used_trial")
+    private boolean usedTrial = false;
+
+    @Enumerated(EnumType.STRING)
+    private BillingCycle billingCycle;
+
+    private Integer lastUpgradeBonusDays = 0;
+    private Tier previousTier;
 }

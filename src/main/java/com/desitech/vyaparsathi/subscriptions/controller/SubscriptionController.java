@@ -2,10 +2,7 @@ package com.desitech.vyaparsathi.subscriptions.controller;
 
 import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.security.CustomUserDetails;
-import com.desitech.vyaparsathi.subscriptions.dto.PaymentRequest;
-import com.desitech.vyaparsathi.subscriptions.dto.PendingPaymentDTO;
-import com.desitech.vyaparsathi.subscriptions.dto.PlatformStatsDTO;
-import com.desitech.vyaparsathi.subscriptions.dto.SubscriptionStatusDTO;
+import com.desitech.vyaparsathi.subscriptions.dto.*;
 import com.desitech.vyaparsathi.subscriptions.entity.PaymentVerification;
 import com.desitech.vyaparsathi.subscriptions.enums.Tier;
 import com.desitech.vyaparsathi.subscriptions.service.SubscriptionService;
@@ -104,6 +101,39 @@ public class SubscriptionController {
         Long shopId = getValidatedShopId(userDetails);
         SubscriptionStatusDTO status = subscriptionService.getSubscriptionStatus(shopId);
         return ResponseEntity.ok(status);
+    }
+
+    /**
+     * USER ENDPOINT: Get payment history for the logged-in shop.
+     * Used for the "Transaction History" table in the Billing Dashboard.
+     */
+    @GetMapping("/my-payments")
+    public ResponseEntity<List<PaymentVerificationDTO>> getMyPaymentHistory(
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+        Long shopId = getValidatedShopId(userDetails);
+
+        // You'll need to create a PaymentVerificationDTO and a service method
+        // that finds all verifications by shopId ordered by date desc.
+        List<PaymentVerificationDTO> history = subscriptionService.getShopPaymentHistory(shopId);
+        return ResponseEntity.ok(history);
+    }
+
+    /**
+     * USER ENDPOINT: Cancel subscription.
+     * Usually sets a flag so the subscription doesn't auto-renew or
+     * marks it as 'CANCEL_PENDING' until the end of the period.
+     */
+    @PostMapping("/cancel")
+    public ResponseEntity<?> cancelSubscription(
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+        Long shopId = getValidatedShopId(userDetails);
+        logger.warn("Subscription cancellation requested for Shop ID: {}", shopId);
+
+        subscriptionService.cancelSubscription(shopId);
+
+        return ResponseEntity.ok(Map.of(
+                "message", "Subscription cancelled. You will have access until your current period ends."
+        ));
     }
 
     // --- PLATFORM / ADMIN ENDPOINTS ---

@@ -119,7 +119,7 @@ public class PaymentController {
                         return ResponseEntity.ok(new ApiResponse<>("Payments recorded successfully", responses, null));
                 } catch (Exception e) {
                         logger.error("Error recording batch payments: {}", e.getMessage(), e);
-                        throw new ApplicationException("Failed to record batch payments", e);
+                        throw new ApplicationException(e.getMessage());
                 }
         }
 

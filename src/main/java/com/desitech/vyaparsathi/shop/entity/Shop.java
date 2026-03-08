@@ -26,6 +26,9 @@ public class Shop {
 
     private String address;
 
+    private String phone;
+    private String email;
+
     @Column(nullable = false)
     private String state;
 
@@ -37,15 +40,26 @@ public class Shop {
     private String locale;
 
     @Convert(converter = LocalDateTimeAttributeConverter.class)
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
 
     @Column(nullable = true)
-    String logoPath;
+    private String logoPath;
+    private String signaturePath;
 
     @Column(name = "industry_type")
     private String industryType;
 
-    private String signaturePath;
+    @Column(name = "is_composition_scheme")
+    private Boolean isCompositionScheme = false;
+
+    @Column(name = "brand_color")
+    private String brandColor = "#2980b9";
+
+    @Column(columnDefinition = "TEXT")
+    private String termsAndConditions;
+
+    @Column(name = "bank_details", columnDefinition = "TEXT")
+    private String bankDetails;
 }

@@ -23,20 +23,21 @@ public class ItemMapper {
      * Converts an Item entity to an ItemDto.
      */
     public ItemDto toDto(Item item) {
-        if (item == null) {
-            return null;
-        }
+        if (item == null) return null;
 
         ItemDto dto = new ItemDto();
         dto.setId(item.getId());
         dto.setName(item.getName());
         dto.setDescription(item.getDescription());
         dto.setBrandName(item.getBrandName());
-        // Map new attributes
-        dto.setFabric(item.getFabric());
-        dto.setSeason(item.getSeason());
 
-        // Map the category relationship
+        // Syncing the legacy fields with generic attributes
+        // We ensure the DTO gets the value regardless of which column the DB used
+        dto.setFabric(item.getFabric() != null ? item.getFabric() : item.getAttribute1());
+        dto.setSeason(item.getSeason() != null ? item.getSeason() : item.getAttribute2());
+        dto.setAttribute1(item.getAttribute1());
+        dto.setAttribute2(item.getAttribute2());
+
         if (item.getCategory() != null) {
             dto.setCategoryId(item.getCategory().getId());
             dto.setCategoryName(item.getCategory().getName());
@@ -55,23 +56,27 @@ public class ItemMapper {
      * Converts an ItemDto to an Item entity.
      */
     public Item toEntity(ItemDto dto) {
-        if (dto == null) {
-            return null;
-        }
+        if (dto == null) return null;
 
         Item item = new Item();
         item.setId(dto.getId());
         item.setName(dto.getName());
         item.setDescription(dto.getDescription());
         item.setBrandName(dto.getBrandName());
-        // Map new attributes
-        item.setAttribute1(dto.getAttribute1() != null ? dto.getAttribute1() : dto.getFabric());
-        item.setAttribute2(dto.getAttribute2() != null ? dto.getAttribute2() : dto.getSeason());
 
-        // Map the category relationship using the repository
+        // If the shop is CLOTHING, 'fabric' and 'attribute1' are the same thing.
+        // We set BOTH to ensure the database stays consistent.
+        String val1 = dto.getAttribute1() != null ? dto.getAttribute1() : dto.getFabric();
+        String val2 = dto.getAttribute2() != null ? dto.getAttribute2() : dto.getSeason();
+
+        item.setAttribute1(val1);
+        item.setFabric(val1);
+        item.setAttribute2(val2);
+        item.setSeason(val2);
+
         if (dto.getCategoryId() != null) {
             Category category = categoryRepository.findById(dto.getCategoryId())
-                    .orElseThrow(() -> new EntityNotFoundException("Category not found with id: " + dto.getCategoryId()));
+                    .orElseThrow(() -> new EntityNotFoundException("Category not found: " + dto.getCategoryId()));
             item.setCategory(category);
         }
 
@@ -79,7 +84,7 @@ public class ItemMapper {
             item.setVariants(dto.getVariants().stream()
                     .map(variantDto -> {
                         ItemVariant variant = toEntity(variantDto);
-                        variant.setItem(item);
+                        variant.setItem(item); // Crucial for JPA relationship
                         return variant;
                     })
                     .collect(Collectors.toList()));
@@ -88,14 +93,8 @@ public class ItemMapper {
         return item;
     }
 
-    /**
-     * Converts a single ItemVariant entity to a flattened ItemVariantDto.
-     * This DTO is rich with parent item info, useful for lists and sales pages.
-     */
     public ItemVariantDto toDto(ItemVariant itemVariant) {
-        if (itemVariant == null) {
-            return null;
-        }
+        if (itemVariant == null) return null;
 
         ItemVariantDto dto = new ItemVariantDto();
         dto.setId(itemVariant.getId());
@@ -108,53 +107,40 @@ public class ItemMapper {
         dto.setColor(itemVariant.getColor());
         dto.setSize(itemVariant.getSize());
         dto.setDesign(itemVariant.getDesign());
-        dto.setFit(itemVariant.getFit()); // Map new 'fit' attribute
+        dto.setFit(itemVariant.getFit());
         dto.setLowStockThreshold(itemVariant.getLowStockThreshold());
 
         if (itemVariant.getItem() != null) {
-            Item parentItem = itemVariant.getItem();
-            dto.setItemName(parentItem.getName());
-            dto.setBrand(parentItem.getBrandName());
-            dto.setItemId(parentItem.getId());
-            dto.setDescription(parentItem.getDescription());
-            // Map new parent attributes
-            dto.setAttribute1(parentItem.getAttribute1() != null ? parentItem.getAttribute1() : parentItem.getFabric());
-            dto.setAttribute2(parentItem.getAttribute2() != null ? parentItem.getAttribute2() : parentItem.getSeason());
+            Item parent = itemVariant.getItem();
+            dto.setItemId(parent.getId());
+            dto.setItemName(parent.getName());
+            dto.setBrand(parent.getBrandName());
 
-            // Map parent category relationship
-            if (parentItem.getCategory() != null) {
-                dto.setCategoryId(parentItem.getCategory().getId());
-                dto.setCategoryName(parentItem.getCategory().getName());
-            }
+            dto.setAttribute1(parent.getAttribute1() != null ? parent.getAttribute1() : parent.getFabric());
+            dto.setAttribute2(parent.getAttribute2() != null ? parent.getAttribute2() : parent.getSeason());
         }
 
-        // This should be populated by a separate stock service/query
         dto.setCurrentStock(BigDecimal.ZERO);
         return dto;
     }
 
-    /**
-     * Converts a single ItemVariantDto to an ItemVariant entity.
-     */
     public ItemVariant toEntity(ItemVariantDto dto) {
-        if (dto == null) {
-            return null;
-        }
+        if (dto == null) return null;
 
-        ItemVariant itemVariant = new ItemVariant();
-        itemVariant.setId(dto.getId());
-        itemVariant.setSku(dto.getSku());
-        itemVariant.setUnit(dto.getUnit());
-        itemVariant.setPricePerUnit(dto.getPricePerUnit());
-        itemVariant.setHsn(dto.getHsn());
-        itemVariant.setGstRate(dto.getGstRate());
-        itemVariant.setPhotoPath(dto.getPhotoPath());
-        itemVariant.setColor(dto.getColor());
-        itemVariant.setSize(dto.getSize());
-        itemVariant.setDesign(dto.getDesign());
-        itemVariant.setFit(dto.getFit()); // Map new 'fit' attribute
-        itemVariant.setLowStockThreshold(dto.getLowStockThreshold());
+        ItemVariant variant = new ItemVariant();
+        variant.setId(dto.getId());
+        variant.setSku(dto.getSku());
+        variant.setUnit(dto.getUnit());
+        variant.setPricePerUnit(dto.getPricePerUnit());
+        variant.setHsn(dto.getHsn());
+        variant.setGstRate(dto.getGstRate());
+        variant.setPhotoPath(dto.getPhotoPath());
+        variant.setColor(dto.getColor());
+        variant.setSize(dto.getSize());
+        variant.setDesign(dto.getDesign());
+        variant.setFit(dto.getFit());
+        variant.setLowStockThreshold(dto.getLowStockThreshold());
 
-        return itemVariant;
+        return variant;
     }
 }

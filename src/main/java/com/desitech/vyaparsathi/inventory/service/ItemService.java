@@ -266,5 +266,7 @@ public class ItemService {
         variant.setManufacturingDate(dto.getManufacturingDate());
         variant.setExpiryDate(dto.getExpiryDate());
         variant.setMrp(dto.getMrp());
+        variant.setIsLooseMedicine(dto.getIsLooseMedicine());
+        variant.setPackSize(dto.getPackSize());
     }
 }

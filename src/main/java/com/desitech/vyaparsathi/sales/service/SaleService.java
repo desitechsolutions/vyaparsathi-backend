@@ -65,6 +65,9 @@ public class SaleService {
 
     private static final Logger logger = LoggerFactory.getLogger(SaleService.class);
 
+    /** Scale used when converting dispensing-unit quantities to stock-unit quantities (for loose medicine). */
+    private static final int STOCK_QUANTITY_SCALE = 6;
+
     @Autowired
     private SaleRepository saleRepository;
     @Autowired
@@ -116,13 +119,14 @@ public class SaleService {
         BigDecimal totalGSTAmount = BigDecimal.ZERO;
 
         for (SaleItemDto itemDto : dto.getItems()) {
-            if (!stockService.isStockAvailable(itemDto.getItemVariantId(), itemDto.getQty())) {
+            ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
+                    .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+
+            BigDecimal stockQty = toStockQty(itemVariant, itemDto.getQty());
+            if (!stockService.isStockAvailable(itemDto.getItemVariantId(), stockQty)) {
                 logger.warn("Insufficient stock for item: {}", itemDto.getItemName());
                 throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
             }
-
-            ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
-                    .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
 
             SaleItem saleItem = new SaleItem();
             saleItem.setItemVariant(itemVariant);
@@ -176,7 +180,8 @@ public class SaleService {
 
         // 5. Deduct Stock
         for (SaleItem item : saleItems) {
-            stockService.deductStock(item.getItemVariant().getId(), item.getQty(), "Sale Transaction", "Sale #" + invoiceNo);
+            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty());
+            stockService.deductStock(item.getItemVariant().getId(), stockQty, "Sale Transaction", "Sale #" + invoiceNo);
         }
 
         // 6. Persist Sale Entity
@@ -285,7 +290,9 @@ public class SaleService {
 
             StockAdjustmentDto adjustment = new StockAdjustmentDto();
             adjustment.setItemVariantId(saleItem.getItemVariant().getId());
-            adjustment.setAdjustmentQuantity(requestedQty);
+            // Convert returned dispensing qty back to stock units for loose medicine
+            BigDecimal stockQty = toStockQty(saleItem.getItemVariant(), requestedQty);
+            adjustment.setAdjustmentQuantity(stockQty);
             adjustment.setReason("Return: Inv #" + sale.getInvoiceNo());
             stockService.adjustStock(adjustment);
         }
@@ -638,12 +645,13 @@ public class SaleService {
         BigDecimal totalGSTAmount = ZERO;
 
         for (SaleItemDto itemDto : dto.getItems()) {
-            if (!stockService.isStockAvailable(itemDto.getItemVariantId(), itemDto.getQty())) {
-                throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
-            }
-
             ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
                     .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+
+            BigDecimal stockQty = toStockQty(itemVariant, itemDto.getQty());
+            if (!stockService.isStockAvailable(itemDto.getItemVariantId(), stockQty)) {
+                throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
+            }
 
             SaleItem saleItem = new SaleItem();
             saleItem.setSale(existing);
@@ -691,7 +699,8 @@ public class SaleService {
 
         // Deduct stock
         for (SaleItem item : existing.getSaleItems()) {
-            stockService.deductStock(item.getItemVariant().getId(), item.getQty(), "Sale Completion", "Sale #" + existing.getInvoiceNo());
+            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty());
+            stockService.deductStock(item.getItemVariant().getId(), stockQty, "Sale Completion", "Sale #" + existing.getInvoiceNo());
         }
 
         // Totals and Rounding
@@ -787,5 +796,26 @@ public class SaleService {
             dto.setShopName(shopRepository.findById(TenantContext.getCurrentShopId()).map(Shop::getName).orElse(""));
         }
         return dto;
+    }
+
+    /**
+     * Converts a dispensing-unit quantity to a stock-unit quantity for loose medicines.
+     * <p>
+     * Example: if a strip has 15 tablets (packSize=15) and the sale qty is 4 tablets,
+     * the stock-unit quantity to deduct is 4/15 ≈ 0.267 strips.
+     * <p>
+     * For non-loose medicines, returns the original quantity unchanged.
+     *
+     * @param variant the item variant being sold
+     * @param dispensingQty quantity in the dispensing/selling unit
+     * @return equivalent quantity in the stock unit
+     */
+    private BigDecimal toStockQty(ItemVariant variant, BigDecimal dispensingQty) {
+        if (Boolean.TRUE.equals(variant.getIsLooseMedicine())
+                && variant.getPackSize() != null
+                && variant.getPackSize().compareTo(BigDecimal.ZERO) > 0) {
+            return dispensingQty.divide(variant.getPackSize(), STOCK_QUANTITY_SCALE, RoundingMode.HALF_UP);
+        }
+        return dispensingQty;
     }
 }

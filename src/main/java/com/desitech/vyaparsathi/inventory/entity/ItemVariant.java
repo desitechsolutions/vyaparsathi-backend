@@ -80,4 +80,20 @@ public class ItemVariant extends ShopAwareEntity {
      */
     @Column(name = "mrp", precision = 12, scale = 2)
     private BigDecimal mrp;
+
+    /**
+     * Whether this medicine can be dispensed in quantities smaller than the stock unit.
+     * For example: strip of 15 tablets can be sold as individual tablets (loose).
+     * When true, {@link #packSize} must be set to enable correct stock deduction.
+     */
+    @Column(name = "is_loose_medicine")
+    private Boolean isLooseMedicine = false;
+
+    /**
+     * Number of dispensing units (e.g. tablets) per stock unit (e.g. strip).
+     * Used only when {@link #isLooseMedicine} is true.
+     * Example: if packSize = 15, selling 4 tablets deducts 4/15 = 0.267 strips from stock.
+     */
+    @Column(name = "pack_size", precision = 10, scale = 3)
+    private BigDecimal packSize;
 }

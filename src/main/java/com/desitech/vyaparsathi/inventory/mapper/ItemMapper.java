@@ -127,6 +127,8 @@ public class ItemMapper {
         dto.setManufacturingDate(itemVariant.getManufacturingDate());
         dto.setExpiryDate(itemVariant.getExpiryDate());
         dto.setMrp(itemVariant.getMrp());
+        dto.setIsLooseMedicine(itemVariant.getIsLooseMedicine());
+        dto.setPackSize(itemVariant.getPackSize());
 
         if (itemVariant.getItem() != null) {
             Item parent = itemVariant.getItem();
@@ -175,6 +177,8 @@ public class ItemMapper {
         variant.setManufacturingDate(dto.getManufacturingDate());
         variant.setExpiryDate(dto.getExpiryDate());
         variant.setMrp(dto.getMrp());
+        variant.setIsLooseMedicine(dto.getIsLooseMedicine());
+        variant.setPackSize(dto.getPackSize());
 
         return variant;
     }

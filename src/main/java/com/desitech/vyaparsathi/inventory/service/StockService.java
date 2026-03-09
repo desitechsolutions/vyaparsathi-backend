@@ -47,11 +47,30 @@ public class StockService {
     @Transactional
     public StockMovementDto addStockFromDto(StockAddDto dto) {
         // Validation
-        itemVariantRepository.findById(dto.getItemVariantId())
+        ItemVariant itemVariant = itemVariantRepository.findById(dto.getItemVariantId())
                 .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", dto.getItemVariantId()));
 
         BigDecimal costPerUnit = dto.getCostPerUnit() != null ? dto.getCostPerUnit() : BigDecimal.ZERO;
         BigDecimal quantity = dto.getQuantity();
+
+        // Update pharmacy-specific fields on the variant when a new batch is received.
+        // This keeps the ItemVariant's batch metadata in sync with the latest stock receipt.
+        boolean variantUpdated = false;
+        if (dto.getBatch() != null && !dto.getBatch().isBlank()) {
+            itemVariant.setBatchNumber(dto.getBatch());
+            variantUpdated = true;
+        }
+        if (dto.getManufacturingDate() != null) {
+            itemVariant.setManufacturingDate(dto.getManufacturingDate());
+            variantUpdated = true;
+        }
+        if (dto.getExpiryDate() != null) {
+            itemVariant.setExpiryDate(dto.getExpiryDate());
+            variantUpdated = true;
+        }
+        if (variantUpdated) {
+            itemVariantRepository.save(itemVariant);
+        }
 
         StockMovement movement = recordStockMovement(dto.getItemVariantId(), StockMovementType.ADD, quantity, costPerUnit, dto.getBatch(), "Manual Stock Addition", "Manual Entry", dto.getExpiryDate());
         return mapToStockMovementDto(movement);
@@ -105,6 +124,14 @@ public class StockService {
             dto.setCostPerUnit(wacMap.getOrDefault(variant.getId(), BigDecimal.ZERO));
 
             dto.setBatch(null);
+
+            // Pharmacy-specific fields from ItemVariant
+            dto.setBatchNumber(variant.getBatchNumber());
+            dto.setExpiryDate(variant.getExpiryDate());
+            dto.setMrp(variant.getMrp());
+            dto.setIsLooseMedicine(variant.getIsLooseMedicine());
+            dto.setPackSize(variant.getPackSize());
+
             return dto;
         }).collect(Collectors.toList());
     }

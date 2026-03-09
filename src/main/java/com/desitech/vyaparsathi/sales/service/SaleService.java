@@ -396,8 +396,7 @@ public class SaleService {
 
         // 4. Finalize Sale State
         sale.setTotalAmount(ZERO);
-        // If you have a status field, set it here:
-        // sale.setStatus(SaleStatus.CANCELLED);
+        sale.setStatus(SaleStatus.CANCELLED);
         saleRepository.save(sale);
 
         logger.info("Cancelled sale with ID {} and reversed {} in payments", saleId, totalPaid);

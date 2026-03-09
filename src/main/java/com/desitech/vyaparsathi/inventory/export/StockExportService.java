@@ -156,18 +156,21 @@ public class StockExportService {
         try (ByteArrayOutputStream out = new ByteArrayOutputStream();
              OutputStreamWriter writer = new OutputStreamWriter(out);
              CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT
-                     .withHeader("Variant ID", "Item Name", "SKU", "Color", "Size", "Current Stock", "Unit", "WAC (Purchase Cost)", "Selling Price"))) {
+                     .withHeader("Variant ID", "Item Name", "SKU", "Batch No.", "Color", "Size", "Current Stock", "Unit", "WAC (Purchase Cost)", "Selling Price", "MRP", "Expiry Date"))) {
             for (CurrentStockDto dto : data) {
                 printer.printRecord(
                         dto.getItemVariantId(),
                         dto.getItemName(),
                         dto.getSku(),
+                        dto.getBatchNumber() != null ? dto.getBatchNumber() : "",
                         dto.getColor(),
                         dto.getSize(),
                         dto.getTotalQuantity(),
                         dto.getUnit(),
                         dto.getCostPerUnit(),
-                        dto.getPricePerUnit()
+                        dto.getPricePerUnit(),
+                        dto.getMrp() != null ? dto.getMrp() : "",
+                        dto.getExpiryDate() != null ? dto.getExpiryDate().toString() : ""
                 );
             }
             printer.flush();
@@ -182,7 +185,7 @@ public class StockExportService {
         try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("Current Stock Summary");
             Row header = sheet.createRow(0);
-            String[] columns = {"Variant ID", "Item Name", "SKU", "Color", "Size", "Current Stock", "Unit", "WAC (Purchase Cost)", "Selling Price"};
+            String[] columns = {"Variant ID", "Item Name", "SKU", "Batch No.", "Color", "Size", "Current Stock", "Unit", "WAC (Purchase Cost)", "Selling Price", "MRP", "Expiry Date"};
             for (int i = 0; i < columns.length; i++) {
                 header.createCell(i).setCellValue(columns[i]);
             }
@@ -192,12 +195,15 @@ public class StockExportService {
                 row.createCell(0).setCellValue(dto.getItemVariantId());
                 row.createCell(1).setCellValue(dto.getItemName());
                 row.createCell(2).setCellValue(dto.getSku());
-                row.createCell(3).setCellValue(dto.getColor());
-                row.createCell(4).setCellValue(dto.getSize());
-                row.createCell(5).setCellValue(dto.getTotalQuantity() != null ? dto.getTotalQuantity().doubleValue() : 0);
-                row.createCell(6).setCellValue(dto.getUnit());
-                row.createCell(7).setCellValue(dto.getCostPerUnit() != null ? dto.getCostPerUnit().doubleValue() : 0);
-                row.createCell(8).setCellValue(dto.getPricePerUnit() != null ? dto.getPricePerUnit().doubleValue() : 0);
+                row.createCell(3).setCellValue(dto.getBatchNumber() != null ? dto.getBatchNumber() : "");
+                row.createCell(4).setCellValue(dto.getColor());
+                row.createCell(5).setCellValue(dto.getSize());
+                row.createCell(6).setCellValue(dto.getTotalQuantity() != null ? dto.getTotalQuantity().doubleValue() : 0);
+                row.createCell(7).setCellValue(dto.getUnit());
+                row.createCell(8).setCellValue(dto.getCostPerUnit() != null ? dto.getCostPerUnit().doubleValue() : 0);
+                row.createCell(9).setCellValue(dto.getPricePerUnit() != null ? dto.getPricePerUnit().doubleValue() : 0);
+                row.createCell(10).setCellValue(dto.getMrp() != null ? dto.getMrp().doubleValue() : 0);
+                row.createCell(11).setCellValue(dto.getExpiryDate() != null ? dto.getExpiryDate().toString() : "");
             }
             workbook.write(out);
             return out.toByteArray();
@@ -218,9 +224,9 @@ public class StockExportService {
             document.add(title);
             document.add(new Paragraph(" "));
 
-            PdfPTable table = new PdfPTable(9);
+            PdfPTable table = new PdfPTable(12);
             table.setWidthPercentage(100);
-            String[] columns = {"ID", "Item Name", "SKU", "Color", "Size", "Qty", "Unit", "WAC (Purchase Cost)", "Selling Price"};
+            String[] columns = {"ID", "Item Name", "SKU", "Batch No.", "Color", "Size", "Qty", "Unit", "WAC", "Sell Price", "MRP", "Expiry"};
             for (String col : columns) {
                 PdfPCell cell = new PdfPCell(new Phrase(col, FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10)));
                 cell.setBackgroundColor(java.awt.Color.LIGHT_GRAY);
@@ -230,12 +236,15 @@ public class StockExportService {
                 table.addCell(new Phrase(String.valueOf(dto.getItemVariantId()), FontFactory.getFont(FontFactory.HELVETICA, 9)));
                 table.addCell(new Phrase(dto.getItemName(), FontFactory.getFont(FontFactory.HELVETICA, 9)));
                 table.addCell(new Phrase(dto.getSku(), FontFactory.getFont(FontFactory.HELVETICA, 9)));
+                table.addCell(new Phrase(dto.getBatchNumber() != null ? dto.getBatchNumber() : "", FontFactory.getFont(FontFactory.HELVETICA, 9)));
                 table.addCell(new Phrase(dto.getColor() != null ? dto.getColor() : "", FontFactory.getFont(FontFactory.HELVETICA, 9)));
                 table.addCell(new Phrase(dto.getSize() != null ? dto.getSize() : "", FontFactory.getFont(FontFactory.HELVETICA, 9)));
                 table.addCell(new Phrase(dto.getTotalQuantity().toString(), FontFactory.getFont(FontFactory.HELVETICA, 9)));
                 table.addCell(new Phrase(dto.getUnit(), FontFactory.getFont(FontFactory.HELVETICA, 9)));
                 table.addCell(new Phrase(dto.getCostPerUnit() != null ? dto.getCostPerUnit().toString() : "0", FontFactory.getFont(FontFactory.HELVETICA, 9)));
                 table.addCell(new Phrase(dto.getPricePerUnit() != null ? dto.getPricePerUnit().toString() : "0", FontFactory.getFont(FontFactory.HELVETICA, 9)));
+                table.addCell(new Phrase(dto.getMrp() != null ? dto.getMrp().toString() : "", FontFactory.getFont(FontFactory.HELVETICA, 9)));
+                table.addCell(new Phrase(dto.getExpiryDate() != null ? dto.getExpiryDate().toString() : "", FontFactory.getFont(FontFactory.HELVETICA, 9)));
             }
             document.add(table);
             document.close();

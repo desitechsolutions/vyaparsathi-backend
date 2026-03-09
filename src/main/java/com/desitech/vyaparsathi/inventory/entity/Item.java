@@ -70,6 +70,13 @@ public class Item extends ShopAwareEntity {
     @Column(name = "composition", length = 500)
     private String composition;
 
+    /**
+     * Storage requirement for the medicine (e.g., "Refrigerated 2–8°C", "Room Temperature").
+     * Used for pharmacy stock management and label printing.
+     */
+    @Column(name = "storage_requirement", length = 100)
+    private String storageRequirement;
+
     // A Item can have many variants (e.g., T-Shirt can be size M, L)
     @OneToMany(mappedBy = "item", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference

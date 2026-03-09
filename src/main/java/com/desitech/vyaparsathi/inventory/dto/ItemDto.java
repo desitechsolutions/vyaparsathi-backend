@@ -24,6 +24,8 @@ public class ItemDto {
     private Boolean requiresPrescription;
     /** Active pharmaceutical ingredient(s) and strength (e.g., "Paracetamol 500mg"). */
     private String composition;
+    /** Storage requirement (e.g., "Refrigerated 2–8°C", "Room Temperature"). */
+    private String storageRequirement;
 
     private List<ItemVariantDto> variants;
 }

@@ -200,23 +200,43 @@ public class InvoiceService {
 
         PdfPCell billCell = new PdfPCell();
         billCell.setPadding(8);
-        billCell.addElement(new Phrase(sale.getCustomer().getName(), boldFont));
-        billCell.addElement(new Phrase("\n" + sale.getCustomer().getAddressLine1(), normalFont));
-        billCell.addElement(new Phrase("\n" + sale.getCustomer().getCity() + ", " + sale.getCustomer().getState(), normalFont));
-        if (sale.getCustomer().getGstNumber() != null) {
-            billCell.addElement(new Phrase("\nGSTIN: " + sale.getCustomer().getGstNumber(), normalFont));
+        if (sale.getCustomer() != null) {
+            billCell.addElement(new Phrase(sale.getCustomer().getName(), boldFont));
+            if (sale.getCustomer().getAddressLine1() != null) {
+                billCell.addElement(new Phrase("\n" + sale.getCustomer().getAddressLine1(), normalFont));
+            }
+            String cityState = formatCityState(sale.getCustomer().getCity(), sale.getCustomer().getState());
+            if (!cityState.isEmpty()) {
+                billCell.addElement(new Phrase("\n" + cityState, normalFont));
+            }
+            if (sale.getCustomer().getGstNumber() != null) {
+                billCell.addElement(new Phrase("\nGSTIN: " + sale.getCustomer().getGstNumber(), normalFont));
+            }
+        } else {
+            billCell.addElement(new Phrase("Walk-in Customer", normalFont));
         }
         table.addCell(billCell);
 
         PdfPCell shipCell = new PdfPCell();
         shipCell.setPadding(8);
         Delivery latest = sale.getLatestDelivery();
-        String shipAddr = (latest != null && latest.getDeliveryAddress() != null && !latest.getDeliveryAddress().trim().isEmpty())
-                ? latest.getDeliveryAddress()
-                : sale.getCustomer().getAddressLine1() + "\n" + sale.getCustomer().getCity() + ", " + sale.getCustomer().getState();
-
-        shipCell.addElement(new Phrase(sale.getCustomer().getName(), boldFont));
-        shipCell.addElement(new Phrase("\n" + shipAddr, normalFont));
+        if (sale.getCustomer() != null) {
+            boolean hasCustomDeliveryAddress = latest != null
+                    && latest.getDeliveryAddress() != null
+                    && !latest.getDeliveryAddress().trim().isEmpty();
+            String shipAddr = hasCustomDeliveryAddress
+                    ? latest.getDeliveryAddress()
+                    : buildCustomerAddress(sale.getCustomer().getAddressLine1(),
+                                          sale.getCustomer().getCity(),
+                                          sale.getCustomer().getState());
+            shipCell.addElement(new Phrase(sale.getCustomer().getName(), boldFont));
+            shipCell.addElement(new Phrase("\n" + shipAddr, normalFont));
+        } else if (latest != null && latest.getDeliveryAddress() != null && !latest.getDeliveryAddress().trim().isEmpty()) {
+            shipCell.addElement(new Phrase("Walk-in Customer", boldFont));
+            shipCell.addElement(new Phrase("\n" + latest.getDeliveryAddress(), normalFont));
+        } else {
+            shipCell.addElement(new Phrase("Walk-in Customer", normalFont));
+        }
         table.addCell(shipCell);
 
         document.add(table);
@@ -365,6 +385,28 @@ public class InvoiceService {
             case NON_SCHEDULED -> "Non-Sch";
             default -> "";
         };
+    }
+
+    /** Formats city and state into a single line, handling null/empty values. */
+    private String formatCityState(String city, String state) {
+        String c = city != null ? city.trim() : "";
+        String s = state != null ? state.trim() : "";
+        if (c.isEmpty() && s.isEmpty()) return "";
+        if (c.isEmpty()) return s;
+        if (s.isEmpty()) return c;
+        return c + ", " + s;
+    }
+
+    /** Builds a full address string from individual components, handling nulls. */
+    private String buildCustomerAddress(String addressLine1, String city, String state) {
+        StringBuilder sb = new StringBuilder();
+        if (addressLine1 != null && !addressLine1.isEmpty()) sb.append(addressLine1);
+        String cityState = formatCityState(city, state);
+        if (!cityState.isEmpty()) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append(cityState);
+        }
+        return sb.toString();
     }
 
     private void addItemTable(Document document, Sale sale, Font headerFont, Font normalFont, Font boldFont, Color brandColor)

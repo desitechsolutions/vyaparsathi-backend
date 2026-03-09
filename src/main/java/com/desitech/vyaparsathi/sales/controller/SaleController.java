@@ -48,9 +48,10 @@ public class SaleController {
 
     @PostMapping
     public ResponseEntity<SaleCreateResponse> create(@Valid @RequestBody SaleDto dto) {
-        logger.info("Creating sale for customerId={}", dto.getCustomer().getId());
+        Long customerId = dto.getCustomer() != null ? dto.getCustomer().getId() : null;
+        logger.info("Creating sale for customerId={}", customerId);
         SaleDto sale = service.createSale(dto);
-        logger.info("Created sale for customerId={}", dto.getCustomer().getId());
+        logger.info("Created sale for customerId={}", customerId);
         SaleCreateResponse response = new SaleCreateResponse(
                 sale.getId(),
                 sale.getInvoiceNo(),

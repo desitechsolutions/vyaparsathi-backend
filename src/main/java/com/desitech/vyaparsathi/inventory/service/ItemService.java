@@ -100,6 +100,8 @@ public class ItemService {
         // Pharmacy fields
         existingItem.setDrugSchedule(itemDto.getDrugSchedule());
         existingItem.setRequiresPrescription(itemDto.getRequiresPrescription());
+        existingItem.setComposition(itemDto.getComposition());
+        existingItem.setStorageRequirement(itemDto.getStorageRequirement());
 
         // 3. Category Update
         if (itemDto.getCategoryId() != null) {
@@ -264,5 +266,7 @@ public class ItemService {
         variant.setManufacturingDate(dto.getManufacturingDate());
         variant.setExpiryDate(dto.getExpiryDate());
         variant.setMrp(dto.getMrp());
+        variant.setIsLooseMedicine(dto.getIsLooseMedicine());
+        variant.setPackSize(dto.getPackSize());
     }
 }

@@ -70,6 +70,8 @@ public class ItemVariantService {
         itemVariant.setManufacturingDate(dto.getManufacturingDate());
         itemVariant.setExpiryDate(dto.getExpiryDate());
         itemVariant.setMrp(dto.getMrp());
+        itemVariant.setIsLooseMedicine(dto.getIsLooseMedicine());
+        itemVariant.setPackSize(dto.getPackSize());
 
         ItemVariant savedVariant = itemVariantRepository.save(itemVariant);
         return mapper.toDto(savedVariant);

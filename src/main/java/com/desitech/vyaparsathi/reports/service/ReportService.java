@@ -521,12 +521,16 @@ public class ReportService {
             BigDecimal sgst = sale.getSaleItems().stream().map(si -> si.getSgstAmt() != null ? si.getSgstAmt() : ZERO).reduce(ZERO, BigDecimal::add);
             BigDecimal igst = sale.getSaleItems().stream().map(si -> si.getIgstAmt() != null ? si.getIgstAmt() : ZERO).reduce(ZERO, BigDecimal::add);
 
-            String gstin = (sale.getCustomer().getGstNumber() != null) ? sale.getCustomer().getGstNumber() : "";
+            String customerName = sale.getCustomer() != null ? sale.getCustomer().getName() : "Walk-in";
+            String gstin = (sale.getCustomer() != null && sale.getCustomer().getGstNumber() != null)
+                    ? sale.getCustomer().getGstNumber() : "";
             String type = gstin.isEmpty() ? "B2C" : "B2B";
+            String customerState = (sale.getCustomer() != null && sale.getCustomer().getState() != null)
+                    ? sale.getCustomer().getState() : "";
 
             csv.append(String.format("%s,%s,\"%s\",%s,%s,%s,%s,%s,%s,%s,%s\n",
-                    sale.getInvoiceNo(), sale.getDate().toLocalDate(), sale.getCustomer().getName(),
-                    gstin, (sale.getCustomer().getState() != null ? sale.getCustomer().getState() : ""),
+                    sale.getInvoiceNo(), sale.getDate().toLocalDate(), customerName,
+                    gstin, customerState,
                     type, txbl, cgst, sgst, igst, sale.getTotalAmount()));
         }
         return csv.toString();
@@ -688,6 +692,9 @@ public class ReportService {
             String supplierName = (receiving.getPurchaseOrder() != null
                     && receiving.getPurchaseOrder().getSupplier() != null)
                     ? receiving.getPurchaseOrder().getSupplier().getName() : null;
+            String supplierDlNumber = (receiving.getPurchaseOrder() != null
+                    && receiving.getPurchaseOrder().getSupplier() != null)
+                    ? receiving.getPurchaseOrder().getSupplier().getDrugLicenseNumber() : null;
             LocalDate receivedDate = receiving.getReceivedAt() != null
                     ? receiving.getReceivedAt().toLocalDate() : null;
 
@@ -706,6 +713,7 @@ public class ReportService {
                 entry.setReceivedDate(receivedDate);
                 entry.setPoNumber(poNumber);
                 entry.setSupplierName(supplierName);
+                entry.setSupplierDlNumber(supplierDlNumber);
                 entry.setItemName(variant.getItem() != null ? variant.getItem().getName() : null);
                 entry.setComposition(variant.getItem() != null ? variant.getItem().getComposition() : null);
                 entry.setBatchNumber(item.getBatchNumber());

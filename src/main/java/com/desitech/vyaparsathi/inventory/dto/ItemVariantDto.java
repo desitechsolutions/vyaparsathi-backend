@@ -44,4 +44,14 @@ public class ItemVariantDto {
     private BigDecimal mrp;
     /** Active pharmaceutical ingredient(s) and strength – inherited from parent Item. */
     private String composition;
+    /**
+     * Drug schedule classification – inherited from parent Item.
+     * Used for sales-page prescription warnings and substitute lookups.
+     */
+    private com.desitech.vyaparsathi.inventory.enums.DrugSchedule drugSchedule;
+    /**
+     * Whether a valid prescription is required – inherited from parent Item.
+     * Displayed as a warning at the point of sale.
+     */
+    private Boolean requiresPrescription;
 }

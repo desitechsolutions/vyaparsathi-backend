@@ -28,4 +28,11 @@ public class Supplier extends ShopAwareEntity {
 
     @Column
     private String gstin;
+
+    /**
+     * Drug License number for pharmacy suppliers.
+     * Required for pharmacy regulatory compliance and purchase register entries.
+     */
+    @Column(name = "drug_license_number")
+    private String drugLicenseNumber;
 }

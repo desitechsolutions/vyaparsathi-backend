@@ -189,6 +189,12 @@ public class SaleService {
         sale.setSyncedFlag(false);
         sale.setSaleItems(saleItems);
         saleItems.forEach(si -> si.setSale(sale));
+
+        // Pharmacy-specific fields
+        sale.setDoctorName(dto.getDoctorName());
+        sale.setPatientName(dto.getPatientName());
+        sale.setPrescriptionNumber(dto.getPrescriptionNumber());
+
         Sale savedSale = saleRepository.saveAndFlush(sale);
 
         // 7. Handle Delivery
@@ -585,6 +591,11 @@ public class SaleService {
         sale.setRoundOff(sale.getTotalAmount().subtract(totalTaxableValue)); // Difference for ledger balancing
         sale.getSaleItems().addAll(itemsToUpdate);
 
+        // Pharmacy-specific fields
+        sale.setDoctorName(dto.getDoctorName());
+        sale.setPatientName(dto.getPatientName());
+        sale.setPrescriptionNumber(dto.getPrescriptionNumber());
+
         Sale saved = saleRepository.save(sale);
 
         // Handle Delivery (Now uses saved.getInvoiceNo() to avoid null issues)
@@ -692,6 +703,11 @@ public class SaleService {
         existing.setRoundOff(roundOff);
         existing.setCustomer(customer);
         existing.setStatus(SaleStatus.COMPLETED);
+
+        // Pharmacy-specific fields
+        existing.setDoctorName(dto.getDoctorName());
+        existing.setPatientName(dto.getPatientName());
+        existing.setPrescriptionNumber(dto.getPrescriptionNumber());
 
         Sale saved = saleRepository.save(existing);
 

@@ -11,6 +11,8 @@ public class StockAddDto {
     private BigDecimal quantity;
     private BigDecimal costPerUnit;
     private String batch;
+    /** Manufacturing date of the batch being added (pharmacy). */
+    private LocalDate manufacturingDate;
     /** Expiry date of the batch being added (pharmacy). */
     private LocalDate expiryDate;
 }

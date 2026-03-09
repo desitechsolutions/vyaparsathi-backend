@@ -57,4 +57,13 @@ public class SaleItem extends ShopAwareEntity {
 
     @Column(name = "is_returned", nullable = false)
     private boolean isReturned = false;
+
+    /**
+     * The pack size (dispensing units per stock unit) that was active at the time of sale
+     * for a loose-medicine line item, e.g. 15 tablets per strip.
+     * Null for full-pack sales or medicines that are not dispensed loose.
+     * Stored so that returns can reverse exactly the same fractional stock quantity.
+     */
+    @Column(name = "loose_pack_size", precision = 10, scale = 3)
+    private BigDecimal loosePackSize;
 }

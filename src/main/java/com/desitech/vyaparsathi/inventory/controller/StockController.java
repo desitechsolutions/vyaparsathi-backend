@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import com.desitech.vyaparsathi.inventory.export.StockExportService;
 
 import com.desitech.vyaparsathi.inventory.dto.*;
+import com.desitech.vyaparsathi.inventory.service.StockImportService;
 import com.desitech.vyaparsathi.inventory.service.StockService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -20,6 +21,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -36,6 +38,8 @@ public class StockController {
     private StockService service;
     @Autowired
     private StockExportService stockExportService;
+    @Autowired
+    private StockImportService stockImportService;
 
     @PostMapping("/add")
     @Operation(summary = "Add stock manually",
@@ -63,6 +67,23 @@ public class StockController {
         } catch (Exception e) {
             logger.error("Error fetching current stock levels: {}", e.getMessage(), e);
             throw new ApplicationException("Failed to fetch current stock levels", e);
+        }
+    }
+
+    @GetMapping("/batch-wise")
+    @Operation(summary = "Get batch-wise stock breakdown (pharmacy)",
+               description = "Returns one entry per (item variant, batch, expiry date) combination so that " +
+                       "pharmacy shops can see each batch's remaining quantity and expiry date separately. " +
+                       "Only batches with a positive remaining quantity are included.")
+    @ApiResponse(responseCode = "200", description = "Batch-wise stock retrieved successfully")
+    public ResponseEntity<List<BatchStockDto>> getBatchWiseStock() {
+        try {
+            List<BatchStockDto> result = service.getBatchWiseStock();
+            logger.info("Fetched batch-wise stock levels");
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching batch-wise stock: {}", e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch batch-wise stock", e);
         }
     }
 
@@ -194,6 +215,52 @@ public class StockController {
         if ("excel".equalsIgnoreCase(format)) return MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         if ("pdf".equalsIgnoreCase(format)) return MediaType.APPLICATION_PDF;
         return MediaType.parseMediaType("text/csv");
+    }
+
+    // -------------------------------------------------------------------------
+    // Excel Import endpoints
+    // -------------------------------------------------------------------------
+
+    @GetMapping("/import/template")
+    @Operation(summary = "Download stock import template (pharmacy)",
+               description = "Returns a blank Excel workbook with the correct column headers and a sample row " +
+                       "that pharmacy shops can fill in to bulk-import their existing inventory.")
+    @ApiResponse(responseCode = "200", description = "Template downloaded successfully")
+    public ResponseEntity<byte[]> downloadImportTemplate() {
+        try {
+            byte[] template = stockImportService.generateImportTemplate();
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=stock_import_template.xlsx")
+                    .contentType(MediaType.parseMediaType(
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                    .body(template);
+        } catch (Exception e) {
+            logger.error("Failed to generate import template: {}", e.getMessage(), e);
+            throw new ApplicationException("Failed to generate import template", e);
+        }
+    }
+
+    @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Bulk import stock from Excel (pharmacy)",
+               description = "Accepts an .xlsx file in the import template format. " +
+                       "For each row the service finds or creates the Item and ItemVariant (matched by SKU), " +
+                       "then records an ADD stock movement. " +
+                       "Returns a summary with success/error counts and per-row error messages.")
+    @ApiResponse(responseCode = "200", description = "Import processed – check result for row-level errors")
+    public ResponseEntity<StockImportResultDto> importStock(
+            @Parameter(description = "Excel file (.xlsx) in the import template format")
+            @RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            throw new ApplicationException("Uploaded file is empty", null);
+        }
+        try {
+            StockImportResultDto result = stockImportService.importFromExcel(file);
+            logger.info("Stock import completed – success={}, errors={}", result.getSuccessCount(), result.getErrorCount());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Stock import failed: {}", e.getMessage(), e);
+            throw new ApplicationException("Stock import failed: " + e.getMessage(), e);
+        }
     }
 
 }

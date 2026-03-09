@@ -27,4 +27,19 @@ public class SaleItemDto {
     private BigDecimal taxableValue;
     private BigDecimal returnedQty;
     private BigDecimal netQty;
+
+    /**
+     * True when the frontend is selling this item in loose/tablet mode
+     * (e.g., dispensing individual tablets from a strip).
+     * When true, {@link #loosePackSize} must also be provided.
+     */
+    private Boolean isLooseSale;
+
+    /**
+     * The number of dispensing units per stock unit at the time of this sale
+     * (e.g., 15 tablets per strip).  Sent by the frontend when {@link #isLooseSale}
+     * is true.  Takes precedence over the ItemVariant's stored packSize so that a
+     * pharmacist can sell loose even if the variant has not been pre-configured.
+     */
+    private BigDecimal loosePackSize;
 }

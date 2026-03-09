@@ -122,7 +122,7 @@ public class SaleService {
             ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
                     .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
 
-            BigDecimal stockQty = toStockQty(itemVariant, itemDto.getQty());
+            BigDecimal stockQty = toStockQty(itemVariant, itemDto.getQty(), itemDto);
             if (!stockService.isStockAvailable(itemDto.getItemVariantId(), stockQty)) {
                 logger.warn("Insufficient stock for item: {}", itemDto.getItemName());
                 throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
@@ -132,6 +132,8 @@ public class SaleService {
             saleItem.setItemVariant(itemVariant);
             saleItem.setQty(itemDto.getQty());
             saleItem.setUnitPrice(itemDto.getUnitPrice());
+            // Persist the effective pack size so returns can reverse the same fractional qty
+            saleItem.setLoosePackSize(resolveLoosePackSize(itemVariant, itemDto));
 
             // Calculate taxable value: (Qty * Price) - Discount
             BigDecimal itemTaxableValue = itemDto.getQty()
@@ -180,7 +182,7 @@ public class SaleService {
 
         // 5. Deduct Stock
         for (SaleItem item : saleItems) {
-            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty());
+            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty(), item.getLoosePackSize());
             stockService.deductStock(item.getItemVariant().getId(), stockQty, "Sale Transaction", "Sale #" + invoiceNo);
         }
 
@@ -290,8 +292,9 @@ public class SaleService {
 
             StockAdjustmentDto adjustment = new StockAdjustmentDto();
             adjustment.setItemVariantId(saleItem.getItemVariant().getId());
-            // Convert returned dispensing qty back to stock units for loose medicine
-            BigDecimal stockQty = toStockQty(saleItem.getItemVariant(), requestedQty);
+            // Convert returned dispensing qty back to stock units using the same pack size
+            // that was active when the original sale was made (stored on the SaleItem).
+            BigDecimal stockQty = toStockQty(saleItem.getItemVariant(), requestedQty, saleItem.getLoosePackSize());
             adjustment.setAdjustmentQuantity(stockQty);
             adjustment.setReason("Return: Inv #" + sale.getInvoiceNo());
             stockService.adjustStock(adjustment);
@@ -356,7 +359,10 @@ public class SaleService {
         for (SaleItem saleItem : sale.getSaleItems()) {
             StockAdjustmentDto adjustment = new StockAdjustmentDto();
             adjustment.setItemVariantId(saleItem.getItemVariant().getId());
-            adjustment.setAdjustmentQuantity(saleItem.getQty()); // Positive adjustment adds back to stock
+            // For loose medicine, convert dispensing qty back to stock units using the
+            // pack size stored at sale time.  Positive adjustment adds back to stock.
+            BigDecimal stockQty = toStockQty(saleItem.getItemVariant(), saleItem.getQty(), saleItem.getLoosePackSize());
+            adjustment.setAdjustmentQuantity(stockQty);
             adjustment.setReason("Cancelled Sale #" + sale.getInvoiceNo());
             stockService.adjustStock(adjustment);
         }
@@ -647,7 +653,7 @@ public class SaleService {
             ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
                     .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
 
-            BigDecimal stockQty = toStockQty(itemVariant, itemDto.getQty());
+            BigDecimal stockQty = toStockQty(itemVariant, itemDto.getQty(), itemDto);
             if (!stockService.isStockAvailable(itemDto.getItemVariantId(), stockQty)) {
                 throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
             }
@@ -658,6 +664,8 @@ public class SaleService {
             saleItem.setQty(itemDto.getQty());
             saleItem.setUnitPrice(itemDto.getUnitPrice());
             saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
+            // Persist the effective pack size so returns can reverse the same fractional qty
+            saleItem.setLoosePackSize(resolveLoosePackSize(itemVariant, itemDto));
 
             // FIX: Taxable value calculation for EVERY item (Required for Sales Volume Reports)
             BigDecimal taxableValue = itemDto.getQty()
@@ -698,7 +706,7 @@ public class SaleService {
 
         // Deduct stock
         for (SaleItem item : existing.getSaleItems()) {
-            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty());
+            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty(), item.getLoosePackSize());
             stockService.deductStock(item.getItemVariant().getId(), stockQty, "Sale Completion", "Sale #" + existing.getInvoiceNo());
         }
 
@@ -800,14 +808,16 @@ public class SaleService {
     /**
      * Converts a dispensing-unit quantity to a stock-unit quantity for loose medicines.
      * <p>
-     * Example: if a strip has 15 tablets (packSize=15) and the sale qty is 4 tablets,
-     * the stock-unit quantity to deduct is 4/15 ≈ 0.267 strips.
-     * <p>
-     * For non-loose medicines, returns the original quantity unchanged.
+     * This is the <em>legacy fallback</em> overload — it uses only the ItemVariant's
+     * database configuration ({@link ItemVariant#getIsLooseMedicine()} and
+     * {@link ItemVariant#getPackSize()}).  Prefer the overloads that accept an explicit
+     * {@code loosePackSize} or a {@link SaleItemDto} when those values are available,
+     * because the ItemVariant may not yet be configured as a loose medicine even when the
+     * pharmacist chooses to dispense loose at the point of sale.
      *
-     * @param variant the item variant being sold
-     * @param dispensingQty quantity in the dispensing/selling unit
-     * @return equivalent quantity in the stock unit
+     * @param variant       the item variant being sold/returned
+     * @param dispensingQty quantity in the dispensing/selling unit (e.g. tablets)
+     * @return equivalent quantity in the stock unit (e.g. strips)
      */
     private BigDecimal toStockQty(ItemVariant variant, BigDecimal dispensingQty) {
         if (Boolean.TRUE.equals(variant.getIsLooseMedicine())
@@ -816,5 +826,70 @@ public class SaleService {
             return dispensingQty.divide(variant.getPackSize(), STOCK_QUANTITY_SCALE, RoundingMode.HALF_UP);
         }
         return dispensingQty;
+    }
+
+    /**
+     * Returns {@code true} when {@code packSize} represents a valid positive pack size —
+     * the single source of truth for that check, shared by all {@code toStockQty} overloads
+     * and {@link #resolveLoosePackSize}.
+     */
+    private static boolean isValidPackSize(BigDecimal packSize) {
+        return packSize != null && packSize.compareTo(BigDecimal.ZERO) > 0;
+    }
+
+    /**
+     * Converts dispensing qty to stock qty, preferring an explicitly stored
+     * {@code loosePackSize} over the ItemVariant's default settings.
+     * <p>
+     * Used when a {@link SaleItem} entity is available (stock deduction loop, cancel,
+     * and return).  The stored {@code loosePackSize} was captured from the frontend at
+     * sale-creation time, so it reflects the pack size the pharmacist actually used —
+     * even if the ItemVariant is not pre-configured as a loose medicine.
+     *
+     * @param variant         the item variant
+     * @param dispensingQty   quantity in dispensing units
+     * @param loosePackSize   pack size persisted on the SaleItem, or {@code null} for full-pack sales
+     * @return equivalent quantity in stock units
+     */
+    private BigDecimal toStockQty(ItemVariant variant, BigDecimal dispensingQty, BigDecimal loosePackSize) {
+        if (isValidPackSize(loosePackSize)) {
+            return dispensingQty.divide(loosePackSize, STOCK_QUANTITY_SCALE, RoundingMode.HALF_UP);
+        }
+        return toStockQty(variant, dispensingQty);
+    }
+
+    /**
+     * Converts dispensing qty to stock qty, preferring the sale-time pack size from
+     * the incoming {@link SaleItemDto} over the ItemVariant's database settings.
+     * <p>
+     * Used during sale creation / draft completion, where we have the DTO available.
+     * This allows the pharmacist to sell loose medicine even if
+     * {@link ItemVariant#getIsLooseMedicine()} is not yet set in the database.
+     *
+     * @param variant       the item variant
+     * @param dispensingQty quantity in dispensing units
+     * @param dto           the incoming sale-item DTO
+     * @return equivalent quantity in stock units
+     */
+    private BigDecimal toStockQty(ItemVariant variant, BigDecimal dispensingQty, SaleItemDto dto) {
+        if (Boolean.TRUE.equals(dto.getIsLooseSale()) && isValidPackSize(dto.getLoosePackSize())) {
+            return dispensingQty.divide(dto.getLoosePackSize(), STOCK_QUANTITY_SCALE, RoundingMode.HALF_UP);
+        }
+        return toStockQty(variant, dispensingQty);
+    }
+
+    /**
+     * Determines the effective pack size to persist on a new {@link SaleItem}.
+     * Prefers the explicit value from the frontend DTO; falls back to the ItemVariant's
+     * database configuration.  Returns {@code null} for full-pack sales.
+     */
+    private BigDecimal resolveLoosePackSize(ItemVariant variant, SaleItemDto dto) {
+        if (Boolean.TRUE.equals(dto.getIsLooseSale()) && isValidPackSize(dto.getLoosePackSize())) {
+            return dto.getLoosePackSize();
+        }
+        if (Boolean.TRUE.equals(variant.getIsLooseMedicine()) && isValidPackSize(variant.getPackSize())) {
+            return variant.getPackSize();
+        }
+        return null;
     }
 }

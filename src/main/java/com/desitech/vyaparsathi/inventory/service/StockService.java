@@ -137,6 +137,56 @@ public class StockService {
     }
 
     /**
+     * Returns per-batch stock breakdown for all item variants.
+     * <p>
+     * Unlike {@link #getCurrentStock()}, which collapses all batches of the same
+     * ItemVariant into a single total, this method returns one entry per
+     * (variant, batch, expiryDate) combination so the UI can display, e.g.:
+     * <ul>
+     *   <li>Paracetamol 500mg – Batch A – 20 strips (exp Jun-2025)</li>
+     *   <li>Paracetamol 500mg – Batch B – 30 strips (exp Dec-2025)</li>
+     * </ul>
+     * Only batches with a net-positive remaining quantity are included.
+     * </p>
+     */
+    public List<BatchStockDto> getBatchWiseStock() {
+        List<ItemVariant> itemVariants = itemVariantRepository.findAll();
+        if (itemVariants.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // Build lookup map for variant metadata
+        Map<Long, ItemVariant> variantMap = itemVariants.stream()
+                .collect(Collectors.toMap(ItemVariant::getId, v -> v));
+
+        List<Long> variantIds = new java.util.ArrayList<>(variantMap.keySet());
+
+        List<StockMovementRepository.BatchStockProjection> projections =
+                stockMovementRepository.findBatchWiseStockByVariantIds(variantIds);
+
+        return projections.stream().map(p -> {
+            BatchStockDto dto = new BatchStockDto();
+            dto.setItemVariantId(p.getVariantId());
+            dto.setBatchNumber(p.getBatchNumber());
+            dto.setExpiryDate(p.getExpiryDate());
+            dto.setQuantity(p.getTotalQuantity() != null ? p.getTotalQuantity() : BigDecimal.ZERO);
+            dto.setCostPerUnit(p.getWacCost() != null ? p.getWacCost() : BigDecimal.ZERO);
+
+            ItemVariant variant = variantMap.get(p.getVariantId());
+            if (variant != null) {
+                dto.setItemName(variant.getItem().getName());
+                dto.setSku(variant.getSku());
+                dto.setUnit(variant.getUnit());
+                dto.setMrp(variant.getMrp());
+                dto.setIsLooseMedicine(variant.getIsLooseMedicine());
+                dto.setPackSize(variant.getPackSize());
+            }
+            return dto;
+        }).collect(Collectors.toList());
+    }
+
+
+    /**
      * Deducts stock by creating a new 'DEDUCT' movement.
      */
     @Transactional

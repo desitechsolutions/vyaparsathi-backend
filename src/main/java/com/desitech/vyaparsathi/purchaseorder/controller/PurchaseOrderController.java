@@ -1,10 +1,15 @@
 package com.desitech.vyaparsathi.purchaseorder.controller;
 
+import com.desitech.vyaparsathi.payment.dto.PaymentDto;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderDto;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderItemDto;
+import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderPaymentSummaryDto;
 import com.desitech.vyaparsathi.purchaseorder.service.PurchaseOrderService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -50,6 +55,16 @@ public class PurchaseOrderController {
         return ResponseEntity.ok(purchaseOrderService.submitPurchaseOrder(id));
     }
 
+    /**
+     * Signals that receiving has begun for this PO.
+     * Transitions the PO from SUBMITTED → PARTIALLY_RECEIVED.
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
+    @PostMapping("/{id}/receive")
+    public ResponseEntity<PurchaseOrderDto> markAsReceiving(@PathVariable Long id) {
+        return ResponseEntity.ok(purchaseOrderService.markAsReceiving(id));
+    }
+
     @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
     @GetMapping("/{id}/items")
     public ResponseEntity<List<PurchaseOrderItemDto>> getItemsForPurchaseOrder(@PathVariable Long id) {
@@ -67,5 +82,46 @@ public class PurchaseOrderController {
     @GetMapping("/pending")
     public List<PurchaseOrderDto> getPendingPurchaseOrders() {
         return purchaseOrderService.getPendingPurchaseOrders();
+    }
+
+    // ─── Payment Endpoints ────────────────────────────────────────────────────
+
+    /**
+     * Record a payment for a Purchase Order.
+     *
+     * <pre>POST /api/purchase-orders/{id}/payments</pre>
+     * Body: {@link PaymentDto} (amount, paymentMethod, reference, notes, …)
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
+    @PostMapping("/{id}/payments")
+    public ResponseEntity<PaymentDto> recordPayment(
+            @PathVariable Long id,
+            @Valid @RequestBody PaymentDto dto) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(purchaseOrderService.recordPayment(id, dto));
+    }
+
+    /**
+     * List all payments recorded against a Purchase Order (paginated).
+     *
+     * <pre>GET /api/purchase-orders/{id}/payments</pre>
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
+    @GetMapping("/{id}/payments")
+    public ResponseEntity<Page<PaymentDto>> getPayments(
+            @PathVariable Long id,
+            Pageable pageable) {
+        return ResponseEntity.ok(purchaseOrderService.getPayments(id, pageable));
+    }
+
+    /**
+     * Returns the payment summary (totalAmount, totalPaid, amountDue, paymentStatus).
+     *
+     * <pre>GET /api/purchase-orders/{id}/payment-summary</pre>
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
+    @GetMapping("/{id}/payment-summary")
+    public ResponseEntity<PurchaseOrderPaymentSummaryDto> getPaymentSummary(@PathVariable Long id) {
+        return ResponseEntity.ok(purchaseOrderService.getPaymentSummary(id));
     }
 }

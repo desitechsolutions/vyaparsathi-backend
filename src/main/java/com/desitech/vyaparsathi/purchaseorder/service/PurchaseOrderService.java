@@ -2,7 +2,13 @@ package com.desitech.vyaparsathi.purchaseorder.service;
 
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.repository.ItemVariantRepository;
+import com.desitech.vyaparsathi.common.exception.ResourceNotFoundException;
+import com.desitech.vyaparsathi.payment.dto.PaymentDto;
+import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
+import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
+import com.desitech.vyaparsathi.payment.service.PaymentService;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderDto;
+import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderPaymentSummaryDto;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrder;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrderItem;
 import com.desitech.vyaparsathi.supplier.entity.Supplier;
@@ -16,11 +22,14 @@ import com.desitech.vyaparsathi.supplier.repository.SupplierRepository;
 import com.desitech.vyaparsathi.purchaseorder.events.PurchaseOrderProducer;
 import com.desitech.vyaparsathi.purchaseorder.events.PurchaseOrderEvent;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -42,6 +51,8 @@ public class PurchaseOrderService {
     private PurchaseOrderMapper mapper;
     @Autowired
     private PurchaseOrderProducer purchaseOrderProducer;
+    @Autowired
+    private PaymentService paymentService;
 
     /**
      * Create a new purchase order in DRAFT, persist it, and emit a Kafka event.
@@ -53,7 +64,7 @@ public class PurchaseOrderService {
         }
 
         Supplier supplier = supplierRepository.findById(dto.getSupplierId())
-                .orElseThrow(() -> new RuntimeException("Supplier not found with ID: " + dto.getSupplierId()));
+                .orElseThrow(() -> new ResourceNotFoundException("Supplier not found with ID: " + dto.getSupplierId()));
 
         PurchaseOrder purchaseOrder = new PurchaseOrder();
         purchaseOrder.setPoNumber(dto.getPoNumber());
@@ -72,7 +83,7 @@ public class PurchaseOrderService {
 
         List<PurchaseOrderItem> items = dto.getItems().stream().map(itemDto -> {
             ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
-                    .orElseThrow(() -> new RuntimeException("Item Variant not found with ID: " + itemDto.getItemVariantId()));
+                    .orElseThrow(() -> new ResourceNotFoundException("Item Variant not found with ID: " + itemDto.getItemVariantId()));
             PurchaseOrderItem item = new PurchaseOrderItem();
             item.setPurchaseOrder(savedPurchaseOrder);
             item.setItemVariant(itemVariant);
@@ -101,21 +112,21 @@ public class PurchaseOrderService {
 
     public PurchaseOrderDto findPurchaseOrderById(Long id) {
         PurchaseOrder purchaseOrder = purchaseOrderRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Purchase Order not found with ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
         return mapper.toDto(purchaseOrder);
     }
 
     @Transactional
     public PurchaseOrderDto updatePurchaseOrder(Long id, PurchaseOrderDto dto) {
         PurchaseOrder purchaseOrder = purchaseOrderRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Purchase Order not found with ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
 
         if (!PurchaseOrderStatus.DRAFT.equals(purchaseOrder.getStatus())) {
             throw new IllegalStateException("Only 'Draft' orders can be updated.");
         }
 
         Supplier supplier = supplierRepository.findById(dto.getSupplierId())
-                .orElseThrow(() -> new RuntimeException("Supplier not found with ID: " + dto.getSupplierId()));
+                .orElseThrow(() -> new ResourceNotFoundException("Supplier not found with ID: " + dto.getSupplierId()));
 
         purchaseOrder.setSupplier(supplier);
         purchaseOrder.setOrderDate(dto.getOrderDate());
@@ -129,7 +140,7 @@ public class PurchaseOrderService {
 
         List<PurchaseOrderItem> newItems = dto.getItems().stream().map(itemDto -> {
             ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
-                    .orElseThrow(() -> new RuntimeException("Item Variant not found with ID: " + itemDto.getItemVariantId()));
+                    .orElseThrow(() -> new ResourceNotFoundException("Item Variant not found with ID: " + itemDto.getItemVariantId()));
             PurchaseOrderItem item = new PurchaseOrderItem();
             item.setPurchaseOrder(purchaseOrder);
             item.setItemVariant(itemVariant);
@@ -157,7 +168,7 @@ public class PurchaseOrderService {
     @Transactional
     public PurchaseOrderDto submitPurchaseOrder(Long id) {
         PurchaseOrder purchaseOrder = purchaseOrderRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Purchase Order not found with ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
 
         if (!PurchaseOrderStatus.DRAFT.equals(purchaseOrder.getStatus())) {
             throw new IllegalStateException("Only 'Draft' orders can be submitted.");
@@ -174,7 +185,7 @@ public class PurchaseOrderService {
     @Transactional
     public void deletePurchaseOrder(Long id) {
         if (!purchaseOrderRepository.existsById(id)) {
-            throw new RuntimeException("Purchase Order not found with ID: " + id);
+            throw new ResourceNotFoundException("Purchase Order not found with ID: " + id);
         }
         PurchaseOrder po = purchaseOrderRepository.findById(id).orElseThrow();
         purchaseOrderRepository.deleteById(id);
@@ -191,5 +202,111 @@ public class PurchaseOrderService {
         );
         List<PurchaseOrder> pos = purchaseOrderRepository.findAllByStatusIn(includedStatuses);
         return pos.stream().map(mapper::toDto).collect(Collectors.toList());
+    }
+
+    // ─── Receiving ────────────────────────────────────────────────────────────
+
+    /**
+     * Transitions a PO from SUBMITTED to PARTIALLY_RECEIVED (or keeps current status).
+     * Called by {@code POST /api/purchase-orders/{id}/receive} so the frontend can signal
+     * that the receiving workflow has begun without creating a full Receiving record.
+     */
+    @Transactional
+    public PurchaseOrderDto markAsReceiving(Long id) {
+        PurchaseOrder po = purchaseOrderRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
+
+        if (PurchaseOrderStatus.SUBMITTED.equals(po.getStatus())) {
+            po.setStatus(PurchaseOrderStatus.PARTIALLY_RECEIVED);
+            purchaseOrderRepository.save(po);
+        }
+        return mapper.toDto(po);
+    }
+
+    // ─── Payments ─────────────────────────────────────────────────────────────
+
+    /**
+     * Records a payment against a Purchase Order.
+     * Updates the PO's {@code paymentStatus} field and persists the payment via
+     * the shared {@link PaymentService} (source type = PURCHASE_ORDER).
+     *
+     * @param poId     the Purchase Order ID
+     * @param dto      payment details (amount, method, reference, …)
+     * @return the persisted PaymentDto
+     */
+    @Transactional
+    public PaymentDto recordPayment(Long poId, PaymentDto dto) {
+        PurchaseOrder po = purchaseOrderRepository.findById(poId)
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + poId));
+
+        // Validate amount
+        BigDecimal amountDue = paymentService.calculateDueAmount(poId, PaymentSourceType.PURCHASE_ORDER, po.getTotalAmount());
+        if (dto.getAmount() == null || dto.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Payment amount must be positive");
+        }
+        if (dto.getAmount().compareTo(amountDue) > 0) {
+            throw new IllegalArgumentException("Payment amount (" + dto.getAmount() +
+                    ") exceeds the amount due (" + amountDue + ")");
+        }
+
+        // Populate mandatory fields before delegating to PaymentService
+        dto.setSourceType(PaymentSourceType.PURCHASE_ORDER);
+        dto.setSourceId(poId);
+        dto.setSupplierId(po.getSupplier().getId());
+        if (dto.getPaymentDate() == null) {
+            dto.setPaymentDate(LocalDateTime.now());
+        }
+
+        PaymentDto saved = paymentService.createPayment(dto);
+
+        // Refresh due amount and update PO payment status
+        BigDecimal newDue = paymentService.calculateDueAmount(poId, PaymentSourceType.PURCHASE_ORDER, po.getTotalAmount());
+        if (newDue.compareTo(BigDecimal.ZERO) <= 0) {
+            po.setPaymentStatus(PaymentStatus.PAID);
+        } else if (newDue.compareTo(po.getTotalAmount()) < 0) {
+            po.setPaymentStatus(PaymentStatus.PARTIALLY_PAID);
+        } else {
+            po.setPaymentStatus(PaymentStatus.PENDING);
+        }
+        purchaseOrderRepository.save(po);
+
+        return saved;
+    }
+
+    /**
+     * Returns a page of payments recorded against a Purchase Order.
+     *
+     * @param poId     the Purchase Order ID
+     * @param pageable pagination parameters
+     */
+    public Page<PaymentDto> getPayments(Long poId, Pageable pageable) {
+        // Verify PO exists
+        if (!purchaseOrderRepository.existsById(poId)) {
+            throw new ResourceNotFoundException("Purchase Order not found with ID: " + poId);
+        }
+        return paymentService.getPaymentsBySource(PaymentSourceType.PURCHASE_ORDER, poId, pageable);
+    }
+
+    /**
+     * Returns the payment summary (total, paid, due, status) for a Purchase Order.
+     *
+     * @param poId the Purchase Order ID
+     */
+    public PurchaseOrderPaymentSummaryDto getPaymentSummary(Long poId) {
+        PurchaseOrder po = purchaseOrderRepository.findById(poId)
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + poId));
+
+        BigDecimal totalAmount = po.getTotalAmount() != null ? po.getTotalAmount() : BigDecimal.ZERO;
+        BigDecimal amountDue = paymentService.calculateDueAmount(poId, PaymentSourceType.PURCHASE_ORDER, totalAmount);
+        BigDecimal totalPaid = totalAmount.subtract(amountDue).max(BigDecimal.ZERO);
+
+        return new PurchaseOrderPaymentSummaryDto(
+                poId,
+                po.getPoNumber(),
+                totalAmount,
+                totalPaid,
+                amountDue,
+                po.getPaymentStatus()
+        );
     }
 }

@@ -37,4 +37,14 @@ public class ReceivingItemDto {
     private LocalDate manufacturingDate;
     /** Expiry date printed on the packaging. Required QC check for pharmacy receiving. */
     private LocalDate expiryDate;
+
+    // --- Electronics-specific fields ---
+    /** Serial / IMEI numbers captured at goods receipt (comma-separated for multiple units). */
+    private String serialNumber;
+    /** Warranty start date recorded when the electronics unit is received. */
+    private LocalDate warrantyStartDate;
+
+    // --- Automobile-specific fields ---
+    /** OEM part reference number (e.g. manufacturer part number). */
+    private String partReference;
 }

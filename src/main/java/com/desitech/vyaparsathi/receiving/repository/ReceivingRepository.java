@@ -48,6 +48,15 @@ public interface ReceivingRepository extends BaseRepository<Receiving, Long> {
             "items",
             "items.purchaseOrderItem"
     })
+    @Query("SELECT r FROM Receiving r WHERE r.shop.id = :shopId ORDER BY r.receivedAt DESC")
+    List<Receiving> findAllByShopId(@Param("shopId") Long shopId);
+
+    @EntityGraph(attributePaths = {
+            "purchaseOrder",
+            "purchaseOrder.supplier",
+            "items",
+            "items.purchaseOrderItem"
+    })
     List<Receiving> findAllByPurchaseOrderId(Long poItemId);
 
     @EntityGraph(attributePaths = {

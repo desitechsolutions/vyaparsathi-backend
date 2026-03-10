@@ -76,4 +76,27 @@ public class ReceivingItem extends ShopAwareEntity {
      */
     @Column(name = "expiry_date")
     private LocalDate expiryDate;
+
+    // --- Electronics-specific fields ---
+
+    /**
+     * Serial / IMEI numbers captured at goods receipt.
+     * Comma-separated when multiple units are received on one line.
+     */
+    @Column(name = "serial_number", length = 1000)
+    private String serialNumber;
+
+    /**
+     * Warranty start date recorded when the electronics unit is received.
+     */
+    @Column(name = "warranty_start_date")
+    private LocalDate warrantyStartDate;
+
+    // --- Automobile-specific fields ---
+
+    /**
+     * OEM part reference number (e.g. manufacturer part number like 04465-0K080).
+     */
+    @Column(name = "part_reference", length = 100)
+    private String partReference;
 }

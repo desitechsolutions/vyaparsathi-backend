@@ -66,4 +66,18 @@ public class SaleItem extends ShopAwareEntity {
      */
     @Column(name = "loose_pack_size", precision = 10, scale = 3)
     private BigDecimal loosePackSize;
+
+    /**
+     * Batch/lot number of the specific medicine pack dispensed.
+     * Captured at point-of-sale for batch traceability and drug-recall tracking.
+     */
+    @Column(name = "batch_number", length = 100)
+    private String batchNumber;
+
+    /**
+     * Expiry date of the specific batch dispensed.
+     * Stored per sale-item for invoice printing and narcotics-register compliance.
+     */
+    @Column(name = "expiry_date")
+    private java.time.LocalDate expiryDate;
 }

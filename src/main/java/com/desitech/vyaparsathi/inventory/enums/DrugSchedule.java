@@ -49,9 +49,9 @@ public enum DrugSchedule {
 
     @JsonCreator
     public static DrugSchedule fromValue(String value) {
-        if (value == null) return null;
+        if (value == null || value.trim().isEmpty()) return null;
         for (DrugSchedule schedule : DrugSchedule.values()) {
-            if (schedule.value.equalsIgnoreCase(value)) {
+            if (schedule.value.equalsIgnoreCase(value.trim())) {
                 return schedule;
             }
         }

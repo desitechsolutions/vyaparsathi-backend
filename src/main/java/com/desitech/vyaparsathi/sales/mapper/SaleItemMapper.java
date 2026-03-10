@@ -17,6 +17,8 @@ public interface SaleItemMapper {
     @Mapping(target = "costPerUnit", source = "itemVariant.pricePerUnit") // optional
     @Mapping(target = "isLooseSale", expression = "java(SaleItemMapper.hasValidPackSize(saleItem.getLoosePackSize()))")
     @Mapping(target = "loosePackSize", source = "loosePackSize")
+    @Mapping(target = "batchNumber", source = "batchNumber")
+    @Mapping(target = "expiryDate", source = "expiryDate")
     SaleItemDto toDto(SaleItem saleItem);
 
     @Mapping(target = "itemVariant.id", source = "itemVariantId")

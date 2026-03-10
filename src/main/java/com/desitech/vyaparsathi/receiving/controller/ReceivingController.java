@@ -13,8 +13,6 @@ import lombok.extern.java.Log;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -35,9 +33,8 @@ public class ReceivingController {
     private ReceivingService receivingService;
 
     @GetMapping
-    public ResponseEntity<Page<ReceivingDto>> getAllReceivings(Pageable pageable) {
-        Page<ReceivingDto> receivings = receivingService.getAllReceivings(pageable);
-        return ResponseEntity.ok(receivings);
+    public ResponseEntity<List<ReceivingDto>> getAllReceivings() {
+        return ResponseEntity.ok(receivingService.getAllReceivings());
     }
 
     @GetMapping("/{id}")

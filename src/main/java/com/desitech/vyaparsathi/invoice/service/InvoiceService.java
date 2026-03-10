@@ -100,6 +100,16 @@ public class InvoiceService {
         }
     }
 
+    /**
+     * Determines whether this specific sale was billed with GST.
+     * Uses the sale's own {@code isGstRequired} flag (captured at sale-creation time)
+     * so that invoices remain correct even after a shop later toggles its
+     * composition-scheme setting.
+     */
+    private boolean saleHasGst(Sale sale) {
+        return Boolean.TRUE.equals(sale.getIsGstRequired());
+    }
+
     /** Returns true when the sale's shop is a pharmacy. */
     private boolean isPharmacyShop(Sale sale) {
         String industry = sale.getShop().getIndustryType();
@@ -131,7 +141,7 @@ public class InvoiceService {
         right.setHorizontalAlignment(Element.ALIGN_RIGHT);
         right.setPadding(4);
 
-        boolean isComposition = Boolean.TRUE.equals(sale.getShop().getIsCompositionScheme());
+        boolean isComposition = !saleHasGst(sale);
 
         String invoiceTitle;
         if (isPharmacy) {
@@ -288,7 +298,7 @@ public class InvoiceService {
     private void addPharmacyItemTable(Document document, Sale sale, Font headerFont, Font normalFont, Font boldFont, Color brandColor)
             throws DocumentException {
 
-        boolean isComposition = Boolean.TRUE.equals(sale.getShop().getIsCompositionScheme());
+        boolean isComposition = !saleHasGst(sale);
         // Columns: #, Medicine, Batch No, Expiry, HSN, MRP, Qty, Unit, Rate, [GST%,] Total
         int columns = isComposition ? 10 : 11;
 
@@ -412,7 +422,7 @@ public class InvoiceService {
     private void addItemTable(Document document, Sale sale, Font headerFont, Font normalFont, Font boldFont, Color brandColor)
             throws DocumentException {
 
-        boolean isComposition = Boolean.TRUE.equals(sale.getShop().getIsCompositionScheme());
+        boolean isComposition = !saleHasGst(sale);
         int columns = isComposition ? 7 : 10;
 
         PdfPTable table = new PdfPTable(columns);
@@ -475,7 +485,7 @@ public class InvoiceService {
         document.add(table);
     }
     private void addCalculationSection(Document document, Sale sale, Font normalFont, Font boldFont) throws DocumentException {
-        boolean isComposition = Boolean.TRUE.equals(sale.getShop().getIsCompositionScheme());
+        boolean isComposition = !saleHasGst(sale);
 
         PdfPTable main = new PdfPTable(2);
         main.setWidthPercentage(100);

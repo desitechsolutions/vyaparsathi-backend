@@ -37,8 +37,20 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
 
     @Query("SELECT s.customer.id, MAX(s.date), SUM(s.totalAmount) FROM Sale s GROUP BY s.customer.id")
     List<Object[]> getCustomerPurchaseSummaries();
+
+    @Query("SELECT s.customer.id, MAX(s.date), SUM(s.totalAmount) FROM Sale s WHERE s.shop.id = :shopId GROUP BY s.customer.id")
+    List<Object[]> getCustomerPurchaseSummariesByShop(@Param("shopId") Long shopId);
+
     @Query("SELECT s FROM Sale s WHERE s.date >= :start AND s.date <= :end")
     List<Sale> findSalesForAnalytics(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    @EntityGraph(attributePaths = {"saleItems", "customer"}, type = EntityGraph.EntityGraphType.LOAD)
+    @Query("SELECT s FROM Sale s WHERE s.shop.id = :shopId AND s.date >= :start AND s.date <= :end AND s.status <> 'CANCELLED'")
+    List<Sale> findSalesForAnalyticsByShop(@Param("shopId") Long shopId, @Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    @EntityGraph(attributePaths = {"saleItems", "customer"}, type = EntityGraph.EntityGraphType.LOAD)
+    @Query("SELECT s FROM Sale s WHERE s.shop.id = :shopId AND s.status <> 'CANCELLED'")
+    List<Sale> findAllByShopId(@Param("shopId") Long shopId);
 
     List<Sale> findByCustomerIdAndPaymentStatusInOrderByIdAsc(
             Long customerId,

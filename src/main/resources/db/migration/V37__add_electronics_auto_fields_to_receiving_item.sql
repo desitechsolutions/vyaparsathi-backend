@@ -4,6 +4,6 @@
 -- part_reference   — OEM part reference no. for automobile parts
 
 ALTER TABLE receiving_item
-    ADD COLUMN IF NOT EXISTS serial_number       VARCHAR(1000),
-    ADD COLUMN IF NOT EXISTS warranty_start_date DATE,
-    ADD COLUMN IF NOT EXISTS part_reference      VARCHAR(100);
+    ADD COLUMN  serial_number       VARCHAR(1000),
+    ADD COLUMN  warranty_start_date DATE,
+    ADD COLUMN  part_reference      VARCHAR(100);

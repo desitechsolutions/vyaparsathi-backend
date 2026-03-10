@@ -4,5 +4,5 @@
 -- traceability and pharmacy narcotics-register compliance.
 
 ALTER TABLE sale_item
-    ADD COLUMN IF NOT EXISTS batch_number VARCHAR(100),
-    ADD COLUMN IF NOT EXISTS expiry_date  DATE;
+    ADD COLUMN  batch_number VARCHAR(100),
+    ADD COLUMN  expiry_date  DATE;

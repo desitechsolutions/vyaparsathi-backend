@@ -177,7 +177,7 @@ public class ItemMapper {
         variant.setManufacturingDate(dto.getManufacturingDate());
         variant.setExpiryDate(dto.getExpiryDate());
         variant.setMrp(dto.getMrp());
-        variant.setIsLooseMedicine(dto.getIsLooseMedicine());
+        variant.setIsLooseMedicine(dto.getIsLooseMedicine() != null ? dto.getIsLooseMedicine() : false);
         variant.setPackSize(dto.getPackSize());
 
         return variant;

@@ -6,8 +6,8 @@
 -- the correct GST columns for historical sales.
 
 ALTER TABLE sale
-    ADD COLUMN IF NOT EXISTS doctor_registration_number VARCHAR(100),
-    ADD COLUMN IF NOT EXISTS is_gst_required BOOLEAN NOT NULL DEFAULT FALSE;
+    ADD COLUMN  doctor_registration_number VARCHAR(100),
+    ADD COLUMN  is_gst_required BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Backfill historical sales: mark is_gst_required=TRUE for any sale that has at
 -- least one sale_item with non-zero GST (cgst_amt, sgst_amt, or igst_amt).

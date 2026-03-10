@@ -1,7 +1,7 @@
 package com.desitech.vyaparsathi.supplier.dto;
 
 import com.desitech.vyaparsathi.payment.enums.PaymentMethod;
-import com.desitech.vyaparsathi.supplier.enums.SupplierPaymentStatus;
+import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -17,5 +17,5 @@ public class SupplierPaymentDto {
     private PaymentMethod paymentMethod;
     private String reference;
     private String notes;
-    private SupplierPaymentStatus status;
+    private PaymentStatus status;
 }

@@ -1,14 +1,15 @@
 package com.desitech.vyaparsathi.supplier.service;
 
 import com.desitech.vyaparsathi.common.exception.ResourceNotFoundException;
-import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
+import com.desitech.vyaparsathi.payment.dto.PaymentDto;
+import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
+import com.desitech.vyaparsathi.payment.service.PaymentService;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderPaymentSummaryDto;
+import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrder;
+import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderRepository;
+import com.desitech.vyaparsathi.supplier.dto.SupplierBulkPaymentRequest;
 import com.desitech.vyaparsathi.supplier.dto.SupplierPaymentDto;
-import com.desitech.vyaparsathi.supplier.entity.Supplier;
-import com.desitech.vyaparsathi.supplier.entity.SupplierPayment;
-import com.desitech.vyaparsathi.supplier.enums.SupplierPaymentStatus;
 import com.desitech.vyaparsathi.supplier.exception.SupplierPaymentException;
-import com.desitech.vyaparsathi.supplier.repository.SupplierPaymentRepository;
 import com.desitech.vyaparsathi.supplier.repository.SupplierRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -18,132 +19,163 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 
 /**
- * Handles all supplier payment accounting logic.
- * Records payments against purchase orders and tracks outstanding dues.
+ * Supplier-domain service for all payment operations against Purchase Orders.
+ * Delegates persistence to the unified {@link PaymentService} so that all payment
+ * records live in the shared {@code payment} table.
  */
 @Service
 public class SupplierPaymentService {
 
     @Autowired
-    private SupplierPaymentRepository supplierPaymentRepository;
+    private PaymentService paymentService;
+
+    @Autowired
+    private PurchaseOrderRepository purchaseOrderRepository;
 
     @Autowired
     private SupplierRepository supplierRepository;
 
     /**
-     * Records a payment to a supplier against a purchase order.
-     * Validates that the payment amount is positive and does not exceed the amount due.
+     * Records a single payment against a purchase order.
+     * The PO's {@code paymentStatus} is automatically updated by the underlying
+     * {@link PaymentService}.
      *
-     * @param purchaseOrderId the ID of the purchase order being paid
-     * @param supplierId      the ID of the supplier
-     * @param poTotalAmount   the total amount of the purchase order
-     * @param dto             payment details
-     * @return the persisted SupplierPaymentDto
+     * @param dto must contain {@code purchaseOrderId}, {@code supplierId}, and {@code amount}
+     * @return the persisted PaymentDto from the unified payment table
      */
     @Transactional
-    public SupplierPaymentDto recordPayment(Long purchaseOrderId, Long supplierId,
-                                            BigDecimal poTotalAmount, SupplierPaymentDto dto) {
+    public PaymentDto recordPayment(SupplierPaymentDto dto) {
         if (dto.getAmount() == null || dto.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
             throw new SupplierPaymentException("Payment amount must be positive");
         }
 
-        BigDecimal amountDue = calculateDueAmount(purchaseOrderId, poTotalAmount);
-        if (dto.getAmount().compareTo(amountDue) > 0) {
-            throw new SupplierPaymentException("Payment amount (" + dto.getAmount() +
-                    ") exceeds the amount due (" + amountDue + ")");
+        PurchaseOrder po = purchaseOrderRepository.findById(dto.getPurchaseOrderId())
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Purchase Order not found with ID: " + dto.getPurchaseOrderId()));
+
+        if (!po.getSupplier().getId().equals(dto.getSupplierId())) {
+            throw new SupplierPaymentException("Purchase Order " + dto.getPurchaseOrderId() +
+                    " does not belong to supplier " + dto.getSupplierId());
         }
 
-        Supplier supplier = supplierRepository.findById(supplierId)
-                .orElseThrow(() -> new ResourceNotFoundException("Supplier not found with ID: " + supplierId));
+        if (!supplierRepository.existsById(dto.getSupplierId())) {
+            throw new ResourceNotFoundException("Supplier not found with ID: " + dto.getSupplierId());
+        }
 
-        // Determine the cumulative payment status for this PO after this payment is applied
-        BigDecimal remainingDue = amountDue.subtract(dto.getAmount()).max(BigDecimal.ZERO);
-        SupplierPaymentStatus status = resolveOverallStatus(remainingDue, poTotalAmount);
-
-        SupplierPayment payment = new SupplierPayment();
-        payment.setSupplier(supplier);
-        payment.setPurchaseOrderId(purchaseOrderId);
-        payment.setAmount(dto.getAmount());
-        payment.setPaymentDate(dto.getPaymentDate() != null ? dto.getPaymentDate() : LocalDateTime.now());
-        payment.setPaymentMethod(dto.getPaymentMethod());
-        payment.setReference(dto.getReference());
-        payment.setNotes(dto.getNotes());
-        payment.setStatus(status);
-
-        SupplierPayment saved = supplierPaymentRepository.save(payment);
-        return toDto(saved);
+        PaymentDto paymentDto = toPaymentDto(dto, po.getId(), dto.getSupplierId());
+        return paymentService.createPayment(paymentDto);
     }
 
     /**
-     * Returns a paginated list of payments recorded against a purchase order.
+     * Distributes a total payment amount across multiple purchase orders for a supplier
+     * in ascending-ID (FIFO) order. The allocation stops when either all selected POs
+     * are fully settled or the total amount is exhausted.
      *
-     * @param purchaseOrderId the purchase order ID
-     * @param pageable        pagination parameters
+     * @param request contains {@code supplierId}, {@code selectedPoIds}, {@code totalAmount}, etc.
+     * @return list of persisted PaymentDtos, one per PO that received an allocation
      */
-    public Page<SupplierPaymentDto> getPaymentsByPurchaseOrder(Long purchaseOrderId, Pageable pageable) {
-        return supplierPaymentRepository.findByPurchaseOrderId(purchaseOrderId, pageable)
-                .map(this::toDto);
+    @Transactional
+    public List<PaymentDto> recordBulkPayment(SupplierBulkPaymentRequest request) {
+        if (request.getTotalAmount() == null || request.getTotalAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new SupplierPaymentException("Total payment amount must be positive");
+        }
+        if (request.getSelectedPoIds() == null || request.getSelectedPoIds().isEmpty()) {
+            throw new SupplierPaymentException("At least one Purchase Order must be selected");
+        }
+
+        if (!supplierRepository.existsById(request.getSupplierId())) {
+            throw new ResourceNotFoundException("Supplier not found with ID: " + request.getSupplierId());
+        }
+
+        List<PurchaseOrder> pos = purchaseOrderRepository.findAllById(request.getSelectedPoIds());
+        // Validate all POs belong to the supplier and sort FIFO
+        for (PurchaseOrder po : pos) {
+            if (!po.getSupplier().getId().equals(request.getSupplierId())) {
+                throw new SupplierPaymentException("Purchase Order " + po.getId() +
+                        " does not belong to supplier " + request.getSupplierId());
+            }
+        }
+        pos.sort(Comparator.comparing(PurchaseOrder::getId));
+
+        BigDecimal remaining = request.getTotalAmount();
+        List<PaymentDto> results = new ArrayList<>();
+
+        for (PurchaseOrder po : pos) {
+            if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
+
+            BigDecimal due = paymentService.calculateDueAmount(
+                    po.getId(), PaymentSourceType.PURCHASE_ORDER, po.getTotalAmount());
+            if (due.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            BigDecimal allocation = remaining.min(due);
+
+            SupplierPaymentDto singleDto = new SupplierPaymentDto();
+            singleDto.setSupplierId(request.getSupplierId());
+            singleDto.setPurchaseOrderId(po.getId());
+            singleDto.setAmount(allocation);
+            singleDto.setPaymentDate(request.getPaymentDate());
+            singleDto.setPaymentMethod(request.getPaymentMethod());
+            singleDto.setReference(request.getReference());
+            singleDto.setNotes(request.getNotes());
+
+            results.add(paymentService.createPayment(
+                    toPaymentDto(singleDto, po.getId(), request.getSupplierId())));
+            remaining = remaining.subtract(allocation);
+        }
+
+        return results;
     }
 
     /**
-     * Calculates the amount still owed for a purchase order.
-     *
-     * @param purchaseOrderId the purchase order ID
-     * @param totalAmount     the total value of the purchase order
-     * @return the remaining due amount (never negative)
+     * Returns a paginated list of payments recorded against a specific purchase order.
      */
-    public BigDecimal calculateDueAmount(Long purchaseOrderId, BigDecimal totalAmount) {
-        BigDecimal totalPaid = supplierPaymentRepository.sumByPurchaseOrderId(purchaseOrderId);
-        BigDecimal due = (totalAmount != null ? totalAmount : BigDecimal.ZERO).subtract(totalPaid);
-        return due.max(BigDecimal.ZERO);
+    public Page<PaymentDto> getPaymentsByPurchaseOrder(Long poId, Pageable pageable) {
+        if (!purchaseOrderRepository.existsById(poId)) {
+            throw new ResourceNotFoundException("Purchase Order not found with ID: " + poId);
+        }
+        return paymentService.getPaymentsBySource(PaymentSourceType.PURCHASE_ORDER, poId, pageable);
+    }
+
+    /**
+     * Returns a paginated list of all payments associated with a supplier.
+     */
+    public Page<PaymentDto> getPaymentsBySupplier(Long supplierId, Pageable pageable) {
+        if (!supplierRepository.existsById(supplierId)) {
+            throw new ResourceNotFoundException("Supplier not found with ID: " + supplierId);
+        }
+        return paymentService.getPaymentsBySupplier(supplierId, pageable);
     }
 
     /**
      * Returns the payment summary (total, paid, due, status) for a purchase order.
-     *
-     * @param purchaseOrderId the purchase order ID
-     * @param poNumber        the human-readable PO number
-     * @param totalAmount     the total value of the purchase order
-     * @param currentStatus   the current payment status on the PO
-     * @return payment summary
      */
-    public PurchaseOrderPaymentSummaryDto getPaymentSummary(Long purchaseOrderId, String poNumber,
-                                                            BigDecimal totalAmount,
-                                                            PaymentStatus currentStatus) {
-        BigDecimal total = totalAmount != null ? totalAmount : BigDecimal.ZERO;
-        BigDecimal amountDue = calculateDueAmount(purchaseOrderId, total);
-        BigDecimal totalPaid = total.subtract(amountDue).max(BigDecimal.ZERO);
-        return new PurchaseOrderPaymentSummaryDto(purchaseOrderId, poNumber, total, totalPaid, amountDue, currentStatus);
+    public PurchaseOrderPaymentSummaryDto getPaymentSummary(Long poId) {
+        PurchaseOrder po = purchaseOrderRepository.findById(poId)
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + poId));
+        BigDecimal total = po.getTotalAmount() != null ? po.getTotalAmount() : BigDecimal.ZERO;
+        BigDecimal due = paymentService.calculateDueAmount(poId, PaymentSourceType.PURCHASE_ORDER, total);
+        BigDecimal paid = total.subtract(due).max(BigDecimal.ZERO);
+        return new PurchaseOrderPaymentSummaryDto(poId, po.getPoNumber(), total, paid, due, po.getPaymentStatus());
     }
 
-    // ─── Helpers ──────────────────────────────────────────────────────────────
+    // ─── Private helpers ──────────────────────────────────────────────────────
 
-    /**
-     * Determines the overall PO payment status based on the cumulative remaining due
-     * after applying the latest payment.
-     */
-    private SupplierPaymentStatus resolveOverallStatus(BigDecimal remainingDue, BigDecimal totalAmount) {
-        if (remainingDue.compareTo(BigDecimal.ZERO) <= 0) {
-            return SupplierPaymentStatus.PAID;
-        } else if (remainingDue.compareTo(totalAmount) < 0) {
-            return SupplierPaymentStatus.PARTIALLY_PAID;
-        }
-        return SupplierPaymentStatus.PENDING;
-    }
-
-    private SupplierPaymentDto toDto(SupplierPayment entity) {
-        SupplierPaymentDto dto = new SupplierPaymentDto();
-        dto.setId(entity.getId());
-        dto.setSupplierId(entity.getSupplier() != null ? entity.getSupplier().getId() : null);
-        dto.setPurchaseOrderId(entity.getPurchaseOrderId());
-        dto.setAmount(entity.getAmount());
-        dto.setPaymentDate(entity.getPaymentDate());
-        dto.setPaymentMethod(entity.getPaymentMethod());
-        dto.setReference(entity.getReference());
-        dto.setNotes(entity.getNotes());
-        dto.setStatus(entity.getStatus());
+    private PaymentDto toPaymentDto(SupplierPaymentDto src, Long poId, Long supplierId) {
+        PaymentDto dto = new PaymentDto();
+        dto.setSourceType(PaymentSourceType.PURCHASE_ORDER);
+        dto.setSourceId(poId);
+        dto.setSupplierId(supplierId);
+        dto.setAmount(src.getAmount());
+        dto.setPaymentDate(src.getPaymentDate() != null ? src.getPaymentDate() : LocalDateTime.now());
+        dto.setPaymentMethod(src.getPaymentMethod());
+        dto.setReference(src.getReference());
+        dto.setNotes(src.getNotes());
         return dto;
     }
 }
+

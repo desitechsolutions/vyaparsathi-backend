@@ -3,12 +3,11 @@ package com.desitech.vyaparsathi.purchaseorder.service;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.repository.ItemVariantRepository;
 import com.desitech.vyaparsathi.common.exception.ResourceNotFoundException;
-import com.desitech.vyaparsathi.payment.dto.PaymentDto;
-import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
-import com.desitech.vyaparsathi.payment.service.PaymentService;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderDto;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderPaymentSummaryDto;
+import com.desitech.vyaparsathi.supplier.dto.SupplierPaymentDto;
+import com.desitech.vyaparsathi.supplier.service.SupplierPaymentService;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrder;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrderItem;
 import com.desitech.vyaparsathi.supplier.entity.Supplier;
@@ -29,7 +28,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -52,7 +50,7 @@ public class PurchaseOrderService {
     @Autowired
     private PurchaseOrderProducer purchaseOrderProducer;
     @Autowired
-    private PaymentService paymentService;
+    private SupplierPaymentService supplierPaymentService;
 
     /**
      * Create a new purchase order in DRAFT, persist it, and emit a Kafka event.
@@ -226,41 +224,24 @@ public class PurchaseOrderService {
     // ─── Payments ─────────────────────────────────────────────────────────────
 
     /**
-     * Records a payment against a Purchase Order.
-     * Updates the PO's {@code paymentStatus} field and persists the payment via
-     * the shared {@link PaymentService} (source type = PURCHASE_ORDER).
+     * Records a payment against a Purchase Order by delegating to
+     * {@link SupplierPaymentService}. Updates the PO's {@code paymentStatus}
+     * field based on the remaining due amount.
      *
-     * @param poId     the Purchase Order ID
-     * @param dto      payment details (amount, method, reference, …)
-     * @return the persisted PaymentDto
+     * @param poId the Purchase Order ID
+     * @param dto  payment details (amount, method, reference, …)
+     * @return the persisted SupplierPaymentDto
      */
     @Transactional
-    public PaymentDto recordPayment(Long poId, PaymentDto dto) {
+    public SupplierPaymentDto recordPayment(Long poId, SupplierPaymentDto dto) {
         PurchaseOrder po = purchaseOrderRepository.findById(poId)
                 .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + poId));
 
-        // Validate amount
-        BigDecimal amountDue = paymentService.calculateDueAmount(poId, PaymentSourceType.PURCHASE_ORDER, po.getTotalAmount());
-        if (dto.getAmount() == null || dto.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Payment amount must be positive");
-        }
-        if (dto.getAmount().compareTo(amountDue) > 0) {
-            throw new IllegalArgumentException("Payment amount (" + dto.getAmount() +
-                    ") exceeds the amount due (" + amountDue + ")");
-        }
-
-        // Populate mandatory fields before delegating to PaymentService
-        dto.setSourceType(PaymentSourceType.PURCHASE_ORDER);
-        dto.setSourceId(poId);
-        dto.setSupplierId(po.getSupplier().getId());
-        if (dto.getPaymentDate() == null) {
-            dto.setPaymentDate(LocalDateTime.now());
-        }
-
-        PaymentDto saved = paymentService.createPayment(dto);
+        SupplierPaymentDto saved = supplierPaymentService.recordPayment(
+                poId, po.getSupplier().getId(), po.getTotalAmount(), dto);
 
         // Refresh due amount and update PO payment status
-        BigDecimal newDue = paymentService.calculateDueAmount(poId, PaymentSourceType.PURCHASE_ORDER, po.getTotalAmount());
+        BigDecimal newDue = supplierPaymentService.calculateDueAmount(poId, po.getTotalAmount());
         if (newDue.compareTo(BigDecimal.ZERO) <= 0) {
             po.setPaymentStatus(PaymentStatus.PAID);
         } else if (newDue.compareTo(po.getTotalAmount()) < 0) {
@@ -279,12 +260,11 @@ public class PurchaseOrderService {
      * @param poId     the Purchase Order ID
      * @param pageable pagination parameters
      */
-    public Page<PaymentDto> getPayments(Long poId, Pageable pageable) {
-        // Verify PO exists
+    public Page<SupplierPaymentDto> getPayments(Long poId, Pageable pageable) {
         if (!purchaseOrderRepository.existsById(poId)) {
             throw new ResourceNotFoundException("Purchase Order not found with ID: " + poId);
         }
-        return paymentService.getPaymentsBySource(PaymentSourceType.PURCHASE_ORDER, poId, pageable);
+        return supplierPaymentService.getPaymentsByPurchaseOrder(poId, pageable);
     }
 
     /**
@@ -295,18 +275,7 @@ public class PurchaseOrderService {
     public PurchaseOrderPaymentSummaryDto getPaymentSummary(Long poId) {
         PurchaseOrder po = purchaseOrderRepository.findById(poId)
                 .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + poId));
-
-        BigDecimal totalAmount = po.getTotalAmount() != null ? po.getTotalAmount() : BigDecimal.ZERO;
-        BigDecimal amountDue = paymentService.calculateDueAmount(poId, PaymentSourceType.PURCHASE_ORDER, totalAmount);
-        BigDecimal totalPaid = totalAmount.subtract(amountDue).max(BigDecimal.ZERO);
-
-        return new PurchaseOrderPaymentSummaryDto(
-                poId,
-                po.getPoNumber(),
-                totalAmount,
-                totalPaid,
-                amountDue,
-                po.getPaymentStatus()
-        );
+        return supplierPaymentService.getPaymentSummary(
+                poId, po.getPoNumber(), po.getTotalAmount(), po.getPaymentStatus());
     }
 }

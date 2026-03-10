@@ -1,6 +1,6 @@
 package com.desitech.vyaparsathi.purchaseorder.controller;
 
-import com.desitech.vyaparsathi.payment.dto.PaymentDto;
+import com.desitech.vyaparsathi.supplier.dto.SupplierPaymentDto;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderDto;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderItemDto;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderPaymentSummaryDto;
@@ -90,13 +90,13 @@ public class PurchaseOrderController {
      * Record a payment for a Purchase Order.
      *
      * <pre>POST /api/purchase-orders/{id}/payments</pre>
-     * Body: {@link PaymentDto} (amount, paymentMethod, reference, notes, …)
+     * Body: {@link SupplierPaymentDto} (amount, paymentMethod, reference, notes, …)
      */
     @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
     @PostMapping("/{id}/payments")
-    public ResponseEntity<PaymentDto> recordPayment(
+    public ResponseEntity<SupplierPaymentDto> recordPayment(
             @PathVariable Long id,
-            @Valid @RequestBody PaymentDto dto) {
+            @Valid @RequestBody SupplierPaymentDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(purchaseOrderService.recordPayment(id, dto));
     }
@@ -108,7 +108,7 @@ public class PurchaseOrderController {
      */
     @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
     @GetMapping("/{id}/payments")
-    public ResponseEntity<Page<PaymentDto>> getPayments(
+    public ResponseEntity<Page<SupplierPaymentDto>> getPayments(
             @PathVariable Long id,
             Pageable pageable) {
         return ResponseEntity.ok(purchaseOrderService.getPayments(id, pageable));

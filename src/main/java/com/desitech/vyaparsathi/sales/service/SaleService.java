@@ -134,6 +134,9 @@ public class SaleService {
             saleItem.setUnitPrice(itemDto.getUnitPrice());
             // Persist the effective pack size so returns can reverse the same fractional qty
             saleItem.setLoosePackSize(resolveLoosePackSize(itemVariant, itemDto));
+            // Pharmacy batch tracking — persist per-item batch/expiry from the frontend
+            saleItem.setBatchNumber(itemDto.getBatchNumber());
+            saleItem.setExpiryDate(itemDto.getExpiryDate());
 
             // Calculate taxable value: (Qty * Price) - Discount
             BigDecimal itemTaxableValue = itemDto.getQty()
@@ -201,6 +204,8 @@ public class SaleService {
         sale.setDoctorName(dto.getDoctorName());
         sale.setPatientName(dto.getPatientName());
         sale.setPrescriptionNumber(dto.getPrescriptionNumber());
+        sale.setDoctorRegistrationNumber(dto.getDoctorRegistrationNumber());
+        sale.setIsGstRequired(Boolean.TRUE.equals(dto.getIsGstRequired()));
 
         Sale savedSale = saleRepository.saveAndFlush(sale);
 
@@ -607,6 +612,7 @@ public class SaleService {
         sale.setDoctorName(dto.getDoctorName());
         sale.setPatientName(dto.getPatientName());
         sale.setPrescriptionNumber(dto.getPrescriptionNumber());
+        sale.setDoctorRegistrationNumber(dto.getDoctorRegistrationNumber());
 
         Sale saved = saleRepository.save(sale);
 
@@ -666,6 +672,9 @@ public class SaleService {
             saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
             // Persist the effective pack size so returns can reverse the same fractional qty
             saleItem.setLoosePackSize(resolveLoosePackSize(itemVariant, itemDto));
+            // Pharmacy batch tracking — persist per-item batch/expiry from the frontend
+            saleItem.setBatchNumber(itemDto.getBatchNumber());
+            saleItem.setExpiryDate(itemDto.getExpiryDate());
 
             // FIX: Taxable value calculation for EVERY item (Required for Sales Volume Reports)
             BigDecimal taxableValue = itemDto.getQty()
@@ -724,6 +733,8 @@ public class SaleService {
         existing.setDoctorName(dto.getDoctorName());
         existing.setPatientName(dto.getPatientName());
         existing.setPrescriptionNumber(dto.getPrescriptionNumber());
+        existing.setDoctorRegistrationNumber(dto.getDoctorRegistrationNumber());
+        existing.setIsGstRequired(Boolean.TRUE.equals(dto.getIsGstRequired()));
 
         Sale saved = saleRepository.save(existing);
 

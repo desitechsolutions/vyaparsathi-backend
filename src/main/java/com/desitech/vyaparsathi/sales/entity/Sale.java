@@ -103,6 +103,14 @@ public class Sale extends ShopAwareEntity {
     @Column(name = "doctor_registration_number", length = 100)
     private String doctorRegistrationNumber;
 
+    /**
+     * Whether GST was intended for this sale at creation time.
+     * Stored so that invoices generated after a shop changes its composition-scheme
+     * flag still render the correct GST columns for historical sales.
+     */
+    @Column(name = "is_gst_required", nullable = false)
+    private Boolean isGstRequired = false;
+
     @PrePersist
     @Override
     public void onCreate() {

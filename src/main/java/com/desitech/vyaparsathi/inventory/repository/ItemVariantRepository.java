@@ -53,6 +53,13 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
     List<ItemVariant> findAllByLowStockThresholdIsNotNull();
 
     /**
+     * Finds all ItemVariants belonging to a specific shop.
+     * Used for shop-scoped analytics queries.
+     */
+    @Query("SELECT iv FROM ItemVariant iv JOIN iv.item i WHERE i.shop.id = :shopId")
+    List<ItemVariant> findAllByShopId(@Param("shopId") Long shopId);
+
+    /**
      * Finds all variants of items sharing the same composition as the given item.
      * Used to suggest therapeutic substitutes in pharmacy.
      *

@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.purchaseorder.controller;
 
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderDto;
+import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderItemDto;
 import com.desitech.vyaparsathi.purchaseorder.service.PurchaseOrderService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +48,13 @@ public class PurchaseOrderController {
     @PostMapping("/{id}/submit")
     public ResponseEntity<PurchaseOrderDto> submit(@PathVariable Long id) {
         return ResponseEntity.ok(purchaseOrderService.submitPurchaseOrder(id));
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
+    @GetMapping("/{id}/items")
+    public ResponseEntity<List<PurchaseOrderItemDto>> getItemsForPurchaseOrder(@PathVariable Long id) {
+        PurchaseOrderDto po = purchaseOrderService.findPurchaseOrderById(id);
+        return ResponseEntity.ok(po.getItems() != null ? po.getItems() : List.of());
     }
 
     @PreAuthorize("hasAnyRole('ADMIN','OWNER')")

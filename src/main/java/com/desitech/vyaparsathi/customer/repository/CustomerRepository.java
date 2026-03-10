@@ -15,4 +15,7 @@ public interface CustomerRepository extends BaseRepository<Customer, Long> {
     @Query("SELECT c FROM Customer c WHERE c.name LIKE %:q%")
     List<Customer> searchByCustomerPartial(@Param("q") String q);
 
+    @Query("SELECT c FROM Customer c WHERE c.shop.id = :shopId")
+    List<Customer> findAllByShopId(@Param("shopId") Long shopId);
+
 }

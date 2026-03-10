@@ -97,6 +97,12 @@ public class Sale extends ShopAwareEntity {
     @Column(name = "prescription_number", length = 100)
     private String prescriptionNumber;
 
+    /**
+     * Registration number of the prescribing doctor. Used for Schedule H1 / X drug compliance.
+     */
+    @Column(name = "doctor_registration_number", length = 100)
+    private String doctorRegistrationNumber;
+
     @PrePersist
     @Override
     public void onCreate() {

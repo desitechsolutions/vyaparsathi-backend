@@ -45,4 +45,6 @@ public class SaleDto {
     private String patientName;
     /** Prescription / Rx number for pharmacy compliance tracking. */
     private String prescriptionNumber;
+    /** Registration number of the prescribing doctor (required for Schedule H1 / X compliance). */
+    private String doctorRegistrationNumber;
 }

@@ -1,5 +1,7 @@
 package com.desitech.vyaparsathi.inventory.service;
 
+import com.desitech.vyaparsathi.common.configs.TenantContext;
+import com.desitech.vyaparsathi.common.exception.DuplicateItemException;
 import com.desitech.vyaparsathi.inventory.dto.ItemDto;
 import com.desitech.vyaparsathi.inventory.dto.ItemVariantDto;
 import com.desitech.vyaparsathi.inventory.entity.Category;
@@ -51,6 +53,13 @@ public class ItemService {
 
     @Transactional
     public ItemDto createItem(ItemDto itemDto) {
+        if (itemRepository.existsByNameAndBrandNameAndShopId(
+                itemDto.getName(),
+                itemDto.getBrandName(),
+                TenantContext.getCurrentShopId())) {
+            throw new DuplicateItemException("Item '" + itemDto.getName() +
+                    "' with brand '" + itemDto.getBrandName() + "' already exists in this shop.");
+        }
         assignHsnAndSkuCodes(itemDto);
         // Ensure all variants are treated as new (id = null)
         if (itemDto.getVariants() != null) {

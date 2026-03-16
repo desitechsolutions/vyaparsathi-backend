@@ -5,6 +5,8 @@ import com.desitech.vyaparsathi.sales.entity.SaleItem;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
+import java.math.BigDecimal;
+
 @Mapper(componentModel = "spring")
 public interface SaleItemMapper {
 
@@ -13,6 +15,10 @@ public interface SaleItemMapper {
     @Mapping(target = "itemId", source = "itemVariant.item.id") // if you track parent item
     @Mapping(target = "gstRate", source = "itemVariant.gstRate") // if present in ItemVariant
     @Mapping(target = "costPerUnit", source = "itemVariant.pricePerUnit") // optional
+    @Mapping(target = "isLooseSale", expression = "java(SaleItemMapper.hasValidPackSize(saleItem.getLoosePackSize()))")
+    @Mapping(target = "loosePackSize", source = "loosePackSize")
+    @Mapping(target = "batchNumber", source = "batchNumber")
+    @Mapping(target = "expiryDate", source = "expiryDate")
     SaleItemDto toDto(SaleItem saleItem);
 
     @Mapping(target = "itemVariant.id", source = "itemVariantId")
@@ -22,5 +28,10 @@ public interface SaleItemMapper {
     @Mapping(target = "igstAmt", ignore = true)
     @Mapping(target = "taxableValue", ignore = true) // calculated, not taken from UI
     SaleItem toEntity(SaleItemDto dto);
+
+    /** Returns true when the given packSize represents a valid positive pack size. */
+    static boolean hasValidPackSize(BigDecimal packSize) {
+        return packSize != null && packSize.compareTo(BigDecimal.ZERO) > 0;
+    }
 }
 

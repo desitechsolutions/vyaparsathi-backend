@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -89,4 +90,32 @@ public interface StockMovementRepository extends BaseRepository<StockMovement, L
      * This ensures manual stock corrections are factored into the average cost.
      */
     List<StockMovement> findByItemVariantIdAndMovementTypeIn(Long itemVariantId, Collection<StockMovementType> types);
+
+    /**
+     * Projection for batch-wise stock query.
+     * Returns the net quantity per (variantId, batch, expiryDate) combination.
+     */
+    interface BatchStockProjection {
+        Long getVariantId();
+        String getBatchNumber();
+        LocalDate getExpiryDate();
+        BigDecimal getTotalQuantity();
+        BigDecimal getWacCost();
+    }
+
+    /**
+     * Returns per-batch net stock for a list of variant IDs.
+     * Only batches with a positive remaining quantity are returned.
+     * Used by the pharmacy batch-wise stock view.
+     */
+    @Query("SELECT sm.itemVariant.id AS variantId, " +
+            "sm.batch AS batchNumber, " +
+            "sm.expiryDate AS expiryDate, " +
+            "SUM(sm.quantity) AS totalQuantity, " +
+            "COALESCE(SUM(CASE WHEN sm.movementType = 'ADD' AND sm.quantity > 0 THEN sm.quantity * sm.costPerUnit ELSE 0 END) " +
+            "  / NULLIF(SUM(CASE WHEN sm.movementType = 'ADD' AND sm.quantity > 0 THEN sm.quantity ELSE 0 END), 0), 0) AS wacCost " +
+            "FROM StockMovement sm WHERE sm.itemVariant.id IN :variantIds " +
+            "GROUP BY sm.itemVariant.id, sm.batch, sm.expiryDate " +
+            "HAVING SUM(sm.quantity) > 0")
+    List<BatchStockProjection> findBatchWiseStockByVariantIds(@Param("variantIds") List<Long> variantIds);
 }

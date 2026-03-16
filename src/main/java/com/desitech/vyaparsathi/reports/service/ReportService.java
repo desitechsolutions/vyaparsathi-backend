@@ -1,7 +1,14 @@
 package com.desitech.vyaparsathi.reports.service;
 
 import com.desitech.vyaparsathi.inventory.entity.Category;
+import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
+import com.desitech.vyaparsathi.inventory.enums.DrugSchedule;
+import com.desitech.vyaparsathi.inventory.repository.ItemVariantRepository;
+import com.desitech.vyaparsathi.inventory.service.StockService;
 import com.desitech.vyaparsathi.payment.service.PaymentService;
+import com.desitech.vyaparsathi.receiving.entity.Receiving;
+import com.desitech.vyaparsathi.receiving.entity.ReceivingItem;
+import com.desitech.vyaparsathi.receiving.repository.ReceivingRepository;
 import com.desitech.vyaparsathi.reports.dto.*;
 import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.entity.SaleItem;
@@ -20,6 +27,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
@@ -44,6 +52,15 @@ public class ReportService {
 
     @Autowired
     private COGSCalculationService cogsCalculationService;
+
+    @Autowired
+    private ItemVariantRepository itemVariantRepository;
+
+    @Autowired
+    private StockService stockService;
+
+    @Autowired
+    private ReceivingRepository receivingRepository;
 
     private void validateDateRange(LocalDate from, LocalDate to) {
         if (from != null && to != null && from.isAfter(to)) {
@@ -504,12 +521,16 @@ public class ReportService {
             BigDecimal sgst = sale.getSaleItems().stream().map(si -> si.getSgstAmt() != null ? si.getSgstAmt() : ZERO).reduce(ZERO, BigDecimal::add);
             BigDecimal igst = sale.getSaleItems().stream().map(si -> si.getIgstAmt() != null ? si.getIgstAmt() : ZERO).reduce(ZERO, BigDecimal::add);
 
-            String gstin = (sale.getCustomer().getGstNumber() != null) ? sale.getCustomer().getGstNumber() : "";
+            String customerName = sale.getCustomer() != null ? sale.getCustomer().getName() : "Walk-in";
+            String gstin = (sale.getCustomer() != null && sale.getCustomer().getGstNumber() != null)
+                    ? sale.getCustomer().getGstNumber() : "";
             String type = gstin.isEmpty() ? "B2C" : "B2B";
+            String customerState = (sale.getCustomer() != null && sale.getCustomer().getState() != null)
+                    ? sale.getCustomer().getState() : "";
 
             csv.append(String.format("%s,%s,\"%s\",%s,%s,%s,%s,%s,%s,%s,%s\n",
-                    sale.getInvoiceNo(), sale.getDate().toLocalDate(), sale.getCustomer().getName(),
-                    gstin, (sale.getCustomer().getState() != null ? sale.getCustomer().getState() : ""),
+                    sale.getInvoiceNo(), sale.getDate().toLocalDate(), customerName,
+                    gstin, customerState,
                     type, txbl, cgst, sgst, igst, sale.getTotalAmount()));
         }
         return csv.toString();
@@ -558,5 +579,156 @@ public class ReportService {
                 "Gross Profit: " + s.getNetRevenue().subtract(s.getTotalCOGS()) + "\n" +
                 "Operational Expenses: " + calculateOperationalExpenses(getExpensesByDateRange(from, to)) + "\n" +
                 "Estimated Net Profit: " + s.getNetProfit();
+    }
+
+    // -------------------------------------------------------------------------
+    // PHARMACY-SPECIFIC REPORTS
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns items whose expiry date falls within the next {@code days} days (including already-expired).
+     * Powers GET /api/reports/expiry-report?days={days}
+     */
+    public List<ExpiryReportItemDto> getExpiryReport(int days) {
+        LocalDate cutoffDate = LocalDate.now().plusDays(days);
+        List<ItemVariant> expiringVariants = itemVariantRepository.findByExpiryDateOnOrBefore(cutoffDate);
+
+        if (expiringVariants.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<Long> variantIds = expiringVariants.stream()
+                .map(ItemVariant::getId)
+                .collect(Collectors.toList());
+
+        Map<Long, BigDecimal> stockMap = stockService.getStocksForVariants(variantIds);
+        LocalDate today = LocalDate.now();
+
+        return expiringVariants.stream()
+                .map(variant -> {
+                    ExpiryReportItemDto dto = new ExpiryReportItemDto();
+                    dto.setItemVariantId(variant.getId());
+                    dto.setItemName(variant.getItem().getName());
+                    dto.setComposition(variant.getItem().getComposition());
+                    dto.setSku(variant.getSku());
+                    dto.setBatchNumber(variant.getBatchNumber());
+                    dto.setManufacturingDate(variant.getManufacturingDate());
+                    dto.setExpiryDate(variant.getExpiryDate());
+                    long daysToExpiry = ChronoUnit.DAYS.between(today, variant.getExpiryDate());
+                    dto.setDaysToExpiry(daysToExpiry);
+                    dto.setQuantity(stockMap.getOrDefault(variant.getId(), BigDecimal.ZERO));
+                    dto.setUnit(variant.getUnit());
+                    if (daysToExpiry < 0) {
+                        dto.setAlertLevel("EXPIRED");
+                    } else if (daysToExpiry <= 30) {
+                        dto.setAlertLevel("CRITICAL");
+                    } else {
+                        dto.setAlertLevel("WARNING");
+                    }
+                    return dto;
+                })
+                .sorted(Comparator.comparing(ExpiryReportItemDto::getExpiryDate))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Returns a register of sales for Schedule H, H1, and X (narcotic) drugs in a date range.
+     * Powers GET /api/reports/narcotics-register?from={from}&amp;to={to}
+     */
+    public List<NarcoticsRegisterEntryDto> getNarcoticsRegister(LocalDate from, LocalDate to) {
+        validateDateRange(from, to);
+        List<Sale> sales = getSalesByDateRange(from, to);
+
+        Set<String> controlledSchedules = Set.of(
+                DrugSchedule.SCHEDULE_H.getValue(),
+                DrugSchedule.SCHEDULE_H1.getValue(),
+                DrugSchedule.SCHEDULE_X.getValue()
+        );
+
+        List<NarcoticsRegisterEntryDto> result = new ArrayList<>();
+        for (Sale sale : sales) {
+            for (SaleItem saleItem : sale.getSaleItems()) {
+                ItemVariant variant = saleItem.getItemVariant();
+                if (variant == null || variant.getItem() == null) continue;
+
+                DrugSchedule schedule = variant.getItem().getDrugSchedule();
+                if (schedule == null || !controlledSchedules.contains(schedule.getValue())) continue;
+
+                NarcoticsRegisterEntryDto entry = new NarcoticsRegisterEntryDto();
+                entry.setSaleDate(sale.getDate());
+                entry.setInvoiceNo(sale.getInvoiceNo());
+                entry.setItemName(variant.getItem().getName());
+                entry.setComposition(variant.getItem().getComposition());
+                entry.setDrugSchedule(schedule.getValue());
+                entry.setQty(saleItem.getQty());
+                entry.setUnit(variant.getUnit());
+                entry.setCustomerName(sale.getCustomer() != null ? sale.getCustomer().getName() : null);
+                entry.setDoctorName(sale.getDoctorName());
+                entry.setPatientName(sale.getPatientName());
+                entry.setBatchNumber(variant.getBatchNumber());
+                result.add(entry);
+            }
+        }
+
+        result.sort(Comparator.comparing(NarcoticsRegisterEntryDto::getSaleDate));
+        return result;
+    }
+
+    /**
+     * Returns a batch-wise purchase register for a date range.
+     * Powers GET /api/reports/purchase-register?from={from}&amp;to={to}
+     */
+    public List<PurchaseRegisterEntryDto> getPurchaseRegister(LocalDate from, LocalDate to) {
+        validateDateRange(from, to);
+        LocalDateTime start = from.atStartOfDay();
+        LocalDateTime end = to.atTime(23, 59, 59);
+
+        List<Receiving> receivings = receivingRepository.findByReceivedAtBetween(start, end);
+
+        List<PurchaseRegisterEntryDto> result = new ArrayList<>();
+        for (Receiving receiving : receivings) {
+            String poNumber = receiving.getPurchaseOrder() != null
+                    ? receiving.getPurchaseOrder().getPoNumber() : null;
+            String supplierName = (receiving.getPurchaseOrder() != null
+                    && receiving.getPurchaseOrder().getSupplier() != null)
+                    ? receiving.getPurchaseOrder().getSupplier().getName() : null;
+            String supplierDlNumber = (receiving.getPurchaseOrder() != null
+                    && receiving.getPurchaseOrder().getSupplier() != null)
+                    ? receiving.getPurchaseOrder().getSupplier().getDrugLicenseNumber() : null;
+            LocalDate receivedDate = receiving.getReceivedAt() != null
+                    ? receiving.getReceivedAt().toLocalDate() : null;
+
+            if (receiving.getItems() == null) continue;
+            for (ReceivingItem item : receiving.getItems()) {
+                if (item.getPurchaseOrderItem() == null
+                        || item.getPurchaseOrderItem().getItemVariant() == null) continue;
+
+                ItemVariant variant = item.getPurchaseOrderItem().getItemVariant();
+                BigDecimal unitCost = item.getPurchaseOrderItem().getUnitCost() != null
+                        ? item.getPurchaseOrderItem().getUnitCost() : BigDecimal.ZERO;
+                int receivedQty = item.getReceivedQty() != null ? item.getReceivedQty() : 0;
+                BigDecimal totalCost = unitCost.multiply(BigDecimal.valueOf(receivedQty));
+
+                PurchaseRegisterEntryDto entry = new PurchaseRegisterEntryDto();
+                entry.setReceivedDate(receivedDate);
+                entry.setPoNumber(poNumber);
+                entry.setSupplierName(supplierName);
+                entry.setSupplierDlNumber(supplierDlNumber);
+                entry.setItemName(variant.getItem() != null ? variant.getItem().getName() : null);
+                entry.setComposition(variant.getItem() != null ? variant.getItem().getComposition() : null);
+                entry.setBatchNumber(item.getBatchNumber());
+                entry.setManufacturingDate(item.getManufacturingDate());
+                entry.setExpiryDate(item.getExpiryDate());
+                entry.setReceivedQty(receivedQty);
+                entry.setUnit(variant.getUnit());
+                entry.setUnitCost(unitCost);
+                entry.setTotalCost(totalCost);
+                result.add(entry);
+            }
+        }
+
+        result.sort(Comparator.comparing(PurchaseRegisterEntryDto::getReceivedDate,
+                Comparator.nullsLast(Comparator.naturalOrder())));
+        return result;
     }
 }

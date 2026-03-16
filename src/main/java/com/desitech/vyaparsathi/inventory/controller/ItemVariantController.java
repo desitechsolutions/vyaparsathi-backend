@@ -84,11 +84,12 @@ public class ItemVariantController {
             @RequestParam(required = false) String sku,
             @RequestParam(required = false) String fabric,
             @RequestParam(required = false) String season,
-            @RequestParam(required = false) String fit
+            @RequestParam(required = false) String fit,
+            @RequestParam(required = false) String composition
     ) {
         try {
-            List<ItemVariantDto> dtos = service.searchItemVariants(name,category,color,size,style,sku,fabric,season,fit);
-            logger.info("Searched item variants with filters: name={}, category={}, color={}, size={}, style={}, sku={}", name, category, color, size, style, sku);
+            List<ItemVariantDto> dtos = service.searchItemVariants(name,category,color,size,style,sku,fabric,season,fit,composition);
+            logger.info("Searched item variants with filters: name={}, category={}, color={}, size={}, style={}, sku={}, composition={}", name, category, color, size, style, sku, composition);
             return ResponseEntity.ok(dtos);
         } catch (Exception e) {
             logger.error("Error searching item variants: {}", e.getMessage(), e);

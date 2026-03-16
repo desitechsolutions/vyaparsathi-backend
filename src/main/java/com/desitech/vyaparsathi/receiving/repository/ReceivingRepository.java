@@ -48,6 +48,15 @@ public interface ReceivingRepository extends BaseRepository<Receiving, Long> {
             "items",
             "items.purchaseOrderItem"
     })
+    @Query("SELECT r FROM Receiving r WHERE r.shop.id = :shopId ORDER BY r.receivedAt DESC")
+    List<Receiving> findAllByShopId(@Param("shopId") Long shopId);
+
+    @EntityGraph(attributePaths = {
+            "purchaseOrder",
+            "purchaseOrder.supplier",
+            "items",
+            "items.purchaseOrderItem"
+    })
     List<Receiving> findAllByPurchaseOrderId(Long poItemId);
 
     @EntityGraph(attributePaths = {
@@ -58,4 +67,18 @@ public interface ReceivingRepository extends BaseRepository<Receiving, Long> {
     })
     @Query("SELECT r FROM Receiving r WHERE r.purchaseOrder.poNumber = :poNumber AND r.shop.id = :shopId")
     List<Receiving> findAllByPoNumber(@Param("poNumber") String poNumber, @Param("shopId") Long shopId);
+
+    @EntityGraph(attributePaths = {
+            "purchaseOrder",
+            "purchaseOrder.supplier",
+            "items",
+            "items.purchaseOrderItem",
+            "items.purchaseOrderItem.itemVariant",
+            "items.purchaseOrderItem.itemVariant.item"
+    })
+    @Query("SELECT r FROM Receiving r WHERE r.receivedAt >= :start AND r.receivedAt <= :end ORDER BY r.receivedAt ASC")
+    List<Receiving> findByReceivedAtBetween(
+            @Param("start") java.time.LocalDateTime start,
+            @Param("end") java.time.LocalDateTime end
+    );
 }

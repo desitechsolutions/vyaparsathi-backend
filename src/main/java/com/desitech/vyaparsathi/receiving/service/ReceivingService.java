@@ -38,6 +38,7 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -75,11 +76,14 @@ public class ReceivingService {
     }
 
     /**
-     * Retrieves all receivings with pagination support.
+     * Retrieves all receivings for the current shop as a flat list (no pagination).
+     * The frontend expects a simple array, not a Spring Page wrapper.
      */
-    public Page<ReceivingDto> getAllReceivings(Pageable pageable) {
-        return receivingRepository.findAll(pageable)
-                .map(receivingMapper::toDto);
+    public List<ReceivingDto> getAllReceivings() {
+        Long shopId = TenantUtils.getCurrentShopId();
+        return receivingRepository.findAllByShopId(shopId).stream()
+                .map(receivingMapper::toDto)
+                .collect(Collectors.toList());
     }
 
     /**
@@ -173,7 +177,11 @@ public class ReceivingService {
             throw new BusinessValidationException("Receiving items cannot be empty");
         }
         for (ReceivingItemDto itemDto : dto.getReceivingItems()) {
-            if (itemDto.getReceivedQty() < 0 || itemDto.getDamagedQty() < 0 || itemDto.getRejectedQty() < 0 || itemDto.getPutawayQty() < 0) {
+            int recv   = Optional.ofNullable(itemDto.getReceivedQty()).orElse(0);
+            int dmg    = Optional.ofNullable(itemDto.getDamagedQty()).orElse(0);
+            int rej    = Optional.ofNullable(itemDto.getRejectedQty()).orElse(0);
+            int putaway = Optional.ofNullable(itemDto.getPutawayQty()).orElse(0);
+            if (recv < 0 || dmg < 0 || rej < 0 || putaway < 0) {
                 throw new BusinessValidationException("Quantities cannot be negative");
             }
         }
@@ -202,15 +210,32 @@ public class ReceivingService {
 
             item.setPurchaseOrderItem(poItem);
             item.setExpectedQty(poItem.getQuantity());
-            item.setReceivedQty(itemDto.getReceivedQty());
-            item.setDamagedQty(itemDto.getDamagedQty());
+            item.setReceivedQty(Optional.ofNullable(itemDto.getReceivedQty()).orElse(0));
+            item.setDamagedQty(Optional.ofNullable(itemDto.getDamagedQty()).orElse(0));
             item.setDamageReason(itemDto.getDamageReason());
-            item.setRejectedQty(itemDto.getRejectedQty());
+            item.setRejectedQty(Optional.ofNullable(itemDto.getRejectedQty()).orElse(0));
             item.setRejectReason(itemDto.getRejectReason());
-            item.setPutawayQty(itemDto.getPutawayQty());
+            item.setPutawayQty(Optional.ofNullable(itemDto.getPutawayQty()).orElse(0));
             item.setPutAwayStatus(itemDto.getPutAwayStatus());
             item.setNotes(itemDto.getNotes());
             item.setStatus(determineReceivingItemStatus(item));
+
+            // Overage tracking
+            item.setIsOveraged(Boolean.TRUE.equals(itemDto.getIsOveraged()));
+            item.setOverageReason(itemDto.getOverageReason());
+            item.setOverageNotes(itemDto.getOverageNotes());
+
+            // Pharmacy batch/expiry tracking
+            item.setBatchNumber(itemDto.getBatchNumber());
+            item.setManufacturingDate(itemDto.getManufacturingDate());
+            item.setExpiryDate(itemDto.getExpiryDate());
+
+            // Electronics fields
+            item.setSerialNumber(itemDto.getSerialNumber());
+            item.setWarrantyStartDate(itemDto.getWarrantyStartDate());
+
+            // Automobile fields
+            item.setPartReference(itemDto.getPartReference());
 
             items.add(item);
         }
@@ -379,7 +404,8 @@ public class ReceivingService {
                 ItemVariant variant = item.getPurchaseOrderItem().getItemVariant();
                 BigDecimal cost = item.getPurchaseOrderItem().getUnitCost();
                 StockMovementType type = delta > 0 ? StockMovementType.ADD : StockMovementType.DEDUCT;
-                createStockMovement(variant, cost, type, Math.abs(delta), newReceiving.getId().toString());
+                createStockMovement(variant, cost, type, Math.abs(delta), newReceiving.getId().toString(),
+                        item.getBatchNumber(), item.getExpiryDate());
             }
         }
 
@@ -393,21 +419,24 @@ public class ReceivingService {
                 if (oldQty > 0) {
                     ItemVariant variant = oldVariants.get(removedId);
                     BigDecimal cost = oldCosts.get(removedId);
-                    createStockMovement(variant, cost, StockMovementType.DEDUCT, oldQty, newReceiving.getId().toString());
+                    createStockMovement(variant, cost, StockMovementType.DEDUCT, oldQty, newReceiving.getId().toString(), null, null);
                 }
             }
         }
     }
 
     /**
-     * Creates a stock movement.
+     * Creates a stock movement, including optional batch and expiry for pharmacy shops.
      */
-    private void createStockMovement(ItemVariant variant, BigDecimal cost, StockMovementType type, int quantity, String reference) {
+    private void createStockMovement(ItemVariant variant, BigDecimal cost, StockMovementType type, int quantity, String reference,
+                                     String batchNumber, LocalDate expiryDate) {
         StockMovement stockMovement = new StockMovement();
         stockMovement.setItemVariant(variant);
         stockMovement.setMovementType(type);
         stockMovement.setQuantity(BigDecimal.valueOf(quantity));
         stockMovement.setCostPerUnit(cost);
+        stockMovement.setBatch(batchNumber);
+        stockMovement.setExpiryDate(expiryDate);
         stockMovement.setReason("Purchase Order Receiving Adjustment");
         stockMovement.setReference(reference);
         stockMovementRepository.save(stockMovement);
@@ -528,26 +557,67 @@ public class ReceivingService {
         return receivingTicketRepository.save(ticket);
     }
 
+    /**
+     * Handles {@code POST /api/receiving/receive-goods}.
+     *
+     * <p><b>Create mode</b> (no {@code receivingId} in dto): creates a new PENDING receiving
+     * record pre-populated with all PO items (zero quantities).</p>
+     *
+     * <p><b>Update mode</b> ({@code receivingId} present + {@code receivingItems}): updates
+     * the existing receiving with actual received/damaged/rejected quantities, adjusts stock,
+     * and updates PO status. This is the path used by the ReceiveGoodsForm wizard.</p>
+     */
     @Transactional
     public ReceivingDto createInitialReceivingRecord(CreateReceivingDto createReceivingDto) {
+
+        // ── UPDATE MODE ─────────────────────────────────────────────────────────
+        if (createReceivingDto.getReceivingId() != null
+                && !CollectionUtils.isEmpty(createReceivingDto.getReceivingItems())) {
+
+            // Build a ReceivingDto from the CreateReceivingDto and delegate to updateReceiving
+            ReceivingDto updateDto = new ReceivingDto();
+            updateDto.setNotes(createReceivingDto.getNotes());
+            updateDto.setReceivingItems(createReceivingDto.getReceivingItems());
+            if (createReceivingDto.getShopId() != null) {
+                updateDto.setShopId(createReceivingDto.getShopId());
+            }
+
+            return updateReceiving(createReceivingDto.getReceivingId(), updateDto)
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Receiving not found with ID: " + createReceivingDto.getReceivingId()));
+        }
+
+        // ── CREATE MODE ─────────────────────────────────────────────────────────
+        if (createReceivingDto.getPurchaseOrderId() == null) {
+            throw new BusinessValidationException("Either receivingId (update mode) or purchaseOrderId (create mode) must be provided");
+        }
+
         logger.info("Attempting to create receiving record for PO ID: {}", createReceivingDto.getPurchaseOrderId());
 
         PurchaseOrder po = getPurchaseOrder(createReceivingDto.getPurchaseOrderId());
 
-        if (!PurchaseOrderStatus.SUBMITTED.equals(po.getStatus())) {
-            throw new BusinessValidationException("Cannot create a receiving record for a PO that is not in SUBMITTED");
+        if (!PurchaseOrderStatus.SUBMITTED.equals(po.getStatus())
+                && !PurchaseOrderStatus.PARTIALLY_RECEIVED.equals(po.getStatus())) {
+            throw new BusinessValidationException(
+                    "Cannot create a receiving record for a PO that is not in SUBMITTED or PARTIALLY_RECEIVED status.");
         }
 
-        if (receivingRepository.existsByPurchaseOrder(po)) {
-            throw new BusinessValidationException("A receiving record already exists for this Purchase Order.");
+        // Already-exists path — use a single query to avoid TOCTOU race condition
+        List<Receiving> existingForPo = receivingRepository.findAllByPurchaseOrderId(po.getId());
+        if (!existingForPo.isEmpty()) {
+            logger.info("Receiving already exists for PO ID {}, returning existing record.", po.getId());
+            return receivingMapper.toDto(existingForPo.get(0));
         }
 
-        Receiving receiving = createPendingReceiving(po, "Manually created receiving record.", null);
+        Receiving receiving = createPendingReceiving(po,
+                createReceivingDto.getNotes() != null ? createReceivingDto.getNotes() : "Manually created receiving record.",
+                createReceivingDto.getReceivedBy());
         if (createReceivingDto.getReceivedDate() != null) {
             receiving.setReceivedAt(createReceivingDto.getReceivedDate());
         }
         Receiving savedReceiving = receivingRepository.save(receiving);
-        logger.info("Successfully created PENDING receiving record ID {} for PO ID {}", savedReceiving.getId(), po.getId());
+        logger.info("Successfully created PENDING receiving record ID {} for PO ID {}",
+                savedReceiving.getId(), po.getId());
 
         return receivingMapper.toDto(savedReceiving);
     }

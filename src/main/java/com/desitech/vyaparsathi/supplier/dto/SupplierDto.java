@@ -11,4 +11,6 @@ public class SupplierDto {
     private String email;
     private String address;
     private String gstin;
+    /** Drug License number (for pharmacy suppliers). Required for purchase register compliance. */
+    private String drugLicenseNumber;
 }

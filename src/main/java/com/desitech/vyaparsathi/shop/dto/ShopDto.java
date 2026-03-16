@@ -40,4 +40,7 @@ public class ShopDto {
 
     private String termsAndConditions;
     private String bankDetails;
+
+    /** Drug license number for pharmacy shops (shown on pharmacy invoices). */
+    private String drugLicenseNumber;
 }

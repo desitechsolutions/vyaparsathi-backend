@@ -65,6 +65,14 @@ public class ItemVariantService {
         itemVariant.setLowStockThreshold(dto.getLowStockThreshold());
         itemVariant.setPhotoPath(dto.getPhotoPath());
 
+        // Pharmacy-specific fields
+        itemVariant.setBatchNumber(dto.getBatchNumber());
+        itemVariant.setManufacturingDate(dto.getManufacturingDate());
+        itemVariant.setExpiryDate(dto.getExpiryDate());
+        itemVariant.setMrp(dto.getMrp());
+        itemVariant.setIsLooseMedicine(dto.getIsLooseMedicine());
+        itemVariant.setPackSize(dto.getPackSize());
+
         ItemVariant savedVariant = itemVariantRepository.save(itemVariant);
         return mapper.toDto(savedVariant);
     }
@@ -90,11 +98,11 @@ public class ItemVariantService {
      */
     public List<ItemVariantDto> searchItemVariants(
             String name, String categoryName, String color, String size, String design,
-            String sku, String fabric, String season, String fit) {
+            String sku, String fabric, String season, String fit, String composition) {
 
         // 1. Call the corrected repository method with all parameters
         List<ItemVariant> variants = itemVariantRepository.searchVariants(
-                name, categoryName, color, size, design, sku, fabric, season, fit);
+                name, categoryName, color, size, design, sku, fabric, season, fit, composition);
 
         if (variants.isEmpty()) {
             return List.of();
@@ -110,6 +118,39 @@ public class ItemVariantService {
         Map<Long, BigDecimal> stockMap = stockService.getStocksForVariants(variantIds); // Assumes this method exists in StockService
 
         // 4. Populate the DTOs with the fetched stock levels.
+        dtos.forEach(dto -> dto.setCurrentStock(stockMap.getOrDefault(dto.getId(), BigDecimal.ZERO)));
+
+        return dtos;
+    }
+
+    /**
+     * Returns variants of therapeutic substitutes for a given item.
+     * Substitutes are items sharing the same composition (active ingredient).
+     *
+     * @param itemId the ID of the reference item
+     * @return list of variant DTOs from items with the same composition
+     */
+    public List<ItemVariantDto> getSubstitutes(Long itemId) {
+        com.desitech.vyaparsathi.inventory.entity.Item item = itemRepository.findById(itemId)
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("Item not found with id: " + itemId));
+
+        if (item.getComposition() == null || item.getComposition().isBlank()) {
+            return List.of();
+        }
+
+        List<ItemVariant> substitutes = itemVariantRepository.findSubstitutesByComposition(
+                item.getComposition(), itemId);
+
+        if (substitutes.isEmpty()) {
+            return List.of();
+        }
+
+        List<ItemVariantDto> dtos = substitutes.stream()
+                .map(mapper::toDto)
+                .collect(Collectors.toList());
+
+        List<Long> variantIds = dtos.stream().map(ItemVariantDto::getId).collect(Collectors.toList());
+        Map<Long, BigDecimal> stockMap = stockService.getStocksForVariants(variantIds);
         dtos.forEach(dto -> dto.setCurrentStock(stockMap.getOrDefault(dto.getId(), BigDecimal.ZERO)));
 
         return dtos;

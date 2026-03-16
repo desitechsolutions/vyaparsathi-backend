@@ -7,6 +7,8 @@ import com.desitech.vyaparsathi.receiving.enums.ReceivingItemStatus;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDate;
+
 @Setter
 @Getter
 @NoArgsConstructor
@@ -54,4 +56,47 @@ public class ReceivingItem extends ShopAwareEntity {
 
     @Column(name = "overage_notes", length = 500)
     private String overageNotes;
+
+    // --- Pharmacy-specific fields ---
+
+    /**
+     * Batch/lot number received from the supplier. Mandatory for pharmacy stock traceability.
+     */
+    @Column(name = "batch_number")
+    private String batchNumber;
+
+    /**
+     * Manufacturing date printed on the medicine packaging.
+     */
+    @Column(name = "manufacturing_date")
+    private LocalDate manufacturingDate;
+
+    /**
+     * Expiry date printed on the medicine packaging. Used for QC validation at receiving.
+     */
+    @Column(name = "expiry_date")
+    private LocalDate expiryDate;
+
+    // --- Electronics-specific fields ---
+
+    /**
+     * Serial / IMEI numbers captured at goods receipt.
+     * Comma-separated when multiple units are received on one line.
+     */
+    @Column(name = "serial_number", length = 1000)
+    private String serialNumber;
+
+    /**
+     * Warranty start date recorded when the electronics unit is received.
+     */
+    @Column(name = "warranty_start_date")
+    private LocalDate warrantyStartDate;
+
+    // --- Automobile-specific fields ---
+
+    /**
+     * OEM part reference number (e.g. manufacturer part number like 04465-0K080).
+     */
+    @Column(name = "part_reference", length = 100)
+    private String partReference;
 }

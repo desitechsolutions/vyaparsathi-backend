@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.purchaseorder.controller;
 
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderDto;
+import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderItemDto;
 import com.desitech.vyaparsathi.purchaseorder.service.PurchaseOrderService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +48,23 @@ public class PurchaseOrderController {
     @PostMapping("/{id}/submit")
     public ResponseEntity<PurchaseOrderDto> submit(@PathVariable Long id) {
         return ResponseEntity.ok(purchaseOrderService.submitPurchaseOrder(id));
+    }
+
+    /**
+     * Signals that receiving has begun for this PO.
+     * Transitions the PO from SUBMITTED → PARTIALLY_RECEIVED.
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
+    @PostMapping("/{id}/receive")
+    public ResponseEntity<PurchaseOrderDto> markAsReceiving(@PathVariable Long id) {
+        return ResponseEntity.ok(purchaseOrderService.markAsReceiving(id));
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
+    @GetMapping("/{id}/items")
+    public ResponseEntity<List<PurchaseOrderItemDto>> getItemsForPurchaseOrder(@PathVariable Long id) {
+        PurchaseOrderDto po = purchaseOrderService.findPurchaseOrderById(id);
+        return ResponseEntity.ok(po.getItems() != null ? po.getItems() : List.of());
     }
 
     @PreAuthorize("hasAnyRole('ADMIN','OWNER')")

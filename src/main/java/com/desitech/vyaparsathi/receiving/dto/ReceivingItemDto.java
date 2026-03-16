@@ -5,6 +5,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Min;
 import lombok.Data;
 
+import java.time.LocalDate;
+
 @Data
 public class ReceivingItemDto {
     private Long id;
@@ -27,4 +29,22 @@ public class ReceivingItemDto {
     private String overageReason;
     private String overageNotes;
     private Boolean isOveraged = false;
+
+    // --- Pharmacy-specific fields ---
+    /** Batch/lot number printed on the medicine packaging received from supplier. */
+    private String batchNumber;
+    /** Manufacturing date printed on the packaging. */
+    private LocalDate manufacturingDate;
+    /** Expiry date printed on the packaging. Required QC check for pharmacy receiving. */
+    private LocalDate expiryDate;
+
+    // --- Electronics-specific fields ---
+    /** Serial / IMEI numbers captured at goods receipt (comma-separated for multiple units). */
+    private String serialNumber;
+    /** Warranty start date recorded when the electronics unit is received. */
+    private LocalDate warrantyStartDate;
+
+    // --- Automobile-specific fields ---
+    /** OEM part reference number (e.g. manufacturer part number). */
+    private String partReference;
 }

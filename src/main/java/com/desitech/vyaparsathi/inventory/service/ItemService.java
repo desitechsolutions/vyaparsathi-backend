@@ -1,5 +1,7 @@
 package com.desitech.vyaparsathi.inventory.service;
 
+import com.desitech.vyaparsathi.common.configs.TenantContext;
+import com.desitech.vyaparsathi.common.exception.DuplicateItemException;
 import com.desitech.vyaparsathi.inventory.dto.ItemDto;
 import com.desitech.vyaparsathi.inventory.dto.ItemVariantDto;
 import com.desitech.vyaparsathi.inventory.entity.Category;
@@ -51,6 +53,13 @@ public class ItemService {
 
     @Transactional
     public ItemDto createItem(ItemDto itemDto) {
+        if (itemRepository.existsByNameAndBrandNameAndShopId(
+                itemDto.getName(),
+                itemDto.getBrandName(),
+                TenantContext.getCurrentShopId())) {
+            throw new DuplicateItemException("Item '" + itemDto.getName() +
+                    "' with brand '" + itemDto.getBrandName() + "' already exists in this shop.");
+        }
         assignHsnAndSkuCodes(itemDto);
         // Ensure all variants are treated as new (id = null)
         if (itemDto.getVariants() != null) {
@@ -96,6 +105,12 @@ public class ItemService {
         existingItem.setFabric(attr1);
         existingItem.setAttribute2(attr2);
         existingItem.setSeason(attr2);
+
+        // Pharmacy fields
+        existingItem.setDrugSchedule(itemDto.getDrugSchedule());
+        existingItem.setRequiresPrescription(itemDto.getRequiresPrescription());
+        existingItem.setComposition(itemDto.getComposition());
+        existingItem.setStorageRequirement(itemDto.getStorageRequirement());
 
         // 3. Category Update
         if (itemDto.getCategoryId() != null) {
@@ -254,5 +269,13 @@ public class ItemService {
         variant.setSize(dto.getSize());
         variant.setDesign(dto.getDesign());
         variant.setFit(dto.getFit());
+
+        // 4. Pharmacy fields
+        variant.setBatchNumber(dto.getBatchNumber());
+        variant.setManufacturingDate(dto.getManufacturingDate());
+        variant.setExpiryDate(dto.getExpiryDate());
+        variant.setMrp(dto.getMrp());
+        variant.setIsLooseMedicine(dto.getIsLooseMedicine());
+        variant.setPackSize(dto.getPackSize());
     }
 }

@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.purchaseorder.service;
 
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.repository.ItemVariantRepository;
+import com.desitech.vyaparsathi.common.exception.ResourceNotFoundException;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderDto;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrder;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrderItem;
@@ -53,7 +54,7 @@ public class PurchaseOrderService {
         }
 
         Supplier supplier = supplierRepository.findById(dto.getSupplierId())
-                .orElseThrow(() -> new RuntimeException("Supplier not found with ID: " + dto.getSupplierId()));
+                .orElseThrow(() -> new ResourceNotFoundException("Supplier not found with ID: " + dto.getSupplierId()));
 
         PurchaseOrder purchaseOrder = new PurchaseOrder();
         purchaseOrder.setPoNumber(dto.getPoNumber());
@@ -72,7 +73,7 @@ public class PurchaseOrderService {
 
         List<PurchaseOrderItem> items = dto.getItems().stream().map(itemDto -> {
             ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
-                    .orElseThrow(() -> new RuntimeException("Item Variant not found with ID: " + itemDto.getItemVariantId()));
+                    .orElseThrow(() -> new ResourceNotFoundException("Item Variant not found with ID: " + itemDto.getItemVariantId()));
             PurchaseOrderItem item = new PurchaseOrderItem();
             item.setPurchaseOrder(savedPurchaseOrder);
             item.setItemVariant(itemVariant);
@@ -101,21 +102,21 @@ public class PurchaseOrderService {
 
     public PurchaseOrderDto findPurchaseOrderById(Long id) {
         PurchaseOrder purchaseOrder = purchaseOrderRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Purchase Order not found with ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
         return mapper.toDto(purchaseOrder);
     }
 
     @Transactional
     public PurchaseOrderDto updatePurchaseOrder(Long id, PurchaseOrderDto dto) {
         PurchaseOrder purchaseOrder = purchaseOrderRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Purchase Order not found with ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
 
         if (!PurchaseOrderStatus.DRAFT.equals(purchaseOrder.getStatus())) {
             throw new IllegalStateException("Only 'Draft' orders can be updated.");
         }
 
         Supplier supplier = supplierRepository.findById(dto.getSupplierId())
-                .orElseThrow(() -> new RuntimeException("Supplier not found with ID: " + dto.getSupplierId()));
+                .orElseThrow(() -> new ResourceNotFoundException("Supplier not found with ID: " + dto.getSupplierId()));
 
         purchaseOrder.setSupplier(supplier);
         purchaseOrder.setOrderDate(dto.getOrderDate());
@@ -129,7 +130,7 @@ public class PurchaseOrderService {
 
         List<PurchaseOrderItem> newItems = dto.getItems().stream().map(itemDto -> {
             ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
-                    .orElseThrow(() -> new RuntimeException("Item Variant not found with ID: " + itemDto.getItemVariantId()));
+                    .orElseThrow(() -> new ResourceNotFoundException("Item Variant not found with ID: " + itemDto.getItemVariantId()));
             PurchaseOrderItem item = new PurchaseOrderItem();
             item.setPurchaseOrder(purchaseOrder);
             item.setItemVariant(itemVariant);
@@ -157,7 +158,7 @@ public class PurchaseOrderService {
     @Transactional
     public PurchaseOrderDto submitPurchaseOrder(Long id) {
         PurchaseOrder purchaseOrder = purchaseOrderRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Purchase Order not found with ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
 
         if (!PurchaseOrderStatus.DRAFT.equals(purchaseOrder.getStatus())) {
             throw new IllegalStateException("Only 'Draft' orders can be submitted.");
@@ -174,7 +175,7 @@ public class PurchaseOrderService {
     @Transactional
     public void deletePurchaseOrder(Long id) {
         if (!purchaseOrderRepository.existsById(id)) {
-            throw new RuntimeException("Purchase Order not found with ID: " + id);
+            throw new ResourceNotFoundException("Purchase Order not found with ID: " + id);
         }
         PurchaseOrder po = purchaseOrderRepository.findById(id).orElseThrow();
         purchaseOrderRepository.deleteById(id);
@@ -191,5 +192,24 @@ public class PurchaseOrderService {
         );
         List<PurchaseOrder> pos = purchaseOrderRepository.findAllByStatusIn(includedStatuses);
         return pos.stream().map(mapper::toDto).collect(Collectors.toList());
+    }
+
+    // ─── Receiving ────────────────────────────────────────────────────────────
+
+    /**
+     * Transitions a PO from SUBMITTED to PARTIALLY_RECEIVED (or keeps current status).
+     * Called by {@code POST /api/purchase-orders/{id}/receive} so the frontend can signal
+     * that the receiving workflow has begun without creating a full Receiving record.
+     */
+    @Transactional
+    public PurchaseOrderDto markAsReceiving(Long id) {
+        PurchaseOrder po = purchaseOrderRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
+
+        if (PurchaseOrderStatus.SUBMITTED.equals(po.getStatus())) {
+            po.setStatus(PurchaseOrderStatus.PARTIALLY_RECEIVED);
+            purchaseOrderRepository.save(po);
+        }
+        return mapper.toDto(po);
     }
 }

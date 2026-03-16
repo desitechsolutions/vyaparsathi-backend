@@ -37,4 +37,14 @@ public class SaleDto {
 
     private String signedInvoiceUrl;
     private String status;
+
+    // --- Pharmacy-specific fields ---
+    /** Name of the prescribing doctor (required for Schedule H1 and X drugs). */
+    private String doctorName;
+    /** Patient name if different from the customer. */
+    private String patientName;
+    /** Prescription / Rx number for pharmacy compliance tracking. */
+    private String prescriptionNumber;
+    /** Registration number of the prescribing doctor (required for Schedule H1 / X compliance). */
+    private String doctorRegistrationNumber;
 }

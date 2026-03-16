@@ -6,6 +6,7 @@ import com.desitech.vyaparsathi.common.util.CustomLocalDateTimeDeserializer;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -22,4 +23,6 @@ public class StockMovementDto {
     private String reference; // e.g., "Sale #INV-001", "Purchase Order #PO-001"
     @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
     private LocalDateTime timestamp;
+    /** Expiry date associated with this stock movement batch (pharmacy). */
+    private LocalDate expiryDate;
 }

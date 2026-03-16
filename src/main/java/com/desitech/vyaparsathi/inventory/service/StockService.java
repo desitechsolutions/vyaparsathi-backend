@@ -18,7 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -45,13 +47,32 @@ public class StockService {
     @Transactional
     public StockMovementDto addStockFromDto(StockAddDto dto) {
         // Validation
-        itemVariantRepository.findById(dto.getItemVariantId())
+        ItemVariant itemVariant = itemVariantRepository.findById(dto.getItemVariantId())
                 .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", dto.getItemVariantId()));
 
         BigDecimal costPerUnit = dto.getCostPerUnit() != null ? dto.getCostPerUnit() : BigDecimal.ZERO;
         BigDecimal quantity = dto.getQuantity();
 
-        StockMovement movement = recordStockMovement(dto.getItemVariantId(), StockMovementType.ADD, quantity, costPerUnit, dto.getBatch(), "Manual Stock Addition", "Manual Entry");
+        // Update pharmacy-specific fields on the variant when a new batch is received.
+        // This keeps the ItemVariant's batch metadata in sync with the latest stock receipt.
+        boolean variantUpdated = false;
+        if (dto.getBatch() != null && !dto.getBatch().isBlank()) {
+            itemVariant.setBatchNumber(dto.getBatch());
+            variantUpdated = true;
+        }
+        if (dto.getManufacturingDate() != null) {
+            itemVariant.setManufacturingDate(dto.getManufacturingDate());
+            variantUpdated = true;
+        }
+        if (dto.getExpiryDate() != null) {
+            itemVariant.setExpiryDate(dto.getExpiryDate());
+            variantUpdated = true;
+        }
+        if (variantUpdated) {
+            itemVariantRepository.save(itemVariant);
+        }
+
+        StockMovement movement = recordStockMovement(dto.getItemVariantId(), StockMovementType.ADD, quantity, costPerUnit, dto.getBatch(), "Manual Stock Addition", "Manual Entry", dto.getExpiryDate());
         return mapToStockMovementDto(movement);
     }
 
@@ -103,9 +124,67 @@ public class StockService {
             dto.setCostPerUnit(wacMap.getOrDefault(variant.getId(), BigDecimal.ZERO));
 
             dto.setBatch(null);
+
+            // Pharmacy-specific fields from ItemVariant
+            dto.setBatchNumber(variant.getBatchNumber());
+            dto.setExpiryDate(variant.getExpiryDate());
+            dto.setMrp(variant.getMrp());
+            dto.setIsLooseMedicine(variant.getIsLooseMedicine());
+            dto.setPackSize(variant.getPackSize());
+
             return dto;
         }).collect(Collectors.toList());
     }
+
+    /**
+     * Returns per-batch stock breakdown for all item variants.
+     * <p>
+     * Unlike {@link #getCurrentStock()}, which collapses all batches of the same
+     * ItemVariant into a single total, this method returns one entry per
+     * (variant, batch, expiryDate) combination so the UI can display, e.g.:
+     * <ul>
+     *   <li>Paracetamol 500mg – Batch A – 20 strips (exp Jun-2025)</li>
+     *   <li>Paracetamol 500mg – Batch B – 30 strips (exp Dec-2025)</li>
+     * </ul>
+     * Only batches with a net-positive remaining quantity are included.
+     * </p>
+     */
+    public List<BatchStockDto> getBatchWiseStock() {
+        List<ItemVariant> itemVariants = itemVariantRepository.findAll();
+        if (itemVariants.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // Build lookup map for variant metadata
+        Map<Long, ItemVariant> variantMap = itemVariants.stream()
+                .collect(Collectors.toMap(ItemVariant::getId, v -> v));
+
+        List<Long> variantIds = new java.util.ArrayList<>(variantMap.keySet());
+
+        List<StockMovementRepository.BatchStockProjection> projections =
+                stockMovementRepository.findBatchWiseStockByVariantIds(variantIds);
+
+        return projections.stream().map(p -> {
+            BatchStockDto dto = new BatchStockDto();
+            dto.setItemVariantId(p.getVariantId());
+            dto.setBatchNumber(p.getBatchNumber());
+            dto.setExpiryDate(p.getExpiryDate());
+            dto.setQuantity(p.getTotalQuantity() != null ? p.getTotalQuantity() : BigDecimal.ZERO);
+            dto.setCostPerUnit(p.getWacCost() != null ? p.getWacCost() : BigDecimal.ZERO);
+
+            ItemVariant variant = variantMap.get(p.getVariantId());
+            if (variant != null) {
+                dto.setItemName(variant.getItem().getName());
+                dto.setSku(variant.getSku());
+                dto.setUnit(variant.getUnit());
+                dto.setMrp(variant.getMrp());
+                dto.setIsLooseMedicine(variant.getIsLooseMedicine());
+                dto.setPackSize(variant.getPackSize());
+            }
+            return dto;
+        }).collect(Collectors.toList());
+    }
+
 
     /**
      * Deducts stock by creating a new 'DEDUCT' movement.
@@ -207,6 +286,12 @@ public class StockService {
 
     private StockMovement recordStockMovement(Long itemVariantId, StockMovementType movementType, BigDecimal quantity,
                                               BigDecimal costPerUnit, String batch, String reason, String reference) {
+        return recordStockMovement(itemVariantId, movementType, quantity, costPerUnit, batch, reason, reference, null);
+    }
+
+    private StockMovement recordStockMovement(Long itemVariantId, StockMovementType movementType, BigDecimal quantity,
+                                              BigDecimal costPerUnit, String batch, String reason, String reference,
+                                              LocalDate expiryDate) {
         ItemVariant itemVariant = itemVariantRepository.findById(itemVariantId)
                 .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemVariantId));
 
@@ -218,6 +303,7 @@ public class StockService {
         movement.setBatch(batch);
         movement.setReason(reason);
         movement.setReference(reference);
+        movement.setExpiryDate(expiryDate);
         movement.setTimestamp(LocalDateTime.now());
 
         return stockMovementRepository.save(movement);
@@ -312,7 +398,56 @@ public class StockService {
         dto.setReason(movement.getReason());
         dto.setReference(movement.getReference());
         dto.setTimestamp(movement.getTimestamp());
+        dto.setExpiryDate(movement.getExpiryDate());
         return dto;
+    }
+
+    /**
+     * Returns expiry alerts for all item variants whose expiry date falls within
+     * the given number of days from today. Items already expired are also included.
+     * Primarily used by pharmacy shops.
+     *
+     * @param daysBeforeExpiry number of days ahead to check (e.g., 90 means warn 90 days before expiry)
+     * @return list of expiry alert DTOs sorted by expiry date ascending
+     */
+    public List<ExpiryAlertDto> getExpiryAlerts(int daysBeforeExpiry) {
+        LocalDate cutoffDate = LocalDate.now().plusDays(daysBeforeExpiry);
+        List<ItemVariant> expiringVariants = itemVariantRepository.findByExpiryDateOnOrBefore(cutoffDate);
+
+        if (expiringVariants.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<Long> variantIds = expiringVariants.stream()
+                .map(ItemVariant::getId)
+                .collect(Collectors.toList());
+
+        Map<Long, BigDecimal> stockMap = getStocksForVariants(variantIds);
+        LocalDate today = LocalDate.now();
+
+        return expiringVariants.stream()
+                .map(variant -> {
+                    ExpiryAlertDto alert = new ExpiryAlertDto();
+                    alert.setItemVariantId(variant.getId());
+                    alert.setItemName(variant.getItem().getName());
+                    alert.setSku(variant.getSku());
+                    alert.setBatchNumber(variant.getBatchNumber());
+                    alert.setExpiryDate(variant.getExpiryDate());
+                    long daysLeft = ChronoUnit.DAYS.between(today, variant.getExpiryDate());
+                    alert.setDaysToExpiry(daysLeft);
+                    alert.setCurrentStock(stockMap.getOrDefault(variant.getId(), BigDecimal.ZERO));
+                    alert.setUnit(variant.getUnit());
+                    if (daysLeft < 0) {
+                        alert.setAlertLevel("EXPIRED");
+                    } else if (daysLeft <= 30) {
+                        alert.setAlertLevel("CRITICAL");
+                    } else {
+                        alert.setAlertLevel("WARNING");
+                    }
+                    return alert;
+                })
+                .sorted(java.util.Comparator.comparing(ExpiryAlertDto::getExpiryDate))
+                .collect(Collectors.toList());
     }
 
     public BigDecimal getLatestPurchaseCost(Long itemVariantId) {

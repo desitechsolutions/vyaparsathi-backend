@@ -278,9 +278,16 @@ public class SubscriptionService {
 
                     boolean hasAccess = (isTrial || isActive) && targetDate != null && targetDate.isAfter(now);
 
+                    // Derive effective status in real-time so the API is always accurate,
+                    // even if the nightly scheduler hasn't run yet.
+                    SubscriptionStatus effectiveStatus = sub.getStatus();
+                    if ((isTrial || isActive) && targetDate != null && !targetDate.isAfter(now)) {
+                        effectiveStatus = SubscriptionStatus.EXPIRED;
+                    }
+
                     SubscriptionStatusDTO dto = new SubscriptionStatusDTO();
                     dto.setTier(sub.getTier());
-                    dto.setStatus(sub.getStatus());
+                    dto.setStatus(effectiveStatus);
                     dto.setPremium(hasAccess);
                     dto.setDaysRemaining(Math.max(0, daysRemaining));
                     dto.setUsedTrial(sub.isUsedTrial());

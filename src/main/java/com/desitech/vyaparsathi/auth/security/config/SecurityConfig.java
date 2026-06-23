@@ -46,6 +46,8 @@ public class SecurityConfig {
                                 "/api/invoices/signed",
                                 "/ws/**",
                                 "/api/notifications/public/**",
+                                "/api/newsletter/subscribe",
+                                "/api/newsletter/unsubscribe",
                                 "/uploads/**",
                                 "/api/files/**"
                         ).permitAll()

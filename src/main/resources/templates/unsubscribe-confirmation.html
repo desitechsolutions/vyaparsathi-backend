@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unsubscribed Successfully</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .card {
+            background-color: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            max-width: 480px;
+            width: 90%;
+            padding: 40px;
+            text-align: center;
+            border: 1px solid rgba(226, 232, 240, 0.8);
+        }
+        .logo {
+            font-size: 28px;
+            font-weight: 900;
+            color: #1976d2;
+            margin-bottom: 24px;
+            letter-spacing: 0.5px;
+        }
+        .icon {
+            font-size: 48px;
+            color: #10b981;
+            margin-bottom: 20px;
+        }
+        h1 {
+            font-size: 22px;
+            font-weight: 800;
+            margin: 0 0 12px 0;
+            color: #0f172a;
+        }
+        p {
+            font-size: 15px;
+            color: #64748b;
+            line-height: 1.6;
+            margin: 0 0 30px 0;
+        }
+        .button {
+            display: inline-block;
+            background-color: #1976d2;
+            color: #ffffff;
+            font-weight: 700;
+            padding: 12px 28px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        .button:hover {
+            background-color: #1565c0;
+        }
+        .footer {
+            margin-top: 35px;
+            font-size: 11px;
+            color: #94a3b8;
+            border-top: 1px solid #f1f5f9;
+            padding-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo">VyaparSathi</div>
+        <div class="icon">✓</div>
+        <h1>Unsubscribed Successfully</h1>
+        <p>Your email address <strong>${email}</strong> has been unsubscribed from our newsletter list. You will no longer receive updates, GST tips, or business insights from us.</p>
+        
+        <a href="https://www.desitechsolutions.com" class="button">Go to VyaparSathi</a>
+        
+        <div class="footer">
+            &copy; ${currentYear} Biruma Technology Solutions Pvt Ltd. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>

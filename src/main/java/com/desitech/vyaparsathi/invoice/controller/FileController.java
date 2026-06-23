@@ -62,7 +62,23 @@ public class FileController {
                 }
             }
 
-            logger.warn("File not found in Cloud or ClassPath: {}", fullResourcePath);
+            // --- 3. TRY LOCAL FILE SYSTEM (LOCAL DEV FALLBACK) ---
+            java.io.File localFile = new java.io.File("uploads/" + path);
+            if (!localFile.exists() && !path.startsWith("logos/") && !path.startsWith("signatures/")) {
+                localFile = new java.io.File("uploads/logos/" + path);
+                if (!localFile.exists()) {
+                    localFile = new java.io.File("uploads/signatures/" + path);
+                }
+            }
+            if (localFile.exists() && localFile.isFile()) {
+                logger.debug("Local File System Mode: Fetching from: {}", localFile.getAbsolutePath());
+                byte[] fileBytes = java.nio.file.Files.readAllBytes(localFile.toPath());
+                return ResponseEntity.ok()
+                        .contentType(MediaType.parseMediaType(determineContentType(path, null)))
+                        .body(fileBytes);
+            }
+
+            logger.warn("File not found in Cloud, ClassPath or Local Filesystem: {}", path);
             return ResponseEntity.notFound().build();
 
         } catch (Exception e) {

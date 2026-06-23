@@ -111,6 +111,18 @@ public class Sale extends ShopAwareEntity {
     @Column(name = "is_gst_required", nullable = false)
     private Boolean isGstRequired = false;
 
+    @Column(name = "due_date")
+    private java.time.LocalDate dueDate;
+
+    @Column(name = "invoice_discount", precision = 12, scale = 2)
+    private BigDecimal invoiceDiscount = BigDecimal.ZERO;
+
+    @Column(name = "shipping_charges", precision = 12, scale = 2)
+    private BigDecimal shippingCharges = BigDecimal.ZERO;
+
+    @Column(name = "other_charges", precision = 12, scale = 2)
+    private BigDecimal otherCharges = BigDecimal.ZERO;
+
     @PrePersist
     @Override
     public void onCreate() {

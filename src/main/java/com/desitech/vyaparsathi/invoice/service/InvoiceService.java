@@ -131,6 +131,12 @@ public class InvoiceService {
         if (sale.getShop().getGstin() != null) {
             left.addElement(new Phrase("\nGSTIN: " + sale.getShop().getGstin(), normalFont));
         }
+        if (sale.getShop().getCompanyWebsite() != null && !sale.getShop().getCompanyWebsite().isBlank()) {
+            left.addElement(new Phrase("\nWebsite: " + sale.getShop().getCompanyWebsite(), normalFont));
+        }
+        if (sale.getShop().getSupportContact() != null && !sale.getShop().getSupportContact().isBlank()) {
+            left.addElement(new Phrase("\nSupport: " + sale.getShop().getSupportContact(), normalFont));
+        }
         if (isPharmacy && sale.getShop().getDrugLicenseNumber() != null && !sale.getShop().getDrugLicenseNumber().isBlank()) {
             left.addElement(new Phrase("\nDrug Lic. No: " + sale.getShop().getDrugLicenseNumber(), normalFont));
         }
@@ -162,6 +168,9 @@ public class InvoiceService {
 
         right.addElement(new Paragraph("Invoice No: " + sale.getInvoiceNo(), boldFont));
         right.addElement(new Paragraph("Date: " + sale.getDate().toLocalDate(), normalFont));
+        if (sale.getDueDate() != null) {
+            right.addElement(new Paragraph("Due Date: " + sale.getDueDate(), normalFont));
+        }
 
         // Payment status badge
         BigDecimal paid = paymentService.getTotalPaidBySaleIds(Set.of(sale.getId())).getOrDefault(sale.getId(), ZERO);
@@ -553,6 +562,16 @@ public class InvoiceService {
             addTotalRow(totals, "Total IGST:",     currency.format(totalIgst),   normalFont);
         }
 
+        if (sale.getInvoiceDiscount() != null && sale.getInvoiceDiscount().compareTo(ZERO) > 0) {
+            addTotalRow(totals, "Invoice Discount:", "-" + currency.format(sale.getInvoiceDiscount()), normalFont);
+        }
+        if (sale.getShippingCharges() != null && sale.getShippingCharges().compareTo(ZERO) > 0) {
+            addTotalRow(totals, "Shipping Charges:", currency.format(sale.getShippingCharges()), normalFont);
+        }
+        if (sale.getOtherCharges() != null && sale.getOtherCharges().compareTo(ZERO) > 0) {
+            addTotalRow(totals, "Other Charges:", currency.format(sale.getOtherCharges()), normalFont);
+        }
+
         addTotalRow(totals, "Grand Total:", currency.format(sale.getTotalAmount()), boldFont);
 
         BigDecimal paid = paymentService.getTotalPaidBySaleIds(Set.of(sale.getId()))
@@ -578,6 +597,16 @@ public class InvoiceService {
 
         document.add(new Paragraph("\n"));
 
+        BigDecimal paid = paymentService.getTotalPaidBySaleIds(Set.of(sale.getId()))
+                .getOrDefault(sale.getId(), ZERO);
+        BigDecimal due = sale.getTotalAmount().subtract(paid).max(ZERO);
+
+        String upiId = sale.getShop().getUpiId();
+        byte[] qrBytes = null;
+        if (upiId != null && !upiId.isBlank()) {
+            qrBytes = generateUPIDynamicQRCode(upiId, sale.getShop().getName(), due);
+        }
+
         PdfPTable footer = new PdfPTable(2);
         footer.setWidthPercentage(100);
         footer.setWidths(new float[]{65, 35});
@@ -594,13 +623,44 @@ public class InvoiceService {
             }
         }
 
-        left.addElement(new Phrase("BANKING DETAILS", boldFont));
-
         String bankDetails = sale.getShop().getBankDetails() != null && !sale.getShop().getBankDetails().trim().isEmpty()
                 ? sale.getShop().getBankDetails()
                 : defaultBankingDetails;
 
-        left.addElement(new Phrase("\n" + InvoiceUtil.formatBankDetails(bankDetails), smallFont));
+        if (qrBytes != null) {
+            PdfPTable paymentTable = new PdfPTable(2);
+            paymentTable.setWidthPercentage(100);
+            paymentTable.setWidths(new float[]{72, 28});
+
+            PdfPCell bankCell = new PdfPCell();
+            bankCell.setBorder(Rectangle.NO_BORDER);
+            bankCell.addElement(new Phrase("BANKING DETAILS", boldFont));
+            bankCell.addElement(new Phrase("\n" + formatBankDetails(bankDetails), smallFont));
+            paymentTable.addCell(bankCell);
+
+            PdfPCell qrCell = new PdfPCell();
+            qrCell.setBorder(Rectangle.NO_BORDER);
+            qrCell.setHorizontalAlignment(Element.ALIGN_CENTER);
+            qrCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
+            try {
+                Image qrImg = Image.getInstance(qrBytes);
+                qrImg.scaleToFit(55, 55);
+                qrImg.setAlignment(Image.ALIGN_CENTER);
+                qrCell.addElement(qrImg);
+
+                Font scanFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 6, Font.NORMAL, Color.DARK_GRAY);
+                Paragraph scanLabel = new Paragraph("SCAN TO PAY", scanFont);
+                scanLabel.setAlignment(Element.ALIGN_CENTER);
+                qrCell.addElement(scanLabel);
+            } catch (Exception e) {
+                logger.warn("Failed to render QR Code in PDF", e);
+            }
+            paymentTable.addCell(qrCell);
+            left.addElement(paymentTable);
+        } else {
+            left.addElement(new Phrase("BANKING DETAILS", boldFont));
+            left.addElement(new Phrase("\n" + formatBankDetails(bankDetails), smallFont));
+        }
 
         left.addElement(new Phrase("\n\nTERMS & CONDITIONS", boldFont));
 
@@ -648,6 +708,12 @@ public class InvoiceService {
         footer.addCell(right);
 
         document.add(footer);
+
+        if (sale.getShop().getInvoiceFooter() != null && !sale.getShop().getInvoiceFooter().isBlank()) {
+            Paragraph customFooter = new Paragraph("\n" + sale.getShop().getInvoiceFooter(), smallFont);
+            customFooter.setAlignment(Element.ALIGN_CENTER);
+            document.add(customFooter);
+        }
     }
 
     public byte[] generatePdfBySaleIdOrInvoiceNo(Long saleId, String invoiceNo) {

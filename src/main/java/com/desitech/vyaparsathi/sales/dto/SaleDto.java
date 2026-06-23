@@ -47,4 +47,9 @@ public class SaleDto {
     private String prescriptionNumber;
     /** Registration number of the prescribing doctor (required for Schedule H1 / X compliance). */
     private String doctorRegistrationNumber;
+
+    private java.time.LocalDate dueDate;
+    private BigDecimal invoiceDiscount;
+    private BigDecimal shippingCharges;
+    private BigDecimal otherCharges;
 }

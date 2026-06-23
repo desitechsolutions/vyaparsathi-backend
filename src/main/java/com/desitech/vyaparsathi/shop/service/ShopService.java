@@ -56,15 +56,13 @@ public class ShopService {
         Shop shop = shopMapper.toEntity(dto);
 
         if (logo != null && !logo.isEmpty()) {
-            String fileName = UUID.randomUUID().toString() + "_" + logo.getOriginalFilename();
             try {
-                Path path = Paths.get(uploadDir);
-                if (!Files.exists(path)) Files.createDirectories(path);
-                Files.copy(logo.getInputStream(), path.resolve(fileName), StandardCopyOption.REPLACE_EXISTING);
-                shop.setLogoPath(fileName);
-            } catch (IOException e) {
-                logger.error("Failed to save shop logo", e);
-                throw new RuntimeException("Could not save logo file", e);
+                UUID contextUuid = UUID.randomUUID();
+                String logoUrl = fileStorageService.storeFile(logo, "logos", contextUuid);
+                shop.setLogoPath(logoUrl);
+            } catch (Exception e) {
+                logger.error("Failed to save shop logo during onboarding", e);
+                throw new RuntimeException("Could not save logo file: " + e.getMessage(), e);
             }
         }
 

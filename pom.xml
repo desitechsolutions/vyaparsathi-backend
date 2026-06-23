@@ -133,6 +133,18 @@
       <version>3.0.0</version>
     </dependency>
 
+    <!-- QR Code Generation -->
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>core</artifactId>
+      <version>3.5.3</version>
+    </dependency>
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>javase</artifactId>
+      <version>3.5.3</version>
+    </dependency>
+
     <!-- Legacy PDF support for iText (for com.lowagie.text and com.lowagie.text.pdf) -->
     <dependency>
       <groupId>com.lowagie</groupId>

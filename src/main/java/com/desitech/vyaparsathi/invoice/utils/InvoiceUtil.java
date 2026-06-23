@@ -14,6 +14,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.qrcode.QRCodeWriter;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.client.j2se.MatrixToImageWriter;
+
 import java.awt.*;
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -84,6 +89,21 @@ public class InvoiceUtil {
                 }
             } else {
                 logger.warn("File not found in ClassPath: {}", fullResourcePath);
+            }
+
+            // ===========================================
+            // 4. LOCAL FILE SYSTEM LOOKUP (LOCAL DEV)
+            // ===========================================
+            java.io.File localFile = new java.io.File("uploads/" + dbPath);
+            if (!localFile.exists() && !dbPath.startsWith("logos/") && !dbPath.startsWith("signatures/")) {
+                localFile = new java.io.File("uploads/logos/" + dbPath);
+                if (!localFile.exists()) {
+                    localFile = new java.io.File("uploads/signatures/" + dbPath);
+                }
+            }
+            if (localFile.exists() && localFile.isFile()) {
+                logger.info("Loading {} from local filesystem: {}", type, localFile.getAbsolutePath());
+                return java.nio.file.Files.readAllBytes(localFile.toPath());
             }
 
         } catch (Exception ex) {
@@ -165,49 +185,60 @@ public class InvoiceUtil {
     }
 
     public static String numberToWords(BigDecimal number) {
-        if (number == null || number.compareTo(ZERO) == 0) return "Zero";
+        if (number == null || number.compareTo(ZERO) == 0) return "Zero Rupees";
+
+        long whole = number.longValue();
+        StringBuilder sb = new StringBuilder();
+
+        if (whole > 0) {
+            sb.append(convertToIndianWords(whole));
+        } else {
+            sb.append("Zero");
+        }
+
+        int paise = number.subtract(new BigDecimal(whole)).movePointRight(2).abs().intValue();
+        if (paise > 0) {
+            sb.append(" and ").append(convertToIndianWords(paise)).append(" Paise");
+        }
+
+        return sb.toString().trim().replaceAll("\\s+", " ") + " Rupees";
+    }
+
+    private static String convertToIndianWords(long n) {
+        if (n == 0) return "";
 
         String[] units = {"", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
                 "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"};
         String[] tens = {"", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"};
-        String[] scales = {"", "Thousand", "Lakh", "Crore"};
 
-        long whole = number.longValue();
         StringBuilder sb = new StringBuilder();
-        int scaleIdx = 0;
 
-        while (whole > 0) {
-            long chunk = whole % 1000;
-            if (chunk > 0) {
-                String chunkText = convertChunk((int) chunk, units, tens);
-                if (scaleIdx > 0) chunkText += " " + scales[scaleIdx];
-                sb.insert(0, chunkText + (sb.length() > 0 ? " " : ""));
-            }
-            whole /= 1000;
-            scaleIdx++;
+        if (n >= 10000000) {
+            sb.append(convertToIndianWords(n / 10000000)).append(" Crore ");
+            n %= 10000000;
         }
-
-        int paise = number.subtract(new BigDecimal(number.longValue())).movePointRight(2).abs().intValue();
-        if (paise > 0) {
-            sb.append(" and ").append(convertChunk(paise, units, tens)).append(" Paise");
+        if (n >= 100000) {
+            sb.append(convertToIndianWords(n / 100000)).append(" Lakh ");
+            n %= 100000;
         }
-
-        return sb.toString().trim() + " Rupees";
-    }
-
-    private static String convertChunk(int n, String[] units, String[] tens) {
-        StringBuilder sb = new StringBuilder();
+        if (n >= 1000) {
+            sb.append(convertToIndianWords(n / 1000)).append(" Thousand ");
+            n %= 1000;
+        }
         if (n >= 100) {
-            sb.append(units[n / 100]).append(" Hundred");
+            sb.append(units[(int)(n / 100)]).append(" Hundred ");
             n %= 100;
-            if (n > 0) sb.append(" and ");
+            if (n > 0) sb.append("and ");
         }
-        if (n >= 20) {
-            sb.append(tens[n / 10]);
-            n %= 10;
-            if (n > 0) sb.append(" ").append(units[n]);
-        } else if (n > 0) {
-            sb.append(units[n]);
+        if (n > 0) {
+            if (n < 20) {
+                sb.append(units[(int)n]).append(" ");
+            } else {
+                sb.append(tens[(int)(n / 10)]).append(" ");
+                if (n % 10 > 0) {
+                    sb.append(units[(int)(n % 10)]).append(" ");
+                }
+            }
         }
         return sb.toString();
     }
@@ -225,5 +256,25 @@ public class InvoiceUtil {
     public static void addTotalRow(PdfPTable table, String label, String value, com.lowagie.text.Font font) {
         PdfPCell lCell = new PdfPCell(new Phrase(label, font)); lCell.setBorder(Rectangle.NO_BORDER); table.addCell(lCell);
         PdfPCell vCell = new PdfPCell(new Phrase(value, font)); vCell.setBorder(Rectangle.NO_BORDER); vCell.setHorizontalAlignment(Element.ALIGN_RIGHT); table.addCell(vCell);
+    }
+
+    public static byte[] generateUPIDynamicQRCode(String upiId, String shopName, BigDecimal amount) {
+        if (upiId == null || upiId.isBlank()) return null;
+        try {
+            String data = "upi://pay?pa=" + java.net.URLEncoder.encode(upiId.trim(), "UTF-8") +
+                    "&pn=" + java.net.URLEncoder.encode(shopName != null ? shopName.trim() : "Shop", "UTF-8");
+            if (amount != null && amount.compareTo(ZERO) > 0) {
+                data += "&am=" + amount.setScale(2, java.math.RoundingMode.HALF_UP).toString();
+            }
+            data += "&cu=INR";
+            QRCodeWriter qrCodeWriter = new QRCodeWriter();
+            BitMatrix bitMatrix = qrCodeWriter.encode(data, BarcodeFormat.QR_CODE, 150, 150);
+            java.io.ByteArrayOutputStream pngOutputStream = new java.io.ByteArrayOutputStream();
+            MatrixToImageWriter.writeToStream(bitMatrix, "PNG", pngOutputStream);
+            return pngOutputStream.toByteArray();
+        } catch (Exception e) {
+            logger.warn("Failed to generate UPI QR code for UPI ID: {}", upiId, e);
+            return null;
+        }
     }
 }

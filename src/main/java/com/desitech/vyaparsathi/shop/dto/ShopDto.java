@@ -41,6 +41,13 @@ public class ShopDto {
     private String termsAndConditions;
     private String bankDetails;
 
+    private String upiId;
+    private String invoicePrefix;
+    private String companyWebsite;
+    private String invoiceFooter;
+    private String supportContact;
+    private Integer invoiceDueDays;
+
     /** Drug license number for pharmacy shops (shown on pharmacy invoices). */
     private String drugLicenseNumber;
 }

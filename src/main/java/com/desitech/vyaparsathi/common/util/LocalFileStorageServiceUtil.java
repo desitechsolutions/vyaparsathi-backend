@@ -35,8 +35,8 @@ public class LocalFileStorageServiceUtil implements FileStorageService {
 
     private String storeFileLocally(MultipartFile file, String folder, String fileName) throws IOException {
         try {
-            // Use a path under src/main/resources/static/ for static serving
-            Path targetDir = Paths.get("src/main/resources/static", uploadDir, folder).toAbsolutePath().normalize();
+            // Store under root uploads/ directory for dynamic, live local serving without compilation restarts
+            Path targetDir = Paths.get("uploads", folder).toAbsolutePath().normalize();
 
             if (!Files.exists(targetDir)) {
                 Files.createDirectories(targetDir);
@@ -47,10 +47,10 @@ public class LocalFileStorageServiceUtil implements FileStorageService {
             Files.write(filePath, file.getBytes());
             log.info("File stored locally at: {}", filePath);
 
-            // Construct the public URL
+            // Construct the path (e.g. logos/filename.png)
             return folder + "/" + fileName;
         } catch (IOException e) {
-            log.error("Failed to store file locally: uploadDir={}, folder={}, fileName={}", uploadDir, folder, fileName, e);
+            log.error("Failed to store file locally: folder={}, fileName={}", folder, fileName, e);
             throw new IOException("Failed to store file locally: " + e.getMessage(), e);
         }
     }

@@ -63,6 +63,24 @@ public class Shop {
     @Column(name = "bank_details", columnDefinition = "TEXT")
     private String bankDetails;
 
+    @Column(name = "upi_id")
+    private String upiId;
+
+    @Column(name = "invoice_prefix")
+    private String invoicePrefix;
+
+    @Column(name = "company_website")
+    private String companyWebsite;
+
+    @Column(name = "invoice_footer", columnDefinition = "TEXT")
+    private String invoiceFooter;
+
+    @Column(name = "support_contact")
+    private String supportContact;
+
+    @Column(name = "invoice_due_days")
+    private Integer invoiceDueDays = 30;
+
     /**
      * Drug license number for pharmacy shops.
      * Displayed on pharmacy invoices as required by regulatory compliance.

@@ -14,4 +14,10 @@ public interface PurchaseOrderRepository extends BaseRepository<PurchaseOrder, L
 
     @Query("SELECT po FROM PurchaseOrder po WHERE po.status IN (:includedStatuses)")
     List<PurchaseOrder> findAllByStatusIn(@Param("includedStatuses") List<PurchaseOrderStatus> includedStatuses);
+
+    List<PurchaseOrder> findBySupplierIdAndShopIdAndOrderDateBetween(
+            Long supplierId, Long shopId, java.time.LocalDateTime startDate, java.time.LocalDateTime endDate);
+
+    List<PurchaseOrder> findBySupplierIdAndShopIdAndOrderDateBefore(
+            Long supplierId, Long shopId, java.time.LocalDateTime date);
 }

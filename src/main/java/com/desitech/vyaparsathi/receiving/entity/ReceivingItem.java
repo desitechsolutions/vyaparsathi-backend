@@ -42,6 +42,28 @@ public class ReceivingItem extends ShopAwareEntity {
 
     private String notes;
 
+    @Column(name = "unit_cost", precision = 12, scale = 2)
+    private java.math.BigDecimal unitCost;
+
+    public int getAcceptedQty() {
+        int r = receivedQty != null ? receivedQty : 0;
+        int d = damagedQty != null ? damagedQty : 0;
+        int rej = rejectedQty != null ? rejectedQty : 0;
+        return Math.max(0, r - d - rej);
+    }
+
+    public int getShortQty() {
+        int exp = expectedQty != null ? expectedQty : 0;
+        int r = receivedQty != null ? receivedQty : 0;
+        return Math.max(0, exp - r);
+    }
+
+    public int getExcessQty() {
+        int exp = expectedQty != null ? expectedQty : 0;
+        int r = receivedQty != null ? receivedQty : 0;
+        return Math.max(0, r - exp);
+    }
+
     @Column(name = "putaway_qty")
     private Integer putawayQty;
 

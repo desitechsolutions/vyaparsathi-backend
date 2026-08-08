@@ -36,6 +36,10 @@ import java.util.stream.Collectors;
 
 import static java.math.BigDecimal.ZERO;
 
+import com.desitech.vyaparsathi.purchasereturn.entity.PurchaseReturn;
+import com.desitech.vyaparsathi.purchasereturn.repository.PurchaseReturnRepository;
+import org.springframework.context.annotation.Lazy;
+
 @Service
 public class PaymentServiceImpl implements PaymentService {
 
@@ -52,6 +56,10 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Autowired
     private PurchaseOrderRepository purchaseOrderRepository;
+
+    @Autowired
+    @Lazy
+    private PurchaseReturnRepository purchaseReturnRepository;
 
     @Autowired
     private CustomerLedgerService ledgerService;
@@ -426,7 +434,6 @@ public class PaymentServiceImpl implements PaymentService {
                 po.setPaymentStatus(status);
                 purchaseOrderRepository.save(po);
             }
-            // 🔮 In future: handle other types here
             default -> throw new UnsupportedOperationException("Unsupported sourceType: " + sourceType);
         }
     }

@@ -11,6 +11,10 @@ import java.time.LocalDate;
 public class ReceivingItemDto {
     private Long id;
     private Long purchaseOrderItemId;
+    private Long itemVariantId;
+    private String sku;
+    private String name;
+    private java.math.BigDecimal unitCost;
     private ReceivingItemStatus status;
     @Min(value = 0, message = "Expected quantity cannot be negative")
     private Integer expectedQty;
@@ -29,6 +33,30 @@ public class ReceivingItemDto {
     private String overageReason;
     private String overageNotes;
     private Boolean isOveraged = false;
+
+    public Integer getAcceptedQty() {
+        int r = receivedQty != null ? receivedQty : 0;
+        int d = damagedQty != null ? damagedQty : 0;
+        int rej = rejectedQty != null ? rejectedQty : 0;
+        return Math.max(0, r - d - rej);
+    }
+
+    public Integer getShortQty() {
+        int exp = expectedQty != null ? expectedQty : 0;
+        int r = receivedQty != null ? receivedQty : 0;
+        return Math.max(0, exp - r);
+    }
+
+    public Integer getExcessQty() {
+        int exp = expectedQty != null ? expectedQty : 0;
+        int r = receivedQty != null ? receivedQty : 0;
+        return Math.max(0, r - exp);
+    }
+
+    public java.math.BigDecimal getLineTotal() {
+        if (unitCost == null) return java.math.BigDecimal.ZERO;
+        return unitCost.multiply(java.math.BigDecimal.valueOf(getAcceptedQty()));
+    }
 
     // --- Pharmacy-specific fields ---
     /** Batch/lot number printed on the medicine packaging received from supplier. */

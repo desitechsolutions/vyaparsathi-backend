@@ -21,6 +21,9 @@ import java.util.List;
 @EntityListeners(AuditingEntityListener.class)
 public class Receiving extends ShopAwareEntity {
 
+    @Column(name = "gr_number", length = 50)
+    private String grNumber;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "purchase_order_id", nullable = false)
     private PurchaseOrder purchaseOrder;
@@ -28,6 +31,25 @@ public class Receiving extends ShopAwareEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ReceivingStatus status;
+
+    @Column(name = "supplier_invoice_no", length = 100)
+    private String supplierInvoiceNo;
+
+    @Column(name = "supplier_invoice_date")
+    private java.time.LocalDate supplierInvoiceDate;
+
+    @Column(name = "vehicle_no", length = 50)
+    private String vehicleNo;
+
+    @Column(name = "delivery_challan_no", length = 100)
+    private String deliveryChallanNo;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "approved_by_user_id")
+    private com.desitech.vyaparsathi.auth.entity.User approvedByUser;
+
+    @Column(name = "approved_at")
+    private LocalDateTime approvedAt;
 
     @CreatedDate
     private LocalDateTime receivedAt;

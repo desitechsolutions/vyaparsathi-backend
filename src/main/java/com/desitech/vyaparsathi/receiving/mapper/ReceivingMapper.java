@@ -14,10 +14,12 @@ public interface ReceivingMapper {
 
     // Receiving -> ReceivingDto
     @Mapping(target = "supplier", source = "purchaseOrder.supplier")
-    @Mapping(target = "receivingItems", source = "items", qualifiedByName = "receivingItemsToDtos")  // Key fix: Qualify to use element mapper
+    @Mapping(target = "receivingItems", source = "items", qualifiedByName = "receivingItemsToDtos")
     @Mapping(target = "purchaseOrderId", source = "purchaseOrder.id")
     @Mapping(target = "poNumber", source = "purchaseOrder.poNumber")
     @Mapping(target = "shopId", source = "shop.id")
+    @Mapping(target = "approvedByUserId", source = "approvedByUser.id")
+    @Mapping(target = "approvedByUserName", source = "approvedByUser.username")
     ReceivingDto toDto(Receiving entity);
 
     List<ReceivingDto> toDtoList(List<Receiving> entities);
@@ -32,6 +34,10 @@ public interface ReceivingMapper {
     @Named("toItemDto")  // Qualifier name for element mapping
     @Mapping(target = "purchaseOrderItemId", source = "purchaseOrderItem.id")
     @Mapping(target = "expectedQty", source = "purchaseOrderItem.quantity")  // Nested mapping from PO item
+    @Mapping(target = "itemVariantId", source = "purchaseOrderItem.itemVariant.id")
+    @Mapping(target = "sku", source = "purchaseOrderItem.itemVariant.sku")
+    @Mapping(target = "name", source = "purchaseOrderItem.itemVariant.item.name")
+    @Mapping(target = "unitCost", source = "purchaseOrderItem.unitCost")
     ReceivingItemDto toItemDto(ReceivingItem entity);  // Renamed from toDto
 
     // Explicit collection mapper for ReceivingItem -> ReceivingItemDto (uses toItemDto)

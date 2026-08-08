@@ -28,6 +28,25 @@ import java.util.List;
  * Delegates persistence to the unified {@link PaymentService} so that all payment
  * records live in the shared {@code payment} table.
  */
+import com.desitech.vyaparsathi.common.util.TenantUtils;
+import com.desitech.vyaparsathi.payment.repository.PaymentRepository;
+import com.desitech.vyaparsathi.payment.entity.Payment;
+import com.desitech.vyaparsathi.purchasereturn.entity.PurchaseReturn;
+import com.desitech.vyaparsathi.purchasereturn.enums.PurchaseReturnStatus;
+import com.desitech.vyaparsathi.purchasereturn.repository.PurchaseReturnRepository;
+import com.desitech.vyaparsathi.supplier.dto.SupplierStatementDto;
+import com.desitech.vyaparsathi.supplier.dto.SupplierStatementEntryDto;
+import com.desitech.vyaparsathi.supplier.entity.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.*;
+
 @Service
 public class SupplierPaymentService {
 
@@ -35,7 +54,13 @@ public class SupplierPaymentService {
     private PaymentService paymentService;
 
     @Autowired
+    private PaymentRepository paymentRepository;
+
+    @Autowired
     private PurchaseOrderRepository purchaseOrderRepository;
+
+    @Autowired
+    private PurchaseReturnRepository purchaseReturnRepository;
 
     @Autowired
     private SupplierRepository supplierRepository;
@@ -161,6 +186,106 @@ public class SupplierPaymentService {
         BigDecimal due = paymentService.calculateDueAmount(poId, PaymentSourceType.PURCHASE_ORDER, total);
         BigDecimal paid = total.subtract(due).max(BigDecimal.ZERO);
         return new PurchaseOrderPaymentSummaryDto(poId, po.getPoNumber(), total, paid, due, po.getPaymentStatus());
+    }
+
+    /**
+     * Dynamically calculates a supplier ledger statement (Opening Balance, PO Invoices, Payments, Debit Notes, Running Balance).
+     */
+    public SupplierStatementDto getSupplierStatement(Long supplierId, LocalDateTime startDate, LocalDateTime endDate) {
+        Supplier supplier = supplierRepository.findById(supplierId)
+                .orElseThrow(() -> new ResourceNotFoundException("Supplier not found with ID: " + supplierId));
+
+        Long shopId = TenantUtils.getCurrentShopId();
+        LocalDateTime start = startDate != null ? startDate : LocalDateTime.now().minusMonths(1);
+        LocalDateTime end = endDate != null ? endDate : LocalDateTime.now();
+
+        // 1. Calculate Opening Balance (Prior to start date)
+        List<PurchaseOrder> priorPOs = purchaseOrderRepository.findBySupplierIdAndShopIdAndOrderDateBefore(supplierId, shopId, start);
+        List<Payment> priorPayments = paymentRepository.findBySupplierIdAndShopIdAndPaymentDateBefore(supplierId, shopId, start);
+        List<PurchaseReturn> priorReturns = purchaseReturnRepository.findBySupplierIdAndStatusAndShopIdAndReturnDateBefore(
+                supplierId, PurchaseReturnStatus.APPROVED, shopId, start);
+
+        BigDecimal priorBilled = priorPOs.stream().map(po -> Optional.ofNullable(po.getTotalAmount()).orElse(BigDecimal.ZERO)).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal priorPaid = priorPayments.stream().filter(p -> !PaymentSourceType.PURCHASE_RETURN.equals(p.getSourceType())).map(p -> Optional.ofNullable(p.getAmount()).orElse(BigDecimal.ZERO)).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal priorReturned = priorReturns.stream().map(pr -> Optional.ofNullable(pr.getTotalAmount()).orElse(BigDecimal.ZERO)).reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal openingBalance = priorBilled.subtract(priorPaid).subtract(priorReturned);
+
+        // 2. Fetch Period Transactions
+        List<PurchaseOrder> periodPOs = purchaseOrderRepository.findBySupplierIdAndShopIdAndOrderDateBetween(supplierId, shopId, start, end);
+        List<Payment> periodPayments = paymentRepository.findBySupplierIdAndShopIdAndPaymentDateBetween(supplierId, shopId, start, end);
+        List<PurchaseReturn> periodReturns = purchaseReturnRepository.findBySupplierIdAndStatusAndShopIdAndReturnDateBetween(
+                supplierId, PurchaseReturnStatus.APPROVED, shopId, start, end);
+
+        List<SupplierStatementEntryDto> entries = new ArrayList<>();
+        BigDecimal totalBilled = BigDecimal.ZERO;
+        BigDecimal totalPaid = BigDecimal.ZERO;
+        BigDecimal totalReturned = BigDecimal.ZERO;
+
+        for (PurchaseOrder po : periodPOs) {
+            BigDecimal amt = Optional.ofNullable(po.getTotalAmount()).orElse(BigDecimal.ZERO);
+            totalBilled = totalBilled.add(amt);
+            entries.add(new SupplierStatementEntryDto(
+                    po.getOrderDate(),
+                    "PURCHASE_ORDER",
+                    po.getPoNumber(),
+                    "Purchase Order Invoice " + po.getPoNumber(),
+                    BigDecimal.ZERO,
+                    amt,
+                    BigDecimal.ZERO
+            ));
+        }
+
+        for (Payment payment : periodPayments) {
+            if (PaymentSourceType.PURCHASE_RETURN.equals(payment.getSourceType())) {
+                continue;
+            }
+            BigDecimal amt = Optional.ofNullable(payment.getAmount()).orElse(BigDecimal.ZERO);
+            totalPaid = totalPaid.add(amt);
+            entries.add(new SupplierStatementEntryDto(
+                    payment.getPaymentDate(),
+                    "PAYMENT",
+                    payment.getReference() != null ? payment.getReference() : "PAY-" + payment.getId(),
+                    "Payment (" + payment.getPaymentMethod() + ")",
+                    amt,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO
+            ));
+        }
+
+        for (PurchaseReturn pr : periodReturns) {
+            BigDecimal amt = Optional.ofNullable(pr.getTotalAmount()).orElse(BigDecimal.ZERO);
+            totalReturned = totalReturned.add(amt);
+            entries.add(new SupplierStatementEntryDto(
+                    pr.getReturnDate(),
+                    "PURCHASE_RETURN",
+                    pr.getReturnNo(),
+                    "Debit Note for Purchase Return " + pr.getReturnNo(),
+                    amt,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO
+            ));
+        }
+
+        entries.sort(Comparator.comparing(SupplierStatementEntryDto::getDate));
+
+        BigDecimal currentRunning = openingBalance;
+        for (SupplierStatementEntryDto entry : entries) {
+            currentRunning = currentRunning.add(entry.getCreditAmount()).subtract(entry.getDebitAmount());
+            entry.setRunningBalance(currentRunning);
+        }
+
+        SupplierStatementDto statement = new SupplierStatementDto();
+        statement.setSupplierId(supplier.getId());
+        statement.setSupplierName(supplier.getName());
+        statement.setOpeningBalance(openingBalance);
+        statement.setClosingBalance(currentRunning);
+        statement.setTotalBilled(totalBilled);
+        statement.setTotalPaid(totalPaid);
+        statement.setTotalReturned(totalReturned);
+        statement.setStatementEntries(entries);
+
+        return statement;
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────

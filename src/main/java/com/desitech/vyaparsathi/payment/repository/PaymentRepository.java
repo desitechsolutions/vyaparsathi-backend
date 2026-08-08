@@ -44,4 +44,10 @@ public interface PaymentRepository extends BaseRepository<Payment, Long> {
     );
     @Query("SELECT p.paymentMethod FROM Payment p WHERE p.sourceType = :type AND p.sourceId = :id")
     Set<PaymentMethod> findPaymentMethodsBySource(@Param("type") PaymentSourceType type, @Param("id") Long id);
+
+    List<Payment> findBySupplierIdAndShopIdAndPaymentDateBetween(
+            Long supplierId, Long shopId, java.time.LocalDateTime startDate, java.time.LocalDateTime endDate);
+
+    List<Payment> findBySupplierIdAndShopIdAndPaymentDateBefore(
+            Long supplierId, Long shopId, java.time.LocalDateTime date);
 }

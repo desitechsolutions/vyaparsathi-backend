@@ -13,6 +13,7 @@ import java.util.List;
 @Data
 public class ReceivingDto {
     private Long id;
+    private String grNumber;
 
     @NotNull(message = "Purchase Order ID is required")
     private Long purchaseOrderId;
@@ -31,6 +32,14 @@ public class ReceivingDto {
 
     @NotNull(message = "Shop ID is required")
     private Long shopId;
+
+    private String supplierInvoiceNo;
+    private java.time.LocalDate supplierInvoiceDate;
+    private String vehicleNo;
+    private String deliveryChallanNo;
+    private Long approvedByUserId;
+    private String approvedByUserName;
+    private LocalDateTime approvedAt;
 
     private SupplierDto supplier;
     private Integer putawayQty;

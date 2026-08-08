@@ -107,6 +107,10 @@ public class ReceivingService {
 
         Receiving receiving = createPendingReceiving(purchaseOrder, receivingDto.getNotes(), receivingDto.getReceivedBy());
         receiving.setShop(shop);  // Override default if specified
+        receiving.setSupplierInvoiceNo(receivingDto.getSupplierInvoiceNo());
+        receiving.setSupplierInvoiceDate(receivingDto.getSupplierInvoiceDate());
+        receiving.setVehicleNo(receivingDto.getVehicleNo());
+        receiving.setDeliveryChallanNo(receivingDto.getDeliveryChallanNo());
 
         // Process detailed items with validation
         List<ReceivingItem> receivingItems = processReceivingItems(receivingDto.getReceivingItems(), receiving, true);
@@ -138,8 +142,12 @@ public class ReceivingService {
                     Map<Long, BigDecimal> oldCosts = existingReceiving.getItems().stream()
                             .collect(Collectors.toMap(ReceivingItem::getId, item -> item.getPurchaseOrderItem().getUnitCost()));
 
-                    // Update allowed fields only (no PO, no shop, no receivedAt)
+                    // Update allowed fields
                     existingReceiving.setNotes(receivingDto.getNotes());
+                    existingReceiving.setSupplierInvoiceNo(receivingDto.getSupplierInvoiceNo());
+                    existingReceiving.setSupplierInvoiceDate(receivingDto.getSupplierInvoiceDate());
+                    existingReceiving.setVehicleNo(receivingDto.getVehicleNo());
+                    existingReceiving.setDeliveryChallanNo(receivingDto.getDeliveryChallanNo());
 
                     // Process items with update logic (add/remove/update)
                     List<ReceivingItem> updatedItems = processReceivingItems(receivingDto.getReceivingItems(), existingReceiving, false);
@@ -339,6 +347,7 @@ public class ReceivingService {
         Shop defaultShop = getDefaultShop();
 
         Receiving receiving = new Receiving();
+        receiving.setGrNumber("GR-" + java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss")));
         receiving.setPurchaseOrder(po);
         receiving.setStatus(ReceivingStatus.PENDING);
         receiving.setNotes(Optional.ofNullable(notes).orElse("Auto-created receiving record."));
@@ -399,10 +408,11 @@ public class ReceivingService {
         for (ReceivingItem item : newReceiving.getItems()) {
             Long itemId = item.getId();
             int oldQty = oldReceivedQtys.getOrDefault(itemId, 0);
-            int delta = item.getReceivedQty() - oldQty;
+            int currentAccepted = item.getAcceptedQty();
+            int delta = currentAccepted - oldQty;
             if (delta != 0) {
                 ItemVariant variant = item.getPurchaseOrderItem().getItemVariant();
-                BigDecimal cost = item.getPurchaseOrderItem().getUnitCost();
+                BigDecimal cost = item.getUnitCost() != null ? item.getUnitCost() : item.getPurchaseOrderItem().getUnitCost();
                 StockMovementType type = delta > 0 ? StockMovementType.ADD : StockMovementType.DEDUCT;
                 createStockMovement(variant, cost, type, Math.abs(delta), newReceiving.getId().toString(),
                         item.getBatchNumber(), item.getExpiryDate());
@@ -433,7 +443,8 @@ public class ReceivingService {
         StockMovement stockMovement = new StockMovement();
         stockMovement.setItemVariant(variant);
         stockMovement.setMovementType(type);
-        stockMovement.setQuantity(BigDecimal.valueOf(quantity));
+        BigDecimal qty = BigDecimal.valueOf(quantity);
+        stockMovement.setQuantity(type == StockMovementType.DEDUCT ? qty.negate() : qty);
         stockMovement.setCostPerUnit(cost);
         stockMovement.setBatch(batchNumber);
         stockMovement.setExpiryDate(expiryDate);

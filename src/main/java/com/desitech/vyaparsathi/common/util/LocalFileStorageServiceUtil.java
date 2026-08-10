@@ -12,10 +12,13 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.UUID;
 
-@Slf4j
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 @Component
 @Profile("local")
 public class LocalFileStorageServiceUtil implements FileStorageService {
+    private static final Logger log = LoggerFactory.getLogger(LocalFileStorageServiceUtil.class);
 
     @Value("${spring.file.upload.dir:uploads}")
     private String uploadDir;

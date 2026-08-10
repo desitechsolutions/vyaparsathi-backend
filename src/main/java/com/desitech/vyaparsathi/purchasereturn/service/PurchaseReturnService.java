@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.purchasereturn.service;
 
+import com.desitech.vyaparsathi.common.annotations.LogAudit;
 import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.common.exception.ResourceNotFoundException;
 import com.desitech.vyaparsathi.common.util.TenantUtils;
@@ -29,6 +30,7 @@ import com.desitech.vyaparsathi.receiving.entity.ReceivingItem;
 import com.desitech.vyaparsathi.receiving.repository.ReceivingRepository;
 import com.desitech.vyaparsathi.supplier.entity.Supplier;
 import com.desitech.vyaparsathi.supplier.repository.SupplierRepository;
+import com.desitech.vyaparsathi.supplier.service.SupplierLedgerService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -72,6 +74,10 @@ public class PurchaseReturnService {
 
     @Autowired
     private PurchaseReturnMapper purchaseReturnMapper;
+
+    // Issue 4 Fix: Inject SupplierLedgerService to record debit notes on approval
+    @Autowired
+    private SupplierLedgerService supplierLedgerService;
 
     @Transactional
     public PurchaseReturnDto createPurchaseReturn(CreatePurchaseReturnDto dto) {
@@ -133,6 +139,7 @@ public class PurchaseReturnService {
     }
 
     @Transactional
+    @LogAudit(action = "APPROVE_PURCHASE_RETURN", entity = "PURCHASE_RETURN")
     public PurchaseReturnDto approvePurchaseReturn(Long id) {
         PurchaseReturn purchaseReturn = purchaseReturnRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Purchase Return not found with ID: " + id));
@@ -169,12 +176,27 @@ public class PurchaseReturnService {
 
         purchaseReturn.setStatus(PurchaseReturnStatus.APPROVED);
         PurchaseReturn updated = purchaseReturnRepository.save(purchaseReturn);
-        logger.info("Approved Purchase Return {} (ID: {}) - Stock deducted", updated.getReturnNo(), updated.getId());
+
+        // Issue 4 Fix: Record a Debit Note in Supplier Ledger to reduce payable balance
+        // This ensures Supplier Payment screen shows net payable = originalAmount - returns - cashPaid
+        Supplier supplier = updated.getSupplier();
+        supplierLedgerService.recordEntry(
+                supplier,
+                "DEBIT_NOTE",
+                updated.getReturnNo(),
+                updated.getTotalAmount(),  // debitAmount: reduces supplier payable
+                java.math.BigDecimal.ZERO, // no creditAmount for a return/debit note
+                "Purchase Return Debit Note: " + updated.getReturnNo()
+        );
+
+        logger.info("Approved Purchase Return {} (ID: {}) - Stock deducted, Debit Note recorded",
+                updated.getReturnNo(), updated.getId());
 
         return purchaseReturnMapper.toDto(updated);
     }
 
     @Transactional
+    @LogAudit(action = "CANCEL_PURCHASE_RETURN", entity = "PURCHASE_RETURN")
     public PurchaseReturnDto cancelPurchaseReturn(Long id) {
         PurchaseReturn purchaseReturn = purchaseReturnRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Purchase Return not found with ID: " + id));

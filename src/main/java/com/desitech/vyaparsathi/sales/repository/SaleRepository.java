@@ -52,6 +52,14 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     @Query("SELECT s FROM Sale s WHERE s.shop.id = :shopId AND s.status <> 'CANCELLED'")
     List<Sale> findAllByShopId(@Param("shopId") Long shopId);
 
+    @EntityGraph(attributePaths = {"saleItems", "customer"}, type = EntityGraph.EntityGraphType.LOAD)
+    @Query("SELECT s FROM Sale s WHERE s.shop.id = :shopId AND s.status <> 'CANCELLED' ORDER BY s.date DESC")
+    Page<Sale> findAllByShopId(@Param("shopId") Long shopId, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"saleItems", "customer"}, type = EntityGraph.EntityGraphType.LOAD)
+    @Query("SELECT s FROM Sale s WHERE s.shop.id = :shopId AND s.date >= :start AND s.date <= :end AND s.status <> 'CANCELLED' ORDER BY s.date ASC")
+    List<Sale> findAllByShopIdAndDateBetween(@Param("shopId") Long shopId, @Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
     List<Sale> findByCustomerIdAndPaymentStatusInOrderByIdAsc(
             Long customerId,
             List<PaymentStatus> statuses
@@ -63,7 +71,6 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     @Query("SELECT s FROM Sale s WHERE s.invoiceNo LIKE %:q%")
     List<Sale> searchByInvoicePartial(@Param("q") String q);
 
-    @Query("SELECT COUNT(s) FROM Sale s WHERE s.shop.id = :shopId AND s.date >= :startDate")
+    @Query("SELECT COUNT(s) FROM Sale s WHERE s.shop.id = :shopId AND s.date >= :startDate AND s.status <> com.desitech.vyaparsathi.sales.enums.SaleStatus.DRAFT")
     long countMonthlySalesByShop(@Param("shopId") Long shopId, @Param("startDate") LocalDateTime startDate);
-
 }

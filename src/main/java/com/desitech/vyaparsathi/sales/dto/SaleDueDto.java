@@ -1,13 +1,15 @@
 package com.desitech.vyaparsathi.sales.dto;
 
 import lombok.AllArgsConstructor;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-@Data
+@Getter
+@Setter
 @AllArgsConstructor
 @NoArgsConstructor
 public class SaleDueDto {
@@ -27,7 +29,10 @@ public class SaleDueDto {
     private String shopName;
     private String postalCode;
     private String status;
-
-
-
+    private String einvoiceStatus;
+    private String irn;
+    private String ackNo;
+    private LocalDateTime ackDate;
+    private String qrCodePath;
+    private String ewayBillNo;
 }

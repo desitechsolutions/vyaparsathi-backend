@@ -133,4 +133,19 @@ public class GlobalExceptionHandler {
         error.put("message", ex.getMessage());
         return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
     }
+
+    @ExceptionHandler(FeatureRestrictedException.class)
+    public ResponseEntity<Map<String, Object>> handleFeatureRestricted(FeatureRestrictedException ex) {
+        Map<String, Object> response = new java.util.LinkedHashMap<>();
+        response.put("code", ex.getCode());
+        response.put("feature", ex.getFeature());
+        response.put("message", ex.getMessage());
+
+        Map<String, Object> upgradeOptions = new java.util.LinkedHashMap<>();
+        upgradeOptions.put("canStartTrial", ex.isCanStartTrial());
+        upgradeOptions.put("trialDays", ex.getTrialDays());
+
+        response.put("upgradeOptions", upgradeOptions);
+        return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED).body(response);
+    }
 }

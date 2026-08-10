@@ -2,7 +2,7 @@ package com.desitech.vyaparsathi.reports.service;
 
 import com.desitech.vyaparsathi.inventory.entity.Category;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
-import com.desitech.vyaparsathi.inventory.enums.DrugSchedule;
+
 import com.desitech.vyaparsathi.inventory.repository.ItemVariantRepository;
 import com.desitech.vyaparsathi.inventory.service.StockService;
 import com.desitech.vyaparsathi.payment.service.PaymentService;
@@ -609,7 +609,7 @@ public class ReportService {
                     ExpiryReportItemDto dto = new ExpiryReportItemDto();
                     dto.setItemVariantId(variant.getId());
                     dto.setItemName(variant.getItem().getName());
-                    dto.setComposition(variant.getItem().getComposition());
+                    dto.setSpecifications(variant.getItem().getSpecifications());
                     dto.setSku(variant.getSku());
                     dto.setBatchNumber(variant.getBatchNumber());
                     dto.setManufacturingDate(variant.getManufacturingDate());
@@ -632,49 +632,6 @@ public class ReportService {
     }
 
     /**
-     * Returns a register of sales for Schedule H, H1, and X (narcotic) drugs in a date range.
-     * Powers GET /api/reports/narcotics-register?from={from}&amp;to={to}
-     */
-    public List<NarcoticsRegisterEntryDto> getNarcoticsRegister(LocalDate from, LocalDate to) {
-        validateDateRange(from, to);
-        List<Sale> sales = getSalesByDateRange(from, to);
-
-        Set<String> controlledSchedules = Set.of(
-                DrugSchedule.SCHEDULE_H.getValue(),
-                DrugSchedule.SCHEDULE_H1.getValue(),
-                DrugSchedule.SCHEDULE_X.getValue()
-        );
-
-        List<NarcoticsRegisterEntryDto> result = new ArrayList<>();
-        for (Sale sale : sales) {
-            for (SaleItem saleItem : sale.getSaleItems()) {
-                ItemVariant variant = saleItem.getItemVariant();
-                if (variant == null || variant.getItem() == null) continue;
-
-                DrugSchedule schedule = variant.getItem().getDrugSchedule();
-                if (schedule == null || !controlledSchedules.contains(schedule.getValue())) continue;
-
-                NarcoticsRegisterEntryDto entry = new NarcoticsRegisterEntryDto();
-                entry.setSaleDate(sale.getDate());
-                entry.setInvoiceNo(sale.getInvoiceNo());
-                entry.setItemName(variant.getItem().getName());
-                entry.setComposition(variant.getItem().getComposition());
-                entry.setDrugSchedule(schedule.getValue());
-                entry.setQty(saleItem.getQty());
-                entry.setUnit(variant.getUnit());
-                entry.setCustomerName(sale.getCustomer() != null ? sale.getCustomer().getName() : null);
-                entry.setDoctorName(sale.getDoctorName());
-                entry.setPatientName(sale.getPatientName());
-                entry.setBatchNumber(variant.getBatchNumber());
-                result.add(entry);
-            }
-        }
-
-        result.sort(Comparator.comparing(NarcoticsRegisterEntryDto::getSaleDate));
-        return result;
-    }
-
-    /**
      * Returns a batch-wise purchase register for a date range.
      * Powers GET /api/reports/purchase-register?from={from}&amp;to={to}
      */
@@ -692,9 +649,6 @@ public class ReportService {
             String supplierName = (receiving.getPurchaseOrder() != null
                     && receiving.getPurchaseOrder().getSupplier() != null)
                     ? receiving.getPurchaseOrder().getSupplier().getName() : null;
-            String supplierDlNumber = (receiving.getPurchaseOrder() != null
-                    && receiving.getPurchaseOrder().getSupplier() != null)
-                    ? receiving.getPurchaseOrder().getSupplier().getDrugLicenseNumber() : null;
             LocalDate receivedDate = receiving.getReceivedAt() != null
                     ? receiving.getReceivedAt().toLocalDate() : null;
 
@@ -713,9 +667,8 @@ public class ReportService {
                 entry.setReceivedDate(receivedDate);
                 entry.setPoNumber(poNumber);
                 entry.setSupplierName(supplierName);
-                entry.setSupplierDlNumber(supplierDlNumber);
                 entry.setItemName(variant.getItem() != null ? variant.getItem().getName() : null);
-                entry.setComposition(variant.getItem() != null ? variant.getItem().getComposition() : null);
+                entry.setSpecifications(variant.getItem() != null ? variant.getItem().getSpecifications() : null);
                 entry.setBatchNumber(item.getBatchNumber());
                 entry.setManufacturingDate(item.getManufacturingDate());
                 entry.setExpiryDate(item.getExpiryDate());

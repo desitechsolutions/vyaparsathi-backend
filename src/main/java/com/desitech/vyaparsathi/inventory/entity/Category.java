@@ -26,4 +26,13 @@ public class Category extends ShopAwareEntity {
 
     @OneToMany(mappedBy = "parent", cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<Category> children = new HashSet<>();
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public Category getParent() { return parent; }
+    public void setParent(Category parent) { this.parent = parent; }
+
+    public Set<Category> getChildren() { return children; }
+    public void setChildren(Set<Category> children) { this.children = children; }
 }

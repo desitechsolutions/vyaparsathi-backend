@@ -125,12 +125,10 @@ public class StockService {
 
             dto.setBatch(null);
 
-            // Pharmacy-specific fields from ItemVariant
+            // Generic retail fields from ItemVariant
             dto.setBatchNumber(variant.getBatchNumber());
             dto.setExpiryDate(variant.getExpiryDate());
             dto.setMrp(variant.getMrp());
-            dto.setIsLooseMedicine(variant.getIsLooseMedicine());
-            dto.setPackSize(variant.getPackSize());
 
             return dto;
         }).collect(Collectors.toList());
@@ -178,8 +176,6 @@ public class StockService {
                 dto.setSku(variant.getSku());
                 dto.setUnit(variant.getUnit());
                 dto.setMrp(variant.getMrp());
-                dto.setIsLooseMedicine(variant.getIsLooseMedicine());
-                dto.setPackSize(variant.getPackSize());
             }
             return dto;
         }).collect(Collectors.toList());

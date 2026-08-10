@@ -37,6 +37,7 @@ public class SubscriptionServiceTest {
 
     @Mock private SubscriptionRepository subscriptionRepository;
     @Mock private SubscriptionPayRepository subscriptionPayRepository;
+    @Mock private com.desitech.vyaparsathi.subscriptions.razorpay.repository.RazorpaySubscriptionOrderRepository subscriptionOrderRepository;
     @Mock private ShopRepository shopRepository;
     @Mock private UserRepository userRepository;
     @Mock private PricingPlanService pricingPlanService;

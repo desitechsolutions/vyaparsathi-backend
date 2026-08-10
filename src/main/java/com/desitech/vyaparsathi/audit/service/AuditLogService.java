@@ -34,6 +34,17 @@ public class AuditLogService {
         log.setUserAgent(ua);
         log.setTimestamp(LocalDateTime.now());
 
+        // Check if current thread is running inside an Impersonation Session
+        if (com.desitech.vyaparsathi.auth.security.ImpersonationContext.isImpersonating()) {
+            var impDetails = com.desitech.vyaparsathi.auth.security.ImpersonationContext.get();
+            if (impDetails != null) {
+                log.setActorAdminId(impDetails.getActorAdminId());
+                log.setImpersonationSessionId(impDetails.getImpersonationSessionId());
+                log.setTargetShopId(impDetails.getTargetShopId());
+                log.setDetails("[IMPERSONATED BY ADMIN #" + impDetails.getActorAdminId() + "] " + (details != null ? details : ""));
+            }
+        }
+
         repository.save(log);
     }
 
@@ -72,16 +83,22 @@ public class AuditLogService {
      * Mapper to convert Entity to DTO, including forensic IP and User Agent info.
      */
     private AuditLogDto toDto(AuditLog log) {
-        return new AuditLogDto(
-                log.getId(),
-                log.getUsername(),
-                log.getAction(),
-                log.getEntity(),
-                log.getEntityId(),
-                log.getDetails(),
-                log.getTimestamp(),
-                log.getIpAddress(),
-                log.getUserAgent()
-        );
+        AuditLogDto dto = new AuditLogDto();
+        dto.setId(log.getId());
+        dto.setUsername(log.getUsername());
+        dto.setAction(log.getAction());
+        dto.setEntity(log.getEntity());
+        dto.setEntityId(log.getEntityId());
+        dto.setDetails(log.getDetails());
+        dto.setTimestamp(log.getTimestamp());
+        dto.setIpAddress(log.getIpAddress());
+        dto.setUserAgent(log.getUserAgent());
+        dto.setActorAdminId(log.getActorAdminId());
+        dto.setTargetShopId(log.getTargetShopId());
+        dto.setReason(log.getReason());
+        dto.setPreviousValue(log.getPreviousValue());
+        dto.setNewValue(log.getNewValue());
+        dto.setImpersonationSessionId(log.getImpersonationSessionId());
+        return dto;
     }
 }

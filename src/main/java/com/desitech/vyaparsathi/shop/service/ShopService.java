@@ -3,6 +3,8 @@ package com.desitech.vyaparsathi.shop.service;
 import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.model.Role;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
+import com.desitech.vyaparsathi.auth.security.JwtUtil;
+import com.desitech.vyaparsathi.auth.service.RefreshTokenService;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.common.util.FileStorageService;
@@ -39,6 +41,8 @@ public class ShopService {
     @Autowired private UserRepository userRepository;
     @Autowired private CategoryRepository categoryRepository;
     @Autowired private ShopMapper shopMapper;
+    @Autowired private JwtUtil jwtUtil;
+    @Autowired private RefreshTokenService refreshTokenService;
 
     @Autowired
     private FileStorageService fileStorageService;
@@ -80,10 +84,15 @@ public class ShopService {
             TenantContext.clear();
         }
 
+        String newJwtToken = jwtUtil.generateAccessToken(currentUser,shop.getId());
+        String refreshToken = refreshTokenService.createRefreshToken(currentUser.getUsername()).getToken();
         logger.info("Onboarding completed - Shop created: id={}, name={}, industry={}",
                 shop.getId(), shop.getName(), dto.getIndustryType());
 
-        return shopMapper.toDto(shop);
+        ShopDto shopDto = shopMapper.toDto(shop);
+        shopDto.setAccessToken(newJwtToken);
+        shopDto.setRefreshToken(refreshToken);
+        return shopDto;
     }
 
     private void seedDefaultCategories(Shop shop, String industryType) {

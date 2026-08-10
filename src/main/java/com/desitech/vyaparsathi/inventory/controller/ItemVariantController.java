@@ -85,15 +85,35 @@ public class ItemVariantController {
             @RequestParam(required = false) String fabric,
             @RequestParam(required = false) String season,
             @RequestParam(required = false) String fit,
+            @RequestParam(required = false) String specifications,
             @RequestParam(required = false) String composition
     ) {
         try {
-            List<ItemVariantDto> dtos = service.searchItemVariants(name,category,color,size,style,sku,fabric,season,fit,composition);
-            logger.info("Searched item variants with filters: name={}, category={}, color={}, size={}, style={}, sku={}, composition={}", name, category, color, size, style, sku, composition);
+            String specs = specifications != null ? specifications : composition;
+            List<ItemVariantDto> dtos = service.searchItemVariants(name, category, color, size, style, sku, fabric, season, fit, specs);
+            logger.info("Searched item variants with filters: name={}, category={}, color={}, size={}, style={}, sku={}, specifications={}", name, category, color, size, style, sku, specs);
             return ResponseEntity.ok(dtos);
         } catch (Exception e) {
             logger.error("Error searching item variants: {}", e.getMessage(), e);
             throw new ApplicationException("Failed to search item variants", e);
+        }
+    }
+
+    /**
+     * POS Barcode / QR scanner lookup.
+     * Used by POS terminals to resolve a scanned barcode to the full item details + live stock.
+     *
+     * GET /api/item-variants/barcode/{code}
+     */
+    @GetMapping("/barcode/{code}")
+    public ResponseEntity<ItemVariantDto> lookupByBarcode(@PathVariable String code) {
+        try {
+            ItemVariantDto result = service.lookupByBarcode(code);
+            logger.info("Barcode lookup success for code={}", code);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Barcode lookup failed for code={}: {}", code, e.getMessage(), e);
+            throw new ApplicationException("Item not found for barcode: " + code, e);
         }
     }
 }

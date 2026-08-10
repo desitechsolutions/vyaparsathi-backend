@@ -7,4 +7,7 @@ import jakarta.validation.constraints.NotNull;
 public class StatusRequest {
     @NotNull(message = "Active status is required")
     private boolean active;
+
+    public boolean isActive() { return active; }
+    public void setActive(boolean active) { this.active = active; }
 }

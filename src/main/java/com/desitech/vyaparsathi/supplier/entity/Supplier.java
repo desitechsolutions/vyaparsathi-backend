@@ -29,10 +29,25 @@ public class Supplier extends ShopAwareEntity {
     @Column
     private String gstin;
 
-    /**
-     * Drug License number for pharmacy suppliers.
-     * Required for pharmacy regulatory compliance and purchase register entries.
-     */
-    @Column(name = "drug_license_number")
-    private String drugLicenseNumber;
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public String getSupplierName() { return name; }
+
+    public String getContactPerson() { return contactPerson; }
+    public void setContactPerson(String contactPerson) { this.contactPerson = contactPerson; }
+
+    public String getPhone() { return phone; }
+    public void setPhone(String phone) { this.phone = phone; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+
+    public String getAddress() { return address; }
+    public void setAddress(String address) { this.address = address; }
+
+    public String getGstin() { return gstin; }
+    public void setGstin(String gstin) { this.gstin = gstin; }
+
+    public String getGstNumber() { return gstin; }
 }

@@ -18,13 +18,19 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 @Aspect
 @Component
-@Slf4j
-@RequiredArgsConstructor
 public class AuditAspect {
+    private static final Logger log = LoggerFactory.getLogger(AuditAspect.class);
 
     private final AuditLogService auditLogService;
+
+    public AuditAspect(AuditLogService auditLogService) {
+        this.auditLogService = auditLogService;
+    }
 
     @Around("@annotation(logAudit)")
     public Object audit(ProceedingJoinPoint joinPoint, LogAudit logAudit) throws Throwable {

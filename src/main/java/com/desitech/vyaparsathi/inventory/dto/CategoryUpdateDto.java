@@ -6,7 +6,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-// 3. Update DTO (used for PUT/PATCH /api/categories/{id})
 @Data
 @Builder
 @NoArgsConstructor
@@ -17,4 +16,10 @@ public class CategoryUpdateDto {
     private String name;
 
     private Long parentId;           // Allow re-parenting (null = make root)
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public Long getParentId() { return parentId; }
+    public void setParentId(Long parentId) { this.parentId = parentId; }
 }

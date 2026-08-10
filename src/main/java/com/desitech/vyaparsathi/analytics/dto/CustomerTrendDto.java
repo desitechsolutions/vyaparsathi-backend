@@ -13,4 +13,9 @@ public class CustomerTrendDto {
     private String customerName;
     private String buyingPattern; // e.g., "weekly", "monthly", "seasonal"
     private List<String> frequentlyBoughtItems;
+
+    public Long getCustomerId() { return customerId; }
+    public String getCustomerName() { return customerName; }
+    public String getBuyingPattern() { return buyingPattern; }
+    public List<String> getFrequentlyBoughtItems() { return frequentlyBoughtItems; }
 }

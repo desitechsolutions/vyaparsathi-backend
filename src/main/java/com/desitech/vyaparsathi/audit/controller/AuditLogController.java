@@ -27,7 +27,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/audit")
-@PreAuthorize("hasAnyRole('OWNER', 'STAFF','ADMIN')")
+@PreAuthorize("hasAnyRole('OWNER', 'STAFF', 'ADMIN', 'SUPER_ADMIN', 'TECH_ADMIN', 'SUPPORT_AGENT')")
 @RequiredArgsConstructor // Automatically injects final fields (Cleaner than @Autowired)
 @Tag(name = "Audit Log", description = "Operations for viewing and searching security audit trails")
 public class AuditLogController {

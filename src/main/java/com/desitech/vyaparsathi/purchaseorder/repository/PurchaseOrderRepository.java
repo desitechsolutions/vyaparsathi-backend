@@ -20,4 +20,7 @@ public interface PurchaseOrderRepository extends BaseRepository<PurchaseOrder, L
 
     List<PurchaseOrder> findBySupplierIdAndShopIdAndOrderDateBefore(
             Long supplierId, Long shopId, java.time.LocalDateTime date);
+
+    // Issue 4 Fix: Used by SupplierPaymentService.getPayableBills() to list all POs for a supplier
+    List<PurchaseOrder> findBySupplierIdAndShopId(Long supplierId, Long shopId);
 }

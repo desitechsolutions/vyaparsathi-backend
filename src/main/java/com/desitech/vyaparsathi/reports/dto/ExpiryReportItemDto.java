@@ -1,6 +1,9 @@
 package com.desitech.vyaparsathi.reports.dto;
 
-import lombok.Data;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -9,12 +12,15 @@ import java.time.LocalDate;
  * DTO for a single row in the pharmacy expiry report.
  * Returned by GET /api/reports/expiry-report?days={days}
  */
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
 public class ExpiryReportItemDto {
     private Long itemVariantId;
     private String itemName;
-    /** Active pharmaceutical composition (e.g., "Paracetamol 500mg"). */
-    private String composition;
+    /** Product specifications or key attributes. */
+    private String specifications;
     private String sku;
     private String batchNumber;
     private LocalDate manufacturingDate;

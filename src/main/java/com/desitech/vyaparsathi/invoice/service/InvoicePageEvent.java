@@ -17,9 +17,11 @@ import java.time.format.DateTimeFormatter;
 public class InvoicePageEvent extends PdfPageEventHelper {
 
     private static final Logger logger = LoggerFactory.getLogger(InvoicePageEvent.class);
+    private static final Color BORDER_LIGHT = new Color(229, 231, 235);
+    private static final Color FOOTER_TEXT = new Color(107, 114, 128);
     private Image logo;
     private final Color themeColor;
-    private final Font footerFont = new Font(Font.HELVETICA, 7, Font.NORMAL, Color.GRAY);
+    private final Font footerFont = new Font(Font.HELVETICA, 7, Font.NORMAL, FOOTER_TEXT);
 
     // Modified constructor to accept the theme color from the Shop settings
     public InvoicePageEvent(byte[] logoData, Color themeColor) {
@@ -57,9 +59,9 @@ public class InvoicePageEvent extends PdfPageEventHelper {
         float margin = 36;
         float bottomPos = 30;
 
-        // Draw the separator line using the Shop's brand color (subtle version)
-        cb.setLineWidth(0.8f);
-        cb.setRGBColorStroke(themeColor.getRed(), themeColor.getGreen(), themeColor.getBlue());
+        // Softer, neutral separator line — matches the invoice's overall design system
+        cb.setLineWidth(1.0f);
+        cb.setRGBColorStroke(BORDER_LIGHT.getRed(), BORDER_LIGHT.getGreen(), BORDER_LIGHT.getBlue());
         cb.moveTo(margin, bottomPos + 12);
         cb.lineTo(width - margin, bottomPos + 12);
         cb.stroke();

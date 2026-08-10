@@ -10,4 +10,10 @@ import lombok.NoArgsConstructor;
 public class SeasonalTrendDto {
     private String season;
     private String trendDescription;
+
+    public String getSeason() { return season; }
+    public void setSeason(String season) { this.season = season; }
+
+    public String getTrendDescription() { return trendDescription; }
+    public void setTrendDescription(String trendDescription) { this.trendDescription = trendDescription; }
 }

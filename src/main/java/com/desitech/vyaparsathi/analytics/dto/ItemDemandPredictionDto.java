@@ -12,4 +12,9 @@ public class ItemDemandPredictionDto {
     private String itemName;
     private Integer predictedDemandNextMonth;
     private String trend; // e.g., "increasing", "decreasing", "stable"
+
+    public Long getItemId() { return itemId; }
+    public String getItemName() { return itemName; }
+    public Integer getPredictedDemandNextMonth() { return predictedDemandNextMonth; }
+    public String getTrend() { return trend; }
 }

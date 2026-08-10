@@ -2,7 +2,6 @@ package com.desitech.vyaparsathi.inventory.entity;
 
 import com.desitech.vyaparsathi.common.entities.BaseEntity;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
-import com.desitech.vyaparsathi.inventory.enums.DrugSchedule;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.*;
@@ -46,40 +45,48 @@ public class Item extends ShopAwareEntity {
     @Column(name = "attribute_2")
     private String attribute2;
 
-    // --- Pharmacy-specific fields ---
+    // --- Generic product fields (formerly pharmacy-specific, now generic retail) ---
 
     /**
-     * Drug schedule classification (used for pharmacy shops).
-     * E.g., SCHEDULE_H, SCHEDULE_X, OTC.
+     * Product specifications, ingredients, or key attributes.
+     * Examples: "100% Cotton", "Paracetamol 500mg", "SKD Kit - 24 pieces"
+     * Renamed from {@code composition} (Phase 1 pharmacy removal).
      */
-    @Enumerated(EnumType.STRING)
-    @Column(name = "drug_schedule", length = 20)
-    private DrugSchedule drugSchedule;
-
-    /**
-     * Whether this medicine requires a valid prescription to be sold.
-     * Relevant for PHARMACY industry type.
-     */
-    @Column(name = "requires_prescription")
-    private Boolean requiresPrescription = false;
-
-    /**
-     * Active pharmaceutical ingredient(s) and strength (e.g., "Paracetamol 500mg").
-     * Used to find therapeutic substitutes and for regulatory reporting.
-     */
-    @Column(name = "composition", length = 500)
-    private String composition;
-
-    /**
-     * Storage requirement for the medicine (e.g., "Refrigerated 2–8°C", "Room Temperature").
-     * Used for pharmacy stock management and label printing.
-     */
-    @Column(name = "storage_requirement", length = 100)
-    private String storageRequirement;
+    @Column(name = "specifications", length = 500)
+    private String specifications;
 
     // A Item can have many variants (e.g., T-Shirt can be size M, L)
     @OneToMany(mappedBy = "item", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference
     private List<ItemVariant> variants;
 
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
+
+    public Category getCategory() { return category; }
+    public void setCategory(Category category) { this.category = category; }
+
+    public String getBrandName() { return brandName; }
+    public void setBrandName(String brandName) { this.brandName = brandName; }
+
+    public String getFabric() { return fabric; }
+    public void setFabric(String fabric) { this.fabric = fabric; }
+
+    public String getSeason() { return season; }
+    public void setSeason(String season) { this.season = season; }
+
+    public String getAttribute1() { return attribute1; }
+    public void setAttribute1(String attribute1) { this.attribute1 = attribute1; }
+
+    public String getAttribute2() { return attribute2; }
+    public void setAttribute2(String attribute2) { this.attribute2 = attribute2; }
+
+    public String getSpecifications() { return specifications; }
+    public void setSpecifications(String specifications) { this.specifications = specifications; }
+
+    public List<ItemVariant> getVariants() { return variants; }
+    public void setVariants(List<ItemVariant> variants) { this.variants = variants; }
 }

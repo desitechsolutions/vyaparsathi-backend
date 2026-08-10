@@ -32,6 +32,10 @@ public interface SubscriptionPayRepository extends JpaRepository<PaymentVerifica
 
     long countByStatus(PaymentVerificationStatus status);
 
+    boolean existsByShopIdAndStatus(Long shopId, PaymentVerificationStatus status);
+
+    Optional<PaymentVerification> findFirstByShopIdAndStatusOrderBySubmittedAtDesc(Long shopId, PaymentVerificationStatus status);
+
     @Query("SELECT SUM(p.amount) FROM PaymentVerification p WHERE p.status = 'APPROVED'")
     Double sumApprovedPayments();
 }

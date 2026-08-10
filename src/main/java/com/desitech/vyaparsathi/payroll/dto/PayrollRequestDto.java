@@ -30,4 +30,28 @@ public class PayrollRequestDto {
     private String paymentMode; // CASH, UPI, BANK
 
     private String remarks;
+
+    public Long getStaffId() { return staffId; }
+    public void setStaffId(Long staffId) { this.staffId = staffId; }
+
+    public String getSalaryMonth() { return salaryMonth; }
+    public void setSalaryMonth(String salaryMonth) { this.salaryMonth = salaryMonth; }
+
+    public Integer getSalaryYear() { return salaryYear; }
+    public void setSalaryYear(Integer salaryYear) { this.salaryYear = salaryYear; }
+
+    public BigDecimal getBonus() { return bonus; }
+    public void setBonus(BigDecimal bonus) { this.bonus = bonus; }
+
+    public BigDecimal getDeductions() { return deductions; }
+    public void setDeductions(BigDecimal deductions) { this.deductions = deductions; }
+
+    public BigDecimal getAdvanceDeduction() { return advanceDeduction; }
+    public void setAdvanceDeduction(BigDecimal advanceDeduction) { this.advanceDeduction = advanceDeduction; }
+
+    public String getPaymentMode() { return paymentMode; }
+    public void setPaymentMode(String paymentMode) { this.paymentMode = paymentMode; }
+
+    public String getRemarks() { return remarks; }
+    public void setRemarks(String remarks) { this.remarks = remarks; }
 }

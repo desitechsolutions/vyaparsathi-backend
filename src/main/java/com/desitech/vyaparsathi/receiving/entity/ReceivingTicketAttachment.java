@@ -3,7 +3,6 @@ package com.desitech.vyaparsathi.receiving.entity;
 import com.desitech.vyaparsathi.common.entities.BaseEntity;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import jakarta.persistence.*;
-import lombok.Data;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -20,5 +19,17 @@ public class ReceivingTicketAttachment extends ShopAwareEntity {
 
     private String fileName;
     private String fileType;
-    private String filePath; // Or store the file directly as a byte array using @Lob
+    private String filePath;
+
+    public ReceivingTicket getReceivingTicket() { return receivingTicket; }
+    public void setReceivingTicket(ReceivingTicket receivingTicket) { this.receivingTicket = receivingTicket; }
+
+    public String getFileName() { return fileName; }
+    public void setFileName(String fileName) { this.fileName = fileName; }
+
+    public String getFileType() { return fileType; }
+    public void setFileType(String fileType) { this.fileType = fileType; }
+
+    public String getFilePath() { return filePath; }
+    public void setFilePath(String filePath) { this.filePath = filePath; }
 }

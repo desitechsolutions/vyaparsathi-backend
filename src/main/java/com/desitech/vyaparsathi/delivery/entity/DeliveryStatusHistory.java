@@ -26,4 +26,16 @@ public class DeliveryStatusHistory extends ShopAwareEntity {
     private DeliveryStatus status;
     private LocalDateTime changedAt = LocalDateTime.now();
     private String changedBy;
+
+    public Delivery getDelivery() { return delivery; }
+    public void setDelivery(Delivery delivery) { this.delivery = delivery; }
+
+    public DeliveryStatus getStatus() { return status; }
+    public void setStatus(DeliveryStatus status) { this.status = status; }
+
+    public LocalDateTime getChangedAt() { return changedAt; }
+    public void setChangedAt(LocalDateTime changedAt) { this.changedAt = changedAt; }
+
+    public String getChangedBy() { return changedBy; }
+    public void setChangedBy(String changedBy) { this.changedBy = changedBy; }
 }

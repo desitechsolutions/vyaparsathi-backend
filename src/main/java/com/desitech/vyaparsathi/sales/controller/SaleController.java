@@ -131,10 +131,13 @@ public class SaleController {
     }
 
     @GetMapping("/history")
-    public ResponseEntity<List<SaleDueDto>> getSalesHistory() {
+    public ResponseEntity<Page<SaleDueDto>> getSalesHistory(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
         try {
-            var result = service.getSalesHistory();
-            logger.info("Fetched sales History");
+            Pageable pageable = PageRequest.of(page, size);
+            var result = service.getSalesHistory(pageable);
+            logger.info("Fetched sales history page={}, size={}, total={}", page, size, result.getTotalElements());
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error fetching sales history: {}", e.getMessage(), e);

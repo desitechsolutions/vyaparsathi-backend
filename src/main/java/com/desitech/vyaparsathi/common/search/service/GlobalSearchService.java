@@ -25,46 +25,42 @@ public class GlobalSearchService {
 
     public List<GlobalSearchResponse> performSearch(String query) {
         List<GlobalSearchResponse> results = new ArrayList<>();
-        String searchPattern = "%" + query + "%";
 
-        results.addAll(customerRepo.searchByCustomerPartial(query).stream()
-                .limit(5)
-                .map(c -> GlobalSearchResponse.builder()
-                        .id(c.getId().toString())
-                        .title(c.getName())
-                        .subtitle("📞 " + c.getPhone() + " | Balance: ₹" + c.getCreditBalance())
-                        .type("CUSTOMER")
-                        .route("/customer-details/" + c.getId() + "/dues")
-                        .extraInfo(Map.of(
-                                "action", "PAYMENT",
-                                "balance", c.getCreditBalance(),
-                                "phone", c.getPhone()
-                        ))
-                        .build())
-                .toList());
+        for (var c : customerRepo.searchByCustomerPartial(query).stream().limit(5).toList()) {
+            GlobalSearchResponse dto = new GlobalSearchResponse();
+            dto.setId(c.getId() != null ? c.getId().toString() : "");
+            dto.setTitle(c.getName());
+            dto.setSubtitle("📞 " + (c.getPhone() != null ? c.getPhone() : "") + " | Balance: ₹" + c.getCreditBalance());
+            dto.setType("CUSTOMER");
+            dto.setRoute("/customer-details/" + c.getId() + "/dues");
+            dto.setExtraInfo(Map.of(
+                    "action", "PAYMENT",
+                    "balance", c.getCreditBalance() != null ? c.getCreditBalance() : 0,
+                    "phone", c.getPhone() != null ? c.getPhone() : ""
+            ));
+            results.add(dto);
+        }
 
-        results.addAll(saleRepo.searchByInvoicePartial(query).stream()
-                .limit(5)
-                .map(s -> GlobalSearchResponse.builder()
-                        .id(s.getId().toString())
-                        .title("Bill: " + s.getInvoiceNo())
-                        .subtitle("Date: " + s.getDate().toLocalDate() + " | Status: " + s.getPaymentStatus())
-                        .type("SALE")
-                        .route("/sales?tab=history&search=" + s.getInvoiceNo())
-                        .extraInfo(Map.of("total", s.getTotalAmount()))
-                        .build())
-                .toList());
+        for (var s : saleRepo.searchByInvoicePartial(query).stream().limit(5).toList()) {
+            GlobalSearchResponse dto = new GlobalSearchResponse();
+            dto.setId(s.getId() != null ? s.getId().toString() : "");
+            dto.setTitle("Bill: " + s.getInvoiceNo());
+            dto.setSubtitle("Date: " + (s.getDate() != null ? s.getDate().toLocalDate() : "") + " | Status: " + s.getPaymentStatus());
+            dto.setType("SALE");
+            dto.setRoute("/sales?tab=history&search=" + s.getInvoiceNo());
+            dto.setExtraInfo(Map.of("total", s.getTotalAmount() != null ? s.getTotalAmount() : 0));
+            results.add(dto);
+        }
 
-        results.addAll(itemRepo.findByNameContainingIgnoreCase(query).stream()
-                .limit(5)
-                .map(i -> GlobalSearchResponse.builder()
-                        .id(i.getId().toString())
-                        .title(i.getName())
-                        .subtitle("Category: " + (i.getCategory() != null ? i.getCategory().getName() : "General"))
-                        .type("PRODUCT")
-                        .route("/products?search=" + i.getName())
-                        .build())
-                .toList());
+        for (var i : itemRepo.findByNameContainingIgnoreCase(query).stream().limit(5).toList()) {
+            GlobalSearchResponse dto = new GlobalSearchResponse();
+            dto.setId(i.getId() != null ? i.getId().toString() : "");
+            dto.setTitle(i.getName());
+            dto.setSubtitle("Category: " + (i.getCategory() != null ? i.getCategory().getName() : "General"));
+            dto.setType("PRODUCT");
+            dto.setRoute("/products?search=" + i.getName());
+            results.add(dto);
+        }
 
         return results;
     }

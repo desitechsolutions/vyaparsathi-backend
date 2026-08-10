@@ -11,9 +11,9 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
 
+@SkipShopFilter
 @Repository
 public interface UserRepository extends BaseRepository<User, Long> {
-    @SkipShopFilter
     Optional<User> findByUsername(String username);
     boolean existsByRole(Role role);
     boolean existsByEmail(String email);

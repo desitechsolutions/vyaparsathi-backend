@@ -18,7 +18,6 @@ public class PaymentVerification {
     private Long id;
 
     private Long userId;
-
     private Long shopId;
 
     @Column(nullable = false, unique = true, length = 12)
@@ -34,11 +33,42 @@ public class PaymentVerification {
     private PaymentVerificationStatus status;
 
     private LocalDateTime submittedAt = LocalDateTime.now();
-
     private LocalDateTime verifiedAt;
-
     private String verifiedBy;
 
     @Enumerated(EnumType.STRING)
     private BillingCycle billingCycle;
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+
+    public Long getShopId() { return shopId; }
+    public void setShopId(Long shopId) { this.shopId = shopId; }
+
+    public String getUtrNumber() { return utrNumber; }
+    public void setUtrNumber(String utrNumber) { this.utrNumber = utrNumber; }
+
+    public Double getAmount() { return amount; }
+    public void setAmount(Double amount) { this.amount = amount; }
+
+    public Tier getPlanRequested() { return planRequested; }
+    public void setPlanRequested(Tier planRequested) { this.planRequested = planRequested; }
+
+    public PaymentVerificationStatus getStatus() { return status; }
+    public void setStatus(PaymentVerificationStatus status) { this.status = status; }
+
+    public LocalDateTime getSubmittedAt() { return submittedAt; }
+    public void setSubmittedAt(LocalDateTime submittedAt) { this.submittedAt = submittedAt; }
+
+    public LocalDateTime getVerifiedAt() { return verifiedAt; }
+    public void setVerifiedAt(LocalDateTime verifiedAt) { this.verifiedAt = verifiedAt; }
+
+    public String getVerifiedBy() { return verifiedBy; }
+    public void setVerifiedBy(String verifiedBy) { this.verifiedBy = verifiedBy; }
+
+    public BillingCycle getBillingCycle() { return billingCycle; }
+    public void setBillingCycle(BillingCycle billingCycle) { this.billingCycle = billingCycle; }
 }

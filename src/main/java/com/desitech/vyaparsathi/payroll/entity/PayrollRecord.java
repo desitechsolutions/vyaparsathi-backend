@@ -47,6 +47,44 @@ public class PayrollRecord extends ShopAwareEntity {
     private PayrollStatus status;
 
     private String paymentMode;
-
     private String remarks;
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public Staff getStaff() { return staff; }
+    public void setStaff(Staff staff) { this.staff = staff; }
+
+    public String getSalaryMonth() { return salaryMonth; }
+    public void setSalaryMonth(String salaryMonth) { this.salaryMonth = salaryMonth; }
+
+    public Integer getSalaryYear() { return salaryYear; }
+    public void setSalaryYear(Integer salaryYear) { this.salaryYear = salaryYear; }
+
+    public LocalDate getPaymentDate() { return paymentDate; }
+    public void setPaymentDate(LocalDate paymentDate) { this.paymentDate = paymentDate; }
+
+    public BigDecimal getBaseSalaryAtTime() { return baseSalaryAtTime; }
+    public void setBaseSalaryAtTime(BigDecimal baseSalaryAtTime) { this.baseSalaryAtTime = baseSalaryAtTime; }
+
+    public BigDecimal getBonus() { return bonus; }
+    public void setBonus(BigDecimal bonus) { this.bonus = bonus; }
+
+    public BigDecimal getDeductions() { return deductions; }
+    public void setDeductions(BigDecimal deductions) { this.deductions = deductions; }
+
+    public BigDecimal getAdvanceDeduction() { return advanceDeduction; }
+    public void setAdvanceDeduction(BigDecimal advanceDeduction) { this.advanceDeduction = advanceDeduction; }
+
+    public BigDecimal getNetAmount() { return netAmount; }
+    public void setNetAmount(BigDecimal netAmount) { this.netAmount = netAmount; }
+
+    public PayrollStatus getStatus() { return status; }
+    public void setStatus(PayrollStatus status) { this.status = status; }
+
+    public String getPaymentMode() { return paymentMode; }
+    public void setPaymentMode(String paymentMode) { this.paymentMode = paymentMode; }
+
+    public String getRemarks() { return remarks; }
+    public void setRemarks(String remarks) { this.remarks = remarks; }
 }

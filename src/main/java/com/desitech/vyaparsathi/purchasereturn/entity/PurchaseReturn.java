@@ -61,4 +61,38 @@ public class PurchaseReturn extends ShopAwareEntity {
     @JsonManagedReference
     @OneToMany(mappedBy = "purchaseReturn", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<PurchaseReturnItem> items = new ArrayList<>();
+
+    public String getReturnNo() { return returnNo; }
+    public void setReturnNo(String returnNo) { this.returnNo = returnNo; }
+
+    public Supplier getSupplier() { return supplier; }
+    public void setSupplier(Supplier supplier) { this.supplier = supplier; }
+
+    public PurchaseOrder getPurchaseOrder() { return purchaseOrder; }
+    public void setPurchaseOrder(PurchaseOrder purchaseOrder) { this.purchaseOrder = purchaseOrder; }
+
+    public Receiving getReceiving() { return receiving; }
+    public void setReceiving(String receiving) {}
+    public void setReceiving(Receiving receiving) { this.receiving = receiving; }
+
+    public LocalDateTime getReturnDate() { return returnDate; }
+    public void setReturnDate(LocalDateTime returnDate) { this.returnDate = returnDate; }
+
+    public BigDecimal getTotalAmount() { return totalAmount; }
+    public void setTotalAmount(BigDecimal totalAmount) { this.totalAmount = totalAmount; }
+
+    public PurchaseReturnStatus getStatus() { return status; }
+    public void setStatus(PurchaseReturnStatus status) { this.status = status; }
+
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
+
+    public com.desitech.vyaparsathi.auth.entity.User getApprovedByUser() { return approvedByUser; }
+    public void setApprovedByUser(com.desitech.vyaparsathi.auth.entity.User approvedByUser) { this.approvedByUser = approvedByUser; }
+
+    public LocalDateTime getApprovedAt() { return approvedAt; }
+    public void setApprovedAt(LocalDateTime approvedAt) { this.approvedAt = approvedAt; }
+
+    public List<PurchaseReturnItem> getItems() { return items; }
+    public void setItems(List<PurchaseReturnItem> items) { this.items = items; }
 }

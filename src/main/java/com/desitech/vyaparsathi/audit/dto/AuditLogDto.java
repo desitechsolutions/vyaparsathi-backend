@@ -19,4 +19,12 @@ public class AuditLogDto {
     private LocalDateTime timestamp;
     private String ipAddress;
     private String userAgent;
+
+    // Extended SuperAdmin Control Center audit fields
+    private Long actorAdminId;
+    private Long targetShopId;
+    private String reason;
+    private String previousValue;
+    private String newValue;
+    private String impersonationSessionId;
 }

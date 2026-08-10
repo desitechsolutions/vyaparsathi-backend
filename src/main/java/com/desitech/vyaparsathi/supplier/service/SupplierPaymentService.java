@@ -5,6 +5,7 @@ import com.desitech.vyaparsathi.payment.dto.PaymentDto;
 import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
 import com.desitech.vyaparsathi.payment.service.PaymentService;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderPaymentSummaryDto;
+import com.desitech.vyaparsathi.supplier.dto.SupplierPayableBillDto;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrder;
 import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderRepository;
 import com.desitech.vyaparsathi.supplier.dto.SupplierBulkPaymentRequest;
@@ -133,8 +134,8 @@ public class SupplierPaymentService {
         for (PurchaseOrder po : pos) {
             if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
 
-            BigDecimal due = paymentService.calculateDueAmount(
-                    po.getId(), PaymentSourceType.PURCHASE_ORDER, po.getTotalAmount());
+            // Issue 4 Fix: Use return-aware net payable instead of cash-payments-only due amount
+            BigDecimal due = calculateNetPayable(po);
             if (due.compareTo(BigDecimal.ZERO) <= 0) continue;
 
             BigDecimal allocation = remaining.min(due);
@@ -183,9 +184,47 @@ public class SupplierPaymentService {
         PurchaseOrder po = purchaseOrderRepository.findById(poId)
                 .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + poId));
         BigDecimal total = po.getTotalAmount() != null ? po.getTotalAmount() : BigDecimal.ZERO;
-        BigDecimal due = paymentService.calculateDueAmount(poId, PaymentSourceType.PURCHASE_ORDER, total);
-        BigDecimal paid = total.subtract(due).max(BigDecimal.ZERO);
-        return new PurchaseOrderPaymentSummaryDto(poId, po.getPoNumber(), total, paid, due, po.getPaymentStatus());
+        BigDecimal returnDeductions = sumApprovedReturnsForPo(po);
+        BigDecimal cashPaid = paymentService.calculateDueAmount(poId, PaymentSourceType.PURCHASE_ORDER, total);
+        BigDecimal actualCashPaid = total.subtract(cashPaid).max(BigDecimal.ZERO);
+        BigDecimal netPayable = total.subtract(returnDeductions).subtract(actualCashPaid).max(BigDecimal.ZERO);
+        com.desitech.vyaparsathi.payment.enums.PaymentStatus status = netPayable.compareTo(BigDecimal.ZERO) <= 0 ? com.desitech.vyaparsathi.payment.enums.PaymentStatus.PAID
+                : actualCashPaid.compareTo(BigDecimal.ZERO) > 0 ? com.desitech.vyaparsathi.payment.enums.PaymentStatus.PARTIALLY_PAID
+                : com.desitech.vyaparsathi.payment.enums.PaymentStatus.PENDING;
+        return new PurchaseOrderPaymentSummaryDto(poId, po.getPoNumber(), total, actualCashPaid, netPayable, status);
+    }
+
+    /**
+     * Issue 4 Fix: Returns per-PO payable breakdown for a supplier.
+     * Net Payable = originalAmount - approvedReturns - cashPaid (per-PO targeting).
+     */
+    @Transactional(readOnly = true)
+    public List<SupplierPayableBillDto> getPayableBills(Long supplierId) {
+        Long shopId = TenantUtils.getCurrentShopId();
+        List<PurchaseOrder> pos = purchaseOrderRepository.findBySupplierIdAndShopId(supplierId, shopId);
+
+        List<SupplierPayableBillDto> bills = new ArrayList<>();
+        for (PurchaseOrder po : pos) {
+            BigDecimal total = po.getTotalAmount() != null ? po.getTotalAmount() : BigDecimal.ZERO;
+            BigDecimal returnDeductions = sumApprovedReturnsForPo(po);
+            BigDecimal cashPaid = total.subtract(
+                    paymentService.calculateDueAmount(po.getId(), PaymentSourceType.PURCHASE_ORDER, total)
+            ).max(BigDecimal.ZERO);
+            BigDecimal netPayable = total.subtract(returnDeductions).subtract(cashPaid).max(BigDecimal.ZERO);
+            String paymentStatus = netPayable.compareTo(BigDecimal.ZERO) <= 0 ? "PAID"
+                    : cashPaid.compareTo(BigDecimal.ZERO) > 0 ? "PARTIALLY_PAID" : "UNPAID";
+
+            SupplierPayableBillDto bill = new SupplierPayableBillDto();
+            bill.setPoId(po.getId());
+            bill.setPoNumber(po.getPoNumber());
+            bill.setOriginalAmount(total);
+            bill.setReturnDeductions(returnDeductions);
+            bill.setCashPaid(cashPaid);
+            bill.setNetPayable(netPayable);
+            bill.setPaymentStatus(paymentStatus);
+            bills.add(bill);
+        }
+        return bills;
     }
 
     /**
@@ -289,6 +328,34 @@ public class SupplierPaymentService {
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
+
+    /**
+     * Issue 4 Fix: Calculates net payable for a PO considering both cash payments
+     * and approved purchase returns (debit notes), so the payable is:
+     *   net = originalAmount - cashPaid - approvedReturnTotal
+     */
+    private BigDecimal calculateNetPayable(PurchaseOrder po) {
+        BigDecimal total = po.getTotalAmount() != null ? po.getTotalAmount() : BigDecimal.ZERO;
+        BigDecimal returnDeductions = sumApprovedReturnsForPo(po);
+        BigDecimal cashPaidAdjusted = total.subtract(
+                paymentService.calculateDueAmount(po.getId(), PaymentSourceType.PURCHASE_ORDER, total)
+        ).max(BigDecimal.ZERO);
+        return total.subtract(returnDeductions).subtract(cashPaidAdjusted).max(BigDecimal.ZERO);
+    }
+
+    /**
+     * Sums all APPROVED purchase return amounts linked to a specific purchase order.
+     */
+    private BigDecimal sumApprovedReturnsForPo(PurchaseOrder po) {
+        Long shopId = TenantUtils.getCurrentShopId();
+        List<PurchaseReturn> returns = purchaseReturnRepository.findBySupplierIdAndStatusAndShopIdAndReturnDateBefore(
+                po.getSupplier().getId(), PurchaseReturnStatus.APPROVED, shopId, java.time.LocalDateTime.now().plusDays(1));
+        // Filter by PO linkage if the PurchaseReturn has a purchaseOrder reference
+        return returns.stream()
+                .filter(pr -> pr.getPurchaseOrder() != null && pr.getPurchaseOrder().getId().equals(po.getId()))
+                .map(pr -> pr.getTotalAmount() != null ? pr.getTotalAmount() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
 
     private PaymentDto toPaymentDto(SupplierPaymentDto src, Long poId, Long supplierId) {
         PaymentDto dto = new PaymentDto();

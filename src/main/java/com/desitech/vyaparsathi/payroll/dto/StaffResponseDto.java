@@ -8,10 +8,16 @@ import java.time.LocalDate;
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class StaffResponseDto extends StaffDto {
-    // This is the key field for your UI logic
     private boolean isPaidInCurrentPeriod;
-
-    // You can also add these for better UI summaries without extra API calls
     private LocalDate lastPaymentDate;
     private BigDecimal lastPaidAmount;
+
+    public boolean isPaidInCurrentPeriod() { return isPaidInCurrentPeriod; }
+    public void setPaidInCurrentPeriod(boolean isPaidInCurrentPeriod) { this.isPaidInCurrentPeriod = isPaidInCurrentPeriod; }
+
+    public LocalDate getLastPaymentDate() { return lastPaymentDate; }
+    public void setLastPaymentDate(LocalDate lastPaymentDate) { this.lastPaymentDate = lastPaymentDate; }
+
+    public BigDecimal getLastPaidAmount() { return lastPaidAmount; }
+    public void setLastPaidAmount(BigDecimal lastPaidAmount) { this.lastPaidAmount = lastPaidAmount; }
 }

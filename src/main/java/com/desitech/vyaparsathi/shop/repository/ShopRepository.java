@@ -14,11 +14,14 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
+@SkipShopFilter
 public interface ShopRepository extends JpaRepository<Shop, Long> {
+
         Boolean existsByCode(String code);
+
         @Query(value = "SELECT COUNT(*) FROM shop WHERE code = :code", nativeQuery = true)
         Long countByCodeGlobal(@Param("code") String code);
-        @SkipShopFilter
+
         @Query("SELECT new com.desitech.vyaparsathi.shop.dto.GlobalShopSummaryDTO(" +
                 "s.id, " +
                 "s.name, " +
@@ -27,12 +30,12 @@ public interface ShopRepository extends JpaRepository<Shop, Long> {
                 "s.createdAt, " +
                 "CONCAT(COALESCE(u.firstName, ''), ' ', COALESCE(u.lastName, '')), " +
                 "u.email, " +
-                "u.active, " +
+                "s.active, " +
                 "sub.tier, " +
                 "sub.status, " +
                 "sub.endDate) " +
                 "FROM Shop s " +
-                "LEFT JOIN User u ON u.shop = s AND u.role = com.desitech.vyaparsathi.auth.model.Role.OWNER " +
+                "LEFT JOIN User u ON u.shop = s AND (u.role = com.desitech.vyaparsathi.auth.model.Role.OWNER OR u.role = com.desitech.vyaparsathi.auth.model.Role.ADMIN) " +
                 "LEFT JOIN Subscription sub ON sub.shop = s " +
                 "ORDER BY s.createdAt DESC")
         Page<GlobalShopSummaryDTO> findAllShopSummaries(Pageable pageable);

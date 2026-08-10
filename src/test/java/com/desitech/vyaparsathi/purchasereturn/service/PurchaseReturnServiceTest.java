@@ -70,6 +70,9 @@ class PurchaseReturnServiceTest {
     private com.desitech.vyaparsathi.inventory.service.StockService stockService;
 
     @Mock
+    private com.desitech.vyaparsathi.supplier.service.SupplierLedgerService supplierLedgerService;
+
+    @Mock
     private PurchaseReturnMapper purchaseReturnMapper;
 
     private Supplier supplier;

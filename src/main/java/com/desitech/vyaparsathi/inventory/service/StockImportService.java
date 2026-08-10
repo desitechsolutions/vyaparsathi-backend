@@ -231,8 +231,7 @@ public class StockImportService {
         Item item = findOrCreateItem(itemName, categoryName, itemCache);
 
         // --- Find or create ItemVariant ---
-        ItemVariant variant = findOrCreateVariant(item, sku, unit, sellingPrice, hsn, gstRate,
-                mrp, isLoose, packSize);
+        ItemVariant variant = findOrCreateVariant(item, sku, unit, sellingPrice, hsn, gstRate, mrp);
 
         // --- Add stock movement ---
         // Batch-specific data (batch, mfgDate, expiryDate) is stored only in the movement.
@@ -277,7 +276,7 @@ public class StockImportService {
 
     private ItemVariant findOrCreateVariant(Item item, String sku, String unit,
                                              BigDecimal sellingPrice, String hsn, Integer gstRate,
-                                             BigDecimal mrp, Boolean isLoose, BigDecimal packSize) {
+                                             BigDecimal mrp) {
         // If SKU provided and variant already exists, update and return
         if (sku != null && !sku.isBlank()) {
             Optional<ItemVariant> existing = itemVariantRepository.findBySku(sku);
@@ -285,8 +284,6 @@ public class StockImportService {
                 ItemVariant v = existing.get();
                 v.setPricePerUnit(sellingPrice);
                 if (mrp != null) v.setMrp(mrp);
-                if (isLoose != null) v.setIsLooseMedicine(isLoose);
-                if (packSize != null) v.setPackSize(packSize);
                 if (gstRate != null) v.setGstRate(gstRate);
                 return itemVariantRepository.save(v);
             }
@@ -301,8 +298,6 @@ public class StockImportService {
         if (hsn != null && !hsn.isBlank()) variant.setHsn(hsn);
         if (gstRate != null) variant.setGstRate(gstRate);
         if (mrp != null) variant.setMrp(mrp);
-        if (isLoose != null) variant.setIsLooseMedicine(isLoose);
-        if (packSize != null) variant.setPackSize(packSize);
 
         return itemVariantRepository.save(variant);
     }

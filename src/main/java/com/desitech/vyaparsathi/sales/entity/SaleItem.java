@@ -46,6 +46,9 @@ public class SaleItem extends ShopAwareEntity {
     @Column(name = "sgst_amt", nullable = false, precision = 12, scale = 2)
     private BigDecimal sgstAmt;
 
+    @Column(name = "utgst_amt", nullable = false, precision = 12, scale = 2)
+    private BigDecimal utgstAmt = BigDecimal.ZERO;
+
     @Column(name = "igst_amt", nullable = false, precision = 12, scale = 2)
     private BigDecimal igstAmt;
 
@@ -59,25 +62,61 @@ public class SaleItem extends ShopAwareEntity {
     private boolean isReturned = false;
 
     /**
-     * The pack size (dispensing units per stock unit) that was active at the time of sale
-     * for a loose-medicine line item, e.g. 15 tablets per strip.
-     * Null for full-pack sales or medicines that are not dispensed loose.
-     * Stored so that returns can reverse exactly the same fractional stock quantity.
-     */
-    @Column(name = "loose_pack_size", precision = 10, scale = 3)
-    private BigDecimal loosePackSize;
-
-    /**
-     * Batch/lot number of the specific medicine pack dispensed.
-     * Captured at point-of-sale for batch traceability and drug-recall tracking.
+     * Batch/lot number of the specific stock received.
+     * Captured at point-of-sale for batch traceability and recall tracking.
      */
     @Column(name = "batch_number", length = 100)
     private String batchNumber;
 
     /**
      * Expiry date of the specific batch dispensed.
-     * Stored per sale-item for invoice printing and narcotics-register compliance.
+     * Stored per sale-item for invoice printing and traceability compliance.
      */
     @Column(name = "expiry_date")
     private java.time.LocalDate expiryDate;
+
+    public Sale getSale() { return sale; }
+    public void setSale(Sale sale) { this.sale = sale; }
+
+    public ItemVariant getItemVariant() { return itemVariant; }
+    public void setItemVariant(ItemVariant itemVariant) { this.itemVariant = itemVariant; }
+
+    public BigDecimal getQty() { return qty; }
+    public void setQty(BigDecimal qty) { this.qty = qty; }
+
+    public BigDecimal getUnitPrice() { return unitPrice; }
+    public void setUnitPrice(BigDecimal unitPrice) { this.unitPrice = unitPrice; }
+
+    public BigDecimal getTaxableValue() { return taxableValue; }
+    public void setTaxableValue(BigDecimal taxableValue) { this.taxableValue = taxableValue; }
+
+    public GSTType getGstType() { return gstType; }
+    public void setGstType(GSTType gstType) { this.gstType = gstType; }
+
+    public BigDecimal getCgstAmt() { return cgstAmt; }
+    public void setCgstAmt(BigDecimal cgstAmt) { this.cgstAmt = cgstAmt; }
+
+    public BigDecimal getSgstAmt() { return sgstAmt; }
+    public void setSgstAmt(BigDecimal sgstAmt) { this.sgstAmt = sgstAmt; }
+
+    public BigDecimal getUtgstAmt() { return utgstAmt; }
+    public void setUtgstAmt(BigDecimal utgstAmt) { this.utgstAmt = utgstAmt; }
+
+    public BigDecimal getIgstAmt() { return igstAmt; }
+    public void setIgstAmt(BigDecimal igstAmt) { this.igstAmt = igstAmt; }
+
+    public BigDecimal getDiscount() { return discount; }
+    public void setDiscount(BigDecimal discount) { this.discount = discount; }
+
+    public BigDecimal getReturnedQty() { return returnedQty; }
+    public void setReturnedQty(BigDecimal returnedQty) { this.returnedQty = returnedQty; }
+
+    public boolean isReturned() { return isReturned; }
+    public void setReturned(boolean returned) { isReturned = returned; }
+
+    public String getBatchNumber() { return batchNumber; }
+    public void setBatchNumber(String batchNumber) { this.batchNumber = batchNumber; }
+
+    public java.time.LocalDate getExpiryDate() { return expiryDate; }
+    public void setExpiryDate(java.time.LocalDate expiryDate) { this.expiryDate = expiryDate; }
 }

@@ -29,29 +29,75 @@ public class SaleItemDto {
     private BigDecimal netQty;
 
     /**
-     * True when the frontend is selling this item in loose/tablet mode
-     * (e.g., dispensing individual tablets from a strip).
-     * When true, {@link #loosePackSize} must also be provided.
-     */
-    private Boolean isLooseSale;
-
-    /**
-     * The number of dispensing units per stock unit at the time of this sale
-     * (e.g., 15 tablets per strip).  Sent by the frontend when {@link #isLooseSale}
-     * is true.  Takes precedence over the ItemVariant's stored packSize so that a
-     * pharmacist can sell loose even if the variant has not been pre-configured.
-     */
-    private BigDecimal loosePackSize;
-
-    /**
-     * Batch/lot number of the medicine dispensed (pharmacy compliance).
-     * Captured at point-of-sale for batch traceability and drug-recall tracking.
+     * Batch/lot number of the specific item dispensed.
+     * Captured at point-of-sale for batch traceability and recall tracking.
      */
     private String batchNumber;
 
     /**
-     * Expiry date of the specific batch dispensed (pharmacy compliance).
-     * Stored per sale-item so invoices and narcotics registers show accurate expiry info.
+     * Expiry date of the specific batch dispensed.
+     * Stored per sale-item for invoice printing and traceability compliance.
      */
     private java.time.LocalDate expiryDate;
+
+    public Long getItemId() { return itemId; }
+    public void setItemId(Long itemId) { this.itemId = itemId; }
+
+    public Long getItemVariantId() { return itemVariantId; }
+    public void setItemVariantId(Long itemVariantId) { this.itemVariantId = itemVariantId; }
+
+    public String getItemName() { return itemName; }
+    public void setItemName(String itemName) { this.itemName = itemName; }
+
+    public BigDecimal getQty() { return qty; }
+    public void setQty(BigDecimal qty) { this.qty = qty; }
+
+    public BigDecimal getUnitPrice() { return unitPrice; }
+    public void setUnitPrice(BigDecimal unitPrice) { this.unitPrice = unitPrice; }
+
+    public BigDecimal getCostPerUnit() { return costPerUnit; }
+    public void setCostPerUnit(BigDecimal costPerUnit) { this.costPerUnit = costPerUnit; }
+
+    public BigDecimal getDiscount() { return discount; }
+    public void setDiscount(BigDecimal discount) { this.discount = discount; }
+
+    public int getGstRate() { return gstRate; }
+    public void setGstRate(int gstRate) { this.gstRate = gstRate; }
+
+    public BigDecimal getTaxableValue() { return taxableValue; }
+    public void setTaxableValue(BigDecimal taxableValue) { this.taxableValue = taxableValue; }
+
+    public BigDecimal getReturnedQty() { return returnedQty; }
+    public void setReturnedQty(BigDecimal returnedQty) { this.returnedQty = returnedQty; }
+
+    public BigDecimal getNetQty() { return netQty; }
+    public void setNetQty(BigDecimal netQty) { this.netQty = netQty; }
+
+    public String getBatchNumber() { return batchNumber; }
+    public void setBatchNumber(String batchNumber) { this.batchNumber = batchNumber; }
+
+    public java.time.LocalDate getExpiryDate() { return expiryDate; }
+    public void setExpiryDate(java.time.LocalDate expiryDate) { this.expiryDate = expiryDate; }
+
+    // --- Issue 1: Variant attribute fields for rich invoice descriptions ---
+    private String variantSku;
+    private String variantColor;
+    private String variantSize;
+    private String variantDesign;
+    private String variantBrand;
+
+    public String getVariantSku() { return variantSku; }
+    public void setVariantSku(String variantSku) { this.variantSku = variantSku; }
+
+    public String getVariantColor() { return variantColor; }
+    public void setVariantColor(String variantColor) { this.variantColor = variantColor; }
+
+    public String getVariantSize() { return variantSize; }
+    public void setVariantSize(String variantSize) { this.variantSize = variantSize; }
+
+    public String getVariantDesign() { return variantDesign; }
+    public void setVariantDesign(String variantDesign) { this.variantDesign = variantDesign; }
+
+    public String getVariantBrand() { return variantBrand; }
+    public void setVariantBrand(String variantBrand) { this.variantBrand = variantBrand; }
 }

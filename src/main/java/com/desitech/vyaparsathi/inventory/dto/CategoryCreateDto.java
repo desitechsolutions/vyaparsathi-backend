@@ -16,4 +16,10 @@ public class CategoryCreateDto {
     private String name;
 
     private Long parentId; // null for root
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public Long getParentId() { return parentId; }
+    public void setParentId(Long parentId) { this.parentId = parentId; }
 }

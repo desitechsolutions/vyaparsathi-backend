@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.payment.service;
 
+import com.desitech.vyaparsathi.common.annotations.LogAudit;
 import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.customer.dto.CustomerLedgerDto;
 import com.desitech.vyaparsathi.customer.entity.CustomerLedgerType;
@@ -73,6 +74,7 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Override
     @Transactional
+    @LogAudit(action = "CREATE_PAYMENT", entity = "PAYMENT")
     public PaymentDto createPayment(PaymentDto dto) {
         Payment payment = paymentMapper.toEntity(dto);
         BigDecimal paymentAmount = payment.getAmount() != null ? payment.getAmount() : ZERO;
@@ -208,6 +210,7 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Override
     @Transactional
+    @LogAudit(action = "BULK_PAYMENT", entity = "PAYMENT")
     public void bulkPayment(BulkPaymentRequest request) {
         BigDecimal totalToProcess = request.getTotalAmount();
         BigDecimal remainingToAllocate = totalToProcess;
@@ -311,6 +314,7 @@ public class PaymentServiceImpl implements PaymentService {
      */
     @Override
     @Transactional
+    @LogAudit(action = "RECORD_DUE_PAYMENT", entity = "PAYMENT")
     public PaymentDto recordDuePayment(PaymentReceivedRequest request) {
         if (request.getAmount() == null || request.getAmount().compareTo(ZERO) <= 0) {
             throw new IllegalArgumentException("Invalid payment amount");
@@ -476,6 +480,7 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Override
     @Transactional
+    @LogAudit(action = "APPLY_ADVANCE", entity = "PAYMENT")
     public BigDecimal applyAdvanceToSale(Long customerId, Long saleId, BigDecimal saleTotal) {
         BigDecimal remainingSaleDue = saleTotal;
         BigDecimal totalApplied = BigDecimal.ZERO;

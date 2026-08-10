@@ -1,6 +1,8 @@
 package com.desitech.vyaparsathi.auth.security;
 
 import com.desitech.vyaparsathi.common.configs.TenantContext;
+import com.desitech.vyaparsathi.platform.service.ImpersonationSessionCacheManager;
+import com.desitech.vyaparsathi.platform.service.ShopStatusCacheManager;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,10 +24,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final Logger logger = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
     private final JwtUtil jwtUtil;
     private final CustomUserDetailsService userDetailsService;
+    private final ImpersonationSessionCacheManager impersonationSessionCacheManager;
+    private final ShopStatusCacheManager shopStatusCacheManager;
 
-    public JwtAuthenticationFilter(JwtUtil jwtUtil, CustomUserDetailsService userDetailsService) {
+    public JwtAuthenticationFilter(JwtUtil jwtUtil,
+                                   CustomUserDetailsService userDetailsService,
+                                   ImpersonationSessionCacheManager impersonationSessionCacheManager,
+                                   ShopStatusCacheManager shopStatusCacheManager) {
         this.jwtUtil = jwtUtil;
         this.userDetailsService = userDetailsService;
+        this.impersonationSessionCacheManager = impersonationSessionCacheManager;
+        this.shopStatusCacheManager = shopStatusCacheManager;
     }
 
     @Override
@@ -43,13 +52,47 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
                 jwt = authHeader.substring(7);
                 logger.debug("Processing JWT for request: {}", request.getRequestURI());
-                // Validate token
+
                 if (jwtUtil.validateToken(jwt)) {
                     username = jwtUtil.extractUsername(jwt);
                     shopId = jwtUtil.extractShopId(jwt);
 
-                    // 1. Set TenantContext if shopId exists
-                    if (shopId != null) {
+                    // 1. Impersonation Session Validation & Lockdown
+                    if (Boolean.TRUE.equals(jwtUtil.isImpersonationToken(jwt))) {
+                        String sessionUuid = jwtUtil.extractImpersonationSessionId(jwt);
+                        var validationResult = impersonationSessionCacheManager.validateSession(sessionUuid);
+
+                        if (validationResult != ImpersonationSessionCacheManager.ValidationResult.VALID) {
+                            logger.warn("Rejecting impersonation request for session {}: {}", sessionUuid, validationResult);
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            response.setContentType("application/json");
+                            response.getWriter().write("{\"error\": \"UNAUTHORIZED\", \"message\": \"Impersonation session has ended or expired.\"}");
+                            return;
+                        }
+
+                        // Block impersonated token from accessing admin endpoints (except exit impersonation)
+                        if (request.getRequestURI().startsWith("/api/admin/") && !request.getRequestURI().equals("/api/admin/operations/impersonate/exit")) {
+                            logger.warn("Blocked impersonated token attempt on admin URI: {}", request.getRequestURI());
+                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            response.setContentType("application/json");
+                            response.getWriter().write("{\"error\": \"FORBIDDEN\", \"message\": \"Impersonated sessions cannot perform platform admin operations.\"}");
+                            return;
+                        }
+
+                        // Set ImpersonationContext ThreadLocal for dual-identity forensic audit linkage
+                        Long originalAdminId = jwtUtil.extractClaim(jwt, claims -> claims.get("originalAdminId", Long.class));
+                        ImpersonationContext.set(originalAdminId, sessionUuid, shopId);
+                    }
+
+                    // 2. Instant Shop Suspension Guard for Merchant APIs
+                    if (shopId != null && !request.getRequestURI().startsWith("/api/admin/")) {
+                        if (!shopStatusCacheManager.isShopActive(shopId)) {
+                            logger.warn("Blocked request for suspended shopId: {}", shopId);
+                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            response.setContentType("application/json");
+                            response.getWriter().write("{\"error\": \"SHOP_SUSPENDED\", \"message\": \"Shop account has been suspended by platform administration.\"}");
+                            return;
+                        }
                         TenantContext.setCurrentShopId(shopId);
                     }
                 } else {
@@ -57,7 +100,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
 
-            // 2. Set Spring Security Authentication if we have a username and no existing auth
+            // 3. Set Spring Security Authentication if we have a username and no existing auth
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
@@ -71,18 +114,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
 
-            // 3. Continue the filter chain
+            // 4. Continue the filter chain
             filterChain.doFilter(request, response);
 
         } catch (Exception e) {
             logger.error("Security Filter Error for URI {}: {}", request.getRequestURI(), e.getMessage());
-            // Clear context on error
             SecurityContextHolder.clearContext();
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json");
             response.getWriter().write("{\"error\": \"Authentication failed\", \"message\": \"" + e.getMessage() + "\"}");
         } finally {
             TenantContext.clear();
+            ImpersonationContext.clear();
         }
     }
 }

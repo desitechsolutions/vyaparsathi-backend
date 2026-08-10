@@ -64,5 +64,47 @@ public class Receiving extends ShopAwareEntity {
     private List<ReceivingItem> items;
 
     @LastModifiedDate
-    private LocalDateTime lastUpdatedAt;  // Added for auditing
+    private LocalDateTime lastUpdatedAt;
+
+    public String getGrNumber() { return grNumber; }
+    public void setGrNumber(String grNumber) { this.grNumber = grNumber; }
+
+    public PurchaseOrder getPurchaseOrder() { return purchaseOrder; }
+    public void setPurchaseOrder(PurchaseOrder purchaseOrder) { this.purchaseOrder = purchaseOrder; }
+
+    public ReceivingStatus getStatus() { return status; }
+    public void setStatus(ReceivingStatus status) { this.status = status; }
+
+    public String getSupplierInvoiceNo() { return supplierInvoiceNo; }
+    public void setSupplierInvoiceNo(String supplierInvoiceNo) { this.supplierInvoiceNo = supplierInvoiceNo; }
+
+    public java.time.LocalDate getSupplierInvoiceDate() { return supplierInvoiceDate; }
+    public void setSupplierInvoiceDate(java.time.LocalDate supplierInvoiceDate) { this.supplierInvoiceDate = supplierInvoiceDate; }
+
+    public String getVehicleNo() { return vehicleNo; }
+    public void setVehicleNo(String vehicleNo) { this.vehicleNo = vehicleNo; }
+
+    public String getDeliveryChallanNo() { return deliveryChallanNo; }
+    public void setDeliveryChallanNo(String deliveryChallanNo) { this.deliveryChallanNo = deliveryChallanNo; }
+
+    public com.desitech.vyaparsathi.auth.entity.User getApprovedByUser() { return approvedByUser; }
+    public void setApprovedByUser(com.desitech.vyaparsathi.auth.entity.User approvedByUser) { this.approvedByUser = approvedByUser; }
+
+    public LocalDateTime getApprovedAt() { return approvedAt; }
+    public void setApprovedAt(LocalDateTime approvedAt) { this.approvedAt = approvedAt; }
+
+    public LocalDateTime getReceivedAt() { return receivedAt; }
+    public void setReceivedAt(LocalDateTime receivedAt) { this.receivedAt = receivedAt; }
+
+    public String getReceivedBy() { return receivedBy; }
+    public void setReceivedBy(String receivedBy) { this.receivedBy = receivedBy; }
+
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
+
+    public List<ReceivingItem> getItems() { return items; }
+    public void setItems(List<ReceivingItem> items) { this.items = items; }
+
+    public LocalDateTime getLastUpdatedAt() { return lastUpdatedAt; }
+    public void setLastUpdatedAt(LocalDateTime lastUpdatedAt) { this.lastUpdatedAt = lastUpdatedAt; }
 }

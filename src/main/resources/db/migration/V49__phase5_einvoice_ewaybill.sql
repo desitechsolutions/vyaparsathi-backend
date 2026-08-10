@@ -1,0 +1,13 @@
+-- Migration V49: Phase 5 E-Invoice (IRN) & E-Way Bill Integration
+-- Schema support for Invoice Registration Portal (IRP) & NIC E-Way Bill System
+
+SET @dbname = DATABASE();
+
+SET @preparedStatement = (SELECT IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = 'sale' AND COLUMN_NAME = 'irn') > 0,
+  'SELECT 1',
+  'ALTER TABLE sale ADD COLUMN irn VARCHAR(100) DEFAULT NULL, ADD COLUMN ack_no VARCHAR(50) DEFAULT NULL, ADD COLUMN ack_date DATETIME DEFAULT NULL, ADD COLUMN qr_code_path VARCHAR(255) DEFAULT NULL, ADD COLUMN einvoice_status VARCHAR(30) NOT NULL DEFAULT \'NOT_GENERATED\', ADD COLUMN eway_bill_no VARCHAR(50) DEFAULT NULL, ADD COLUMN eway_bill_date DATETIME DEFAULT NULL, ADD COLUMN eway_bill_valid_until DATETIME DEFAULT NULL, ADD COLUMN vehicle_number VARCHAR(30) DEFAULT NULL, ADD COLUMN transporter_id VARCHAR(30) DEFAULT NULL, ADD COLUMN transporter_name VARCHAR(100) DEFAULT NULL'
+));
+PREPARE stmt FROM @preparedStatement;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

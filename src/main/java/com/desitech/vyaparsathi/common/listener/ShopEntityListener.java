@@ -14,8 +14,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-@Slf4j
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class ShopEntityListener {
+    private static final Logger log = LoggerFactory.getLogger(ShopEntityListener.class);
 
     @PrePersist
     @PreUpdate

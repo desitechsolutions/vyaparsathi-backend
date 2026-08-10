@@ -15,4 +15,7 @@ public class PurchaseOrderEvent extends ApplicationEvent {
         this.eventType = eventType;
         this.purchaseOrder = eventDto;
     }
+
+    public EventType getEventType() { return eventType; }
+    public PurchaseOrderEventDto getPurchaseOrder() { return purchaseOrder; }
 }

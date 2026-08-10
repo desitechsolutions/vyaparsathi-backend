@@ -12,4 +12,9 @@ public class TopItemDto {
     private String itemName;
     private Double changePercent;
     private boolean rising;
+
+    public Long getItemId() { return itemId; }
+    public String getItemName() { return itemName; }
+    public Double getChangePercent() { return changePercent; }
+    public boolean isRising() { return rising; }
 }

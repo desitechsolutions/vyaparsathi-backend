@@ -9,18 +9,24 @@ import java.util.stream.Collectors;
 public class TemplateUtil {
 
     public static String loadTemplate(String templatePath, Map<String, String> variables) {
-        try (InputStream inputStream = TemplateUtil.class.getClassLoader().getResourceAsStream(templatePath)) {
-            if (inputStream == null) {
-                throw new RuntimeException("Template not found: " + templatePath);
-            }
+        String path = templatePath.startsWith("/") ? templatePath.substring(1) : templatePath;
+        InputStream inputStream = TemplateUtil.class.getClassLoader().getResourceAsStream(path);
+        if (inputStream == null) {
+            inputStream = TemplateUtil.class.getResourceAsStream("/" + path);
+        }
 
-            String content = new BufferedReader(new InputStreamReader(inputStream))
-                    .lines()
-                    .collect(Collectors.joining("\n"));
+        if (inputStream == null) {
+            throw new RuntimeException("Template not found: " + templatePath);
+        }
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+            String content = reader.lines().collect(Collectors.joining("\n"));
 
             // Replace all variables like ${name}, ${resetLink}, etc.
-            for (Map.Entry<String, String> entry : variables.entrySet()) {
-                content = content.replace("${" + entry.getKey() + "}", entry.getValue());
+            if (variables != null) {
+                for (Map.Entry<String, String> entry : variables.entrySet()) {
+                    content = content.replace("${" + entry.getKey() + "}", entry.getValue() != null ? entry.getValue() : "");
+                }
             }
 
             return content;

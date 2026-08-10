@@ -10,28 +10,26 @@ import java.math.BigDecimal;
 @Mapper(componentModel = "spring")
 public interface SaleItemMapper {
 
-    @Mapping(target = "itemVariantId", source = "itemVariant.id")
-    @Mapping(target = "itemName", source = "itemVariant.item.name")
-    @Mapping(target = "itemId", source = "itemVariant.item.id") // if you track parent item
-    @Mapping(target = "gstRate", source = "itemVariant.gstRate") // if present in ItemVariant
-    @Mapping(target = "costPerUnit", source = "itemVariant.pricePerUnit") // optional
-    @Mapping(target = "isLooseSale", expression = "java(SaleItemMapper.hasValidPackSize(saleItem.getLoosePackSize()))")
-    @Mapping(target = "loosePackSize", source = "loosePackSize")
-    @Mapping(target = "batchNumber", source = "batchNumber")
-    @Mapping(target = "expiryDate", source = "expiryDate")
+    @Mapping(target = "itemVariantId",    source = "itemVariant.id")
+    @Mapping(target = "itemName",         source = "itemVariant.item.name")
+    @Mapping(target = "itemId",           source = "itemVariant.item.id")
+    @Mapping(target = "gstRate",          source = "itemVariant.gstRate")
+    @Mapping(target = "costPerUnit",      source = "itemVariant.pricePerUnit")
+    @Mapping(target = "batchNumber",      source = "batchNumber")
+    @Mapping(target = "expiryDate",       source = "expiryDate")
+    // Issue 1: Map variant attributes for frontend display and invoice rendering
+    @Mapping(target = "variantSku",       source = "itemVariant.sku")
+    @Mapping(target = "variantColor",     source = "itemVariant.color")
+    @Mapping(target = "variantSize",      source = "itemVariant.size")
+    @Mapping(target = "variantDesign",    source = "itemVariant.design")
+    @Mapping(target = "variantBrand",     source = "itemVariant.item.brandName")
     SaleItemDto toDto(SaleItem saleItem);
 
-    @Mapping(target = "itemVariant.id", source = "itemVariantId")
-    @Mapping(target = "sale", ignore = true)   // VERY IMPORTANT to avoid recursion
-    @Mapping(target = "cgstAmt", ignore = true) // usually calculated in service
-    @Mapping(target = "sgstAmt", ignore = true)
-    @Mapping(target = "igstAmt", ignore = true)
-    @Mapping(target = "taxableValue", ignore = true) // calculated, not taken from UI
+    @Mapping(target = "itemVariant.id",   source = "itemVariantId")
+    @Mapping(target = "sale",             ignore = true)   // Prevent recursion
+    @Mapping(target = "cgstAmt",          ignore = true)   // Calculated in service
+    @Mapping(target = "sgstAmt",          ignore = true)
+    @Mapping(target = "igstAmt",          ignore = true)
+    @Mapping(target = "taxableValue",     ignore = true)   // Calculated, not from UI
     SaleItem toEntity(SaleItemDto dto);
-
-    /** Returns true when the given packSize represents a valid positive pack size. */
-    static boolean hasValidPackSize(BigDecimal packSize) {
-        return packSize != null && packSize.compareTo(BigDecimal.ZERO) > 0;
-    }
 }
-

@@ -136,6 +136,23 @@ public class SubscriptionController {
         ));
     }
 
+    /**
+     * USER ENDPOINT: Cancel a pending manual UTR verification request.
+     * Allows user to withdraw a pending UTR if they wish to switch to Razorpay AutoPay.
+     */
+    @PostMapping("/cancel-pending-utr")
+    public ResponseEntity<?> cancelPendingUtr(
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+        Long shopId = getValidatedShopId(userDetails);
+        logger.info("Pending UTR cancellation requested for Shop ID: {}", shopId);
+
+        subscriptionService.cancelPendingUtrSubmission(shopId);
+
+        return ResponseEntity.ok(Map.of(
+                "message", "Pending UTR verification request cancelled successfully."
+        ));
+    }
+
     // --- PLATFORM / ADMIN ENDPOINTS ---
 
     /**

@@ -23,4 +23,34 @@ public class PurchaseOrderDto {
     private String notes;
     private List<PurchaseOrderItemDto> items;
     private SupplierDto supplier;
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public String getPoNumber() { return poNumber; }
+    public void setPoNumber(String poNumber) { this.poNumber = poNumber; }
+
+    public Long getSupplierId() { return supplierId; }
+    public void setSupplierId(Long supplierId) { this.supplierId = supplierId; }
+
+    public LocalDateTime getOrderDate() { return orderDate; }
+    public void setOrderDate(LocalDateTime orderDate) { this.orderDate = orderDate; }
+
+    public LocalDateTime getExpectedDeliveryDate() { return expectedDeliveryDate; }
+    public void setExpectedDeliveryDate(LocalDateTime expectedDeliveryDate) { this.expectedDeliveryDate = expectedDeliveryDate; }
+
+    public BigDecimal getTotalAmount() { return totalAmount; }
+    public void setTotalAmount(BigDecimal totalAmount) { this.totalAmount = totalAmount; }
+
+    public PurchaseOrderStatus getStatus() { return status; }
+    public void setStatus(PurchaseOrderStatus status) { this.status = status; }
+
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
+
+    public List<PurchaseOrderItemDto> getItems() { return items; }
+    public void setItems(List<PurchaseOrderItemDto> items) { this.items = items; }
+
+    public SupplierDto getSupplier() { return supplier; }
+    public void setSupplier(SupplierDto supplier) { this.supplier = supplier; }
 }

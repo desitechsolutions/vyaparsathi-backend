@@ -11,9 +11,21 @@ import java.math.BigDecimal;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public  class PurchaseOrderItemEventDto {
+public class PurchaseOrderItemEventDto {
     private Long id;
     private Long itemVariantId;
     private Integer quantity;
     private BigDecimal price;
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public Long getItemVariantId() { return itemVariantId; }
+    public void setItemVariantId(Long itemVariantId) { this.itemVariantId = itemVariantId; }
+
+    public Integer getQuantity() { return quantity; }
+    public void setQuantity(Integer quantity) { this.quantity = quantity; }
+
+    public BigDecimal getPrice() { return price; }
+    public void setPrice(BigDecimal price) { this.price = price; }
 }

@@ -19,14 +19,29 @@ public class CreatePurchaseReturnDto {
     private Long supplierId;
 
     private Long purchaseOrderId;
-
     private Long receivingId;
-
     private LocalDateTime returnDate;
-
     private String notes;
 
     @NotEmpty(message = "Return items cannot be empty")
     @Valid
     private List<CreatePurchaseReturnItemDto> items;
+
+    public Long getSupplierId() { return supplierId; }
+    public void setSupplierId(Long supplierId) { this.supplierId = supplierId; }
+
+    public Long getPurchaseOrderId() { return purchaseOrderId; }
+    public void setPurchaseOrderId(Long purchaseOrderId) { this.purchaseOrderId = purchaseOrderId; }
+
+    public Long getReceivingId() { return receivingId; }
+    public void setReceivingId(Long receivingId) { this.receivingId = receivingId; }
+
+    public LocalDateTime getReturnDate() { return returnDate; }
+    public void setReturnDate(LocalDateTime returnDate) { this.returnDate = returnDate; }
+
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
+
+    public List<CreatePurchaseReturnItemDto> getItems() { return items; }
+    public void setItems(List<CreatePurchaseReturnItemDto> items) { this.items = items; }
 }

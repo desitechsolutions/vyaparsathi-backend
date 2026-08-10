@@ -49,7 +49,11 @@ public class SecurityConfig {
                                 "/api/newsletter/subscribe",
                                 "/api/newsletter/unsubscribe",
                                 "/uploads/**",
-                                "/api/files/**"
+                                "/api/files/**",
+                                // Razorpay server-to-server webhook — must be public (no JWT)
+                                "/api/webhooks/**",
+                                // Public platform info and public endpoints
+                                "/api/v1/public/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
@@ -84,7 +88,8 @@ public class SecurityConfig {
                 "Accept",
                 "Origin",
                 "Access-Control-Request-Method",
-                "Access-Control-Request-Headers"
+                "Access-Control-Request-Headers",
+                "X-Razorpay-Signature"
         ));
 
         // 4. Headers the frontend can see

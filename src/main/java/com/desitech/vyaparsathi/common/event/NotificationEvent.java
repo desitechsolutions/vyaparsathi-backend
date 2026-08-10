@@ -28,4 +28,11 @@ public class NotificationEvent extends ApplicationEvent {
         this.link = link;
         this.priority = priority != null ? priority : "medium";
     }
+
+    public String getType() { return type; }
+    public String getTitle() { return title; }
+    public String getMessage() { return message; }
+    public String getRecipient() { return recipient; }
+    public String getLink() { return link; }
+    public String getPriority() { return priority; }
 }

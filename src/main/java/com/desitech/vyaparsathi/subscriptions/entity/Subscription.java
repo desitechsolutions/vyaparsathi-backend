@@ -42,4 +42,37 @@ public class Subscription extends ShopAwareEntity {
 
     private Integer lastUpgradeBonusDays = 0;
     private Tier previousTier;
+
+    public Tier getTier() { return tier; }
+    public void setTier(Tier tier) { this.tier = tier; }
+
+    public SubscriptionStatus getStatus() { return status; }
+    public void setStatus(SubscriptionStatus status) { this.status = status; }
+
+    public LocalDateTime getStartDate() { return startDate; }
+    public void setStartDate(LocalDateTime startDate) { this.startDate = startDate; }
+
+    public LocalDateTime getEndDate() { return endDate; }
+    public void setEndDate(LocalDateTime endDate) { this.endDate = endDate; }
+
+    public LocalDateTime getTrialEndDate() { return trialEndDate; }
+    public void setTrialEndDate(LocalDateTime trialEndDate) { this.trialEndDate = trialEndDate; }
+
+    public String getLastUtr() { return lastUtr; }
+    public void setLastUtr(String lastUtr) { this.lastUtr = lastUtr; }
+
+    public Long getLastUpdatedByUserId() { return lastUpdatedByUserId; }
+    public void setLastUpdatedByUserId(Long lastUpdatedByUserId) { this.lastUpdatedByUserId = lastUpdatedByUserId; }
+
+    public boolean isUsedTrial() { return usedTrial; }
+    public void setUsedTrial(boolean usedTrial) { this.usedTrial = usedTrial; }
+
+    public BillingCycle getBillingCycle() { return billingCycle; }
+    public void setBillingCycle(BillingCycle billingCycle) { this.billingCycle = billingCycle; }
+
+    public Integer getLastUpgradeBonusDays() { return lastUpgradeBonusDays; }
+    public void setLastUpgradeBonusDays(Integer lastUpgradeBonusDays) { this.lastUpgradeBonusDays = lastUpgradeBonusDays; }
+
+    public Tier getPreviousTier() { return previousTier; }
+    public void setPreviousTier(Tier previousTier) { this.previousTier = previousTier; }
 }

@@ -3,6 +3,7 @@ package com.desitech.vyaparsathi.analytics.dto;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import java.math.BigDecimal;
 
 @Data
 @NoArgsConstructor
@@ -11,5 +12,10 @@ public class ChurnPredictionDto {
     private Long customerId;
     private String customerName;
     private Double churnProbability;
-    private java.math.BigDecimal revenueAtRisk;
+    private BigDecimal revenueAtRisk;
+
+    public Long getCustomerId() { return customerId; }
+    public String getCustomerName() { return customerName; }
+    public Double getChurnProbability() { return churnProbability; }
+    public BigDecimal getRevenueAtRisk() { return revenueAtRisk; }
 }

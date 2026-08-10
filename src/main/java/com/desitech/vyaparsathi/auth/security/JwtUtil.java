@@ -81,6 +81,11 @@ public class JwtUtil {
         return parseClaims(token).get("role", String.class);
     }
 
+    public <T> T extractClaim(String token, java.util.function.Function<Claims, T> claimsResolver) {
+        final Claims claims = parseClaims(token);
+        return claimsResolver.apply(claims);
+    }
+
     // --- VALIDATION ---
     public boolean validateToken(String token) {
         try {
@@ -144,6 +149,41 @@ public class JwtUtil {
         } catch (JwtException | IllegalArgumentException e) {
             logger.warning("Invalid invoice JWT: " + e.getMessage());
             throw e;
+        }
+    }
+
+    // --- IMPERSONATION TOKEN GENERATION (15-Min TTL) ---
+    public String generateImpersonationToken(User targetUser, Long shopId, String sessionUuid, Long superAdminId, String superAdminEmail) {
+        return Jwts.builder()
+                .setSubject(targetUser.getUsername())
+                .claim("role", targetUser.getRole().name())
+                .claim("firstName", targetUser.getFirstName())
+                .claim("lastName", targetUser.getLastName())
+                .claim("shopId", shopId)
+                .claim("isImpersonation", true)
+                .claim("impersonationSessionId", sessionUuid)
+                .claim("originalAdminId", superAdminId)
+                .claim("originalAdminEmail", superAdminEmail)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + 15 * 60 * 1000L)) // 15 minutes TTL
+                .signWith(secretKey, SignatureAlgorithm.HS512)
+                .compact();
+    }
+
+    public Boolean isImpersonationToken(String token) {
+        try {
+            Boolean flag = parseClaims(token).get("isImpersonation", Boolean.class);
+            return Boolean.TRUE.equals(flag);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public String extractImpersonationSessionId(String token) {
+        try {
+            return parseClaims(token).get("impersonationSessionId", String.class);
+        } catch (Exception e) {
+            return null;
         }
     }
 }

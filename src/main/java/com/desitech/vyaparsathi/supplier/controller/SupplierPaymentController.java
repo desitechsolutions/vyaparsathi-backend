@@ -3,6 +3,7 @@ package com.desitech.vyaparsathi.supplier.controller;
 import com.desitech.vyaparsathi.payment.dto.PaymentDto;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderPaymentSummaryDto;
 import com.desitech.vyaparsathi.supplier.dto.SupplierBulkPaymentRequest;
+import com.desitech.vyaparsathi.supplier.dto.SupplierPayableBillDto;
 import com.desitech.vyaparsathi.supplier.dto.SupplierPaymentDto;
 import com.desitech.vyaparsathi.supplier.dto.SupplierStatementDto;
 import com.desitech.vyaparsathi.supplier.service.SupplierPaymentService;
@@ -76,6 +77,18 @@ public class SupplierPaymentController {
     public ResponseEntity<PurchaseOrderPaymentSummaryDto> getPaymentSummary(
             @RequestParam Long purchaseOrderId) {
         return ResponseEntity.ok(supplierPaymentService.getPaymentSummary(purchaseOrderId));
+    }
+
+    /**
+     * Issue 4 Fix: Per-PO payable breakdown with return deductions.
+     * Returns: originalAmount, returnDeductions, cashPaid, netPayable per PO for frontend display.
+     * GET /api/supplier-payments/payable-bills?supplierId=123
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
+    @GetMapping("/payable-bills")
+    public ResponseEntity<List<SupplierPayableBillDto>> getPayableBills(
+            @RequestParam Long supplierId) {
+        return ResponseEntity.ok(supplierPaymentService.getPayableBills(supplierId));
     }
 
     @PreAuthorize("hasAnyRole('ADMIN','OWNER')")

@@ -65,16 +65,34 @@ public class ItemVariantService {
         itemVariant.setLowStockThreshold(dto.getLowStockThreshold());
         itemVariant.setPhotoPath(dto.getPhotoPath());
 
-        // Pharmacy-specific fields
+        // Generic retail fields (batch/expiry/MRP)
         itemVariant.setBatchNumber(dto.getBatchNumber());
         itemVariant.setManufacturingDate(dto.getManufacturingDate());
         itemVariant.setExpiryDate(dto.getExpiryDate());
         itemVariant.setMrp(dto.getMrp());
-        itemVariant.setIsLooseMedicine(dto.getIsLooseMedicine());
-        itemVariant.setPackSize(dto.getPackSize());
+
+        // Barcode (POS scanner)
+        itemVariant.setBarcode(dto.getBarcode());
 
         ItemVariant savedVariant = itemVariantRepository.save(itemVariant);
         return mapper.toDto(savedVariant);
+    }
+
+    /**
+     * POS Barcode / QR Scanner lookup.
+     * Finds the item variant matching the scanned barcode code and populates
+     * its current stock level so the POS can display price + stock immediately.
+     *
+     * @param barcode the raw barcode string scanned by the device
+     * @return the matching ItemVariantDto with current stock populated
+     */
+    public ItemVariantDto lookupByBarcode(String barcode) {
+        ItemVariant variant = itemVariantRepository.findByBarcode(barcode)
+                .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException(
+                        "No item found for barcode: " + barcode));
+        ItemVariantDto dto = mapper.toDto(variant);
+        dto.setCurrentStock(stockService.getCurrentStock(variant.getId()));
+        return dto;
     }
 
     public Page<ItemVariantDto> list(Pageable pageable) {
@@ -98,11 +116,11 @@ public class ItemVariantService {
      */
     public List<ItemVariantDto> searchItemVariants(
             String name, String categoryName, String color, String size, String design,
-            String sku, String fabric, String season, String fit, String composition) {
+            String sku, String fabric, String season, String fit, String specifications) {
 
         // 1. Call the corrected repository method with all parameters
         List<ItemVariant> variants = itemVariantRepository.searchVariants(
-                name, categoryName, color, size, design, sku, fabric, season, fit, composition);
+                name, categoryName, color, size, design, sku, fabric, season, fit, specifications);
 
         if (variants.isEmpty()) {
             return List.of();
@@ -134,12 +152,12 @@ public class ItemVariantService {
         com.desitech.vyaparsathi.inventory.entity.Item item = itemRepository.findById(itemId)
                 .orElseThrow(() -> new jakarta.persistence.EntityNotFoundException("Item not found with id: " + itemId));
 
-        if (item.getComposition() == null || item.getComposition().isBlank()) {
+        if (item.getSpecifications() == null || item.getSpecifications().isBlank()) {
             return List.of();
         }
 
         List<ItemVariant> substitutes = itemVariantRepository.findSubstitutesByComposition(
-                item.getComposition(), itemId);
+                item.getSpecifications(), itemId);
 
         if (substitutes.isEmpty()) {
             return List.of();

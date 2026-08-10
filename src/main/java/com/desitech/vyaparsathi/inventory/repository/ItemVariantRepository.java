@@ -16,6 +16,9 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
 
     Optional<ItemVariant> findBySku(String sku);
 
+    /** POS barcode / QR scanner lookup — finds the variant matching the scanned barcode. */
+    Optional<ItemVariant> findByBarcode(String barcode);
+
     boolean existsByHsn(String hsn);
 
     /**
@@ -32,7 +35,7 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
             "(:fabric IS NULL OR i.fabric LIKE %:fabric%) AND " +
             "(:season IS NULL OR i.season LIKE %:season%) AND " +
             "(:fit IS NULL OR iv.fit LIKE %:fit%) AND " +
-            "(:composition IS NULL OR i.composition LIKE %:composition%)")
+            "(:specifications IS NULL OR i.specifications LIKE %:specifications%)")
     List<ItemVariant> searchVariants(
             @Param("name") String name,
             @Param("categoryName") String categoryName,
@@ -43,7 +46,7 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
             @Param("fabric") String fabric,
             @Param("season") String season,
             @Param("fit") String fit,
-            @Param("composition") String composition
+            @Param("specifications") String specifications
     );
 
     /**
@@ -67,9 +70,9 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
      * @param excludeItemId the item ID to exclude (the reference item itself)
      * @return list of variants from items with the same composition
      */
-    @Query("SELECT iv FROM ItemVariant iv JOIN iv.item i WHERE i.composition = :composition AND i.id <> :excludeItemId")
+    @Query("SELECT iv FROM ItemVariant iv JOIN iv.item i WHERE i.specifications = :specifications AND i.id <> :excludeItemId")
     List<ItemVariant> findSubstitutesByComposition(
-            @Param("composition") String composition,
+            @Param("specifications") String specifications,
             @Param("excludeItemId") Long excludeItemId
     );
 

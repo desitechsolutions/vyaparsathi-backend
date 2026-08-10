@@ -10,6 +10,9 @@ public enum Role {
     STAFF,
     ADMIN,
     SUPER_ADMIN,
+    TECH_ADMIN,
+    SUPPORT_AGENT,
+    BILLING_ADMIN,
     PENDING_OWNER;
 
     @JsonCreator

@@ -21,4 +21,6 @@ public class SubscriptionStatusDTO {
     private boolean usedTrial;
     private BillingCycle billingCycle;
     private Double amount;
+    private Boolean canProcessSale;
+    private boolean canStartTrial;
 }

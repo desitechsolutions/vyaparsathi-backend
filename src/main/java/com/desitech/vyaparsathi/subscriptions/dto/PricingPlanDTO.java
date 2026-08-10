@@ -17,4 +17,5 @@ public class PricingPlanDTO {
     private Integer maxSalesPerMonth;
     private Integer maxItems;
     private Integer maxStaffUsers;
+    private Boolean canProcessSale;
 }

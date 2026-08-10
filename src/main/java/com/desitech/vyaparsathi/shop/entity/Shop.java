@@ -57,6 +57,9 @@ public class Shop {
     @Column(name = "brand_color")
     private String brandColor = "#2980b9";
 
+    @Column(nullable = false)
+    private Boolean active = true;
+
     @Column(columnDefinition = "TEXT")
     private String termsAndConditions;
 
@@ -81,10 +84,72 @@ public class Shop {
     @Column(name = "invoice_due_days")
     private Integer invoiceDueDays = 30;
 
-    /**
-     * Drug license number for pharmacy shops.
-     * Displayed on pharmacy invoices as required by regulatory compliance.
-     */
-    @Column(name = "drug_license_number")
-    private String drugLicenseNumber;
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public String getOwnerName() { return ownerName; }
+    public void setOwnerName(String ownerName) { this.ownerName = ownerName; }
+
+    public String getAddress() { return address; }
+    public void setAddress(String address) { this.address = address; }
+
+    public String getPhone() { return phone; }
+    public void setPhone(String phone) { this.phone = phone; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+
+    public String getState() { return state; }
+    public void setState(String state) { this.state = state; }
+
+    public String getGstin() { return gstin; }
+    public void setGstin(String gstin) { this.gstin = gstin; }
+
+    public String getCode() { return code; }
+    public void setCode(String code) { this.code = code; }
+
+    public String getLogoPath() { return logoPath; }
+    public void setLogoPath(String logoPath) { this.logoPath = logoPath; }
+
+    public String getSignaturePath() { return signaturePath; }
+    public void setSignaturePath(String signaturePath) { this.signaturePath = signaturePath; }
+
+    public String getIndustryType() { return industryType; }
+    public void setIndustryType(String industryType) { this.industryType = industryType; }
+
+    public Boolean getIsCompositionScheme() { return isCompositionScheme; }
+    public void setIsCompositionScheme(Boolean isCompositionScheme) { this.isCompositionScheme = isCompositionScheme; }
+
+    public String getBrandColor() { return brandColor; }
+    public void setBrandColor(String brandColor) { this.brandColor = brandColor; }
+
+    public String getTermsAndConditions() { return termsAndConditions; }
+    public void setTermsAndConditions(String termsAndConditions) { this.termsAndConditions = termsAndConditions; }
+
+    public String getBankDetails() { return bankDetails; }
+    public void setBankDetails(String bankDetails) { this.bankDetails = bankDetails; }
+
+    public String getUpiId() { return upiId; }
+    public void setUpiId(String upiId) { this.upiId = upiId; }
+
+    public String getInvoicePrefix() { return invoicePrefix; }
+    public void setInvoicePrefix(String invoicePrefix) { this.invoicePrefix = invoicePrefix; }
+
+    public String getCompanyWebsite() { return companyWebsite; }
+    public void setCompanyWebsite(String companyWebsite) { this.companyWebsite = companyWebsite; }
+
+    public String getInvoiceFooter() { return invoiceFooter; }
+    public void setInvoiceFooter(String invoiceFooter) { this.invoiceFooter = invoiceFooter; }
+
+    public String getSupportContact() { return supportContact; }
+    public void setSupportContact(String supportContact) { this.supportContact = supportContact; }
+
+    public Integer getInvoiceDueDays() { return invoiceDueDays; }
+    public void setInvoiceDueDays(Integer invoiceDueDays) { this.invoiceDueDays = invoiceDueDays; }
+
+    public Boolean getActive() { return active != null ? active : true; }
+    public void setActive(Boolean active) { this.active = active; }
 }

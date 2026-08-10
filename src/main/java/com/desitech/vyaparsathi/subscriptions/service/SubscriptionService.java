@@ -14,6 +14,7 @@ import com.desitech.vyaparsathi.subscriptions.enums.BillingCycle;
 import com.desitech.vyaparsathi.subscriptions.enums.PaymentVerificationStatus;
 import com.desitech.vyaparsathi.subscriptions.enums.SubscriptionStatus;
 import com.desitech.vyaparsathi.subscriptions.enums.Tier;
+import com.desitech.vyaparsathi.subscriptions.razorpay.repository.RazorpaySubscriptionOrderRepository;
 import com.desitech.vyaparsathi.subscriptions.repository.SubscriptionPayRepository;
 import com.desitech.vyaparsathi.subscriptions.repository.SubscriptionRepository;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +34,7 @@ public class SubscriptionService {
 
     private final SubscriptionRepository subscriptionRepository;
     private final SubscriptionPayRepository subscriptionPayRepository;
+    private final RazorpaySubscriptionOrderRepository subscriptionOrderRepository;
     private final ShopRepository shopRepository;
     private final UserRepository userRepository;
     private final PricingPlanService pricingPlanService;
@@ -45,6 +47,10 @@ public class SubscriptionService {
      */
     @Transactional
     public Subscription initiateTrial(Long shopId, Tier targetTier) {
+        if (subscriptionOrderRepository.hasActiveSubscriptionForShop(shopId)) {
+            throw new SubscriptionException("Active Razorpay AutoPay subscription exists. Cancel AutoPay mandate before starting a trial.");
+        }
+
         Shop shop = shopRepository.findById(shopId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Shop not found: " + shopId));
 
@@ -83,6 +89,14 @@ public class SubscriptionService {
      */
     @Transactional
     public PaymentVerification processUtrSubmission(Long userId, Long shopId, PaymentRequest request) {
+        if (subscriptionOrderRepository.hasActiveSubscriptionForShop(shopId)) {
+            throw new SubscriptionException("Active Razorpay AutoPay subscription exists. Cancel AutoPay mandate before submitting manual UTR payments.");
+        }
+
+        if (subscriptionPayRepository.existsByShopIdAndStatus(shopId, PaymentVerificationStatus.WAITING)) {
+            throw new SubscriptionException("A manual UTR payment is currently pending admin verification. Cancel the pending UTR request or wait for verification before submitting another UTR.");
+        }
+
         if (subscriptionPayRepository.findByUtrNumber(request.getUtrNumber()).isPresent()) {
             throw new SubscriptionException("This UTR has already been submitted.");
         }
@@ -94,7 +108,6 @@ public class SubscriptionService {
         pv.setAmount(request.getAmountPaid());
         pv.setPlanRequested(request.getPlanTier());
         pv.setBillingCycle(request.getBillingCycle());
-        // Note: Ensure your PaymentRequest/Entity also includes 'billingCycle'
         pv.setStatus(PaymentVerificationStatus.WAITING);
         pv.setSubmittedAt(LocalDateTime.now());
         pv = subscriptionPayRepository.save(pv);
@@ -111,6 +124,28 @@ public class SubscriptionService {
         subscriptionRepository.save(subscription);
 
         return pv;
+    }
+
+    /**
+     * Cancels a pending UTR submission for the shop.
+     */
+    @Transactional
+    public void cancelPendingUtrSubmission(Long shopId) {
+        PaymentVerification pv = subscriptionPayRepository
+                .findFirstByShopIdAndStatusOrderBySubmittedAtDesc(shopId, PaymentVerificationStatus.WAITING)
+                .orElseThrow(() -> new SubscriptionException("No pending UTR verification found to cancel."));
+
+        pv.setStatus(PaymentVerificationStatus.REJECTED);
+        pv.setVerifiedAt(LocalDateTime.now());
+        pv.setVerifiedBy("USER_CANCELLED");
+        subscriptionPayRepository.save(pv);
+
+        subscriptionRepository.findByShopId(shopId).ifPresent(sub -> {
+            if (sub.getStatus() == SubscriptionStatus.PENDING) {
+                sub.setStatus(SubscriptionStatus.EXPIRED);
+                subscriptionRepository.save(sub);
+            }
+        });
     }
 
     /**
@@ -257,6 +292,49 @@ public class SubscriptionService {
     }
 
     @Transactional(readOnly = true)
+    public void validateSaleProcessingEntitlement(Long shopId) {
+        if (shopId == null) {
+            return;
+        }
+
+        Subscription sub = subscriptionRepository.findByShopId(shopId).orElse(null);
+        LocalDateTime now = LocalDateTime.now();
+
+        Tier effectiveTier = Tier.FREE;
+        boolean canStartTrial = true;
+
+        if (sub != null) {
+            boolean isTrial = sub.getStatus() == SubscriptionStatus.TRIAL;
+            boolean isActive = sub.getStatus() == SubscriptionStatus.ACTIVE;
+            LocalDateTime targetDate = isTrial ? sub.getTrialEndDate() : sub.getEndDate();
+
+            if ((isTrial || isActive) && targetDate != null && targetDate.isAfter(now)) {
+                effectiveTier = sub.getTier() != null ? sub.getTier() : Tier.FREE;
+            }
+
+            if (sub.isUsedTrial() || sub.getEndDate() != null) {
+                canStartTrial = false;
+            }
+        }
+
+        PricingPlanConfig config = null;
+        try {
+            config = pricingPlanService.getPlanConfig(effectiveTier);
+        } catch (Exception ignored) {}
+
+        boolean canProcess = (config == null || config.getCanProcessSale() == null || Boolean.TRUE.equals(config.getCanProcessSale()));
+
+        if (!canProcess) {
+            throw new com.desitech.vyaparsathi.common.exception.FeatureRestrictedException(
+                    "CAN_PROCESS_SALE",
+                    "Completing sales is restricted under your current plan configuration.",
+                    canStartTrial,
+                    TRIAL_DAYS
+            );
+        }
+    }
+
+    @Transactional(readOnly = true)
     public SubscriptionStatusDTO getSubscriptionStatus(Long shopId) {
         if (shopId == null) {
             return SubscriptionStatusDTO.builder()
@@ -264,6 +342,8 @@ public class SubscriptionService {
                     .status(SubscriptionStatus.ACTIVE)
                     .premium(false)
                     .daysRemaining(0)
+                    .canProcessSale(true)
+                    .canStartTrial(true)
                     .build();
         }
 
@@ -285,6 +365,19 @@ public class SubscriptionService {
                         effectiveStatus = SubscriptionStatus.EXPIRED;
                     }
 
+                    Tier effectiveTier = Tier.FREE;
+                    if (hasAccess && sub.getTier() != null) {
+                        effectiveTier = sub.getTier();
+                    }
+
+                    PricingPlanConfig config = null;
+                    try {
+                        config = pricingPlanService.getPlanConfig(effectiveTier);
+                    } catch (Exception ignored) {}
+
+                    boolean canProcess = (config == null || config.getCanProcessSale() == null || Boolean.TRUE.equals(config.getCanProcessSale()));
+                    boolean canStartTrial = !sub.isUsedTrial() && sub.getEndDate() == null;
+
                     SubscriptionStatusDTO dto = new SubscriptionStatusDTO();
                     dto.setTier(sub.getTier());
                     dto.setStatus(effectiveStatus);
@@ -293,14 +386,25 @@ public class SubscriptionService {
                     dto.setUsedTrial(sub.isUsedTrial());
                     dto.setLastUtr(sub.getLastUtr());
                     dto.setBillingCycle(sub.getBillingCycle());
+                    dto.setCanProcessSale(canProcess);
+                    dto.setCanStartTrial(canStartTrial);
                     return dto;
                 })
                 .orElseGet(() -> {
+                    PricingPlanConfig config = null;
+                    try {
+                        config = pricingPlanService.getPlanConfig(Tier.FREE);
+                    } catch (Exception ignored) {}
+
+                    boolean canProcess = (config == null || config.getCanProcessSale() == null || Boolean.TRUE.equals(config.getCanProcessSale()));
+
                     SubscriptionStatusDTO dto = new SubscriptionStatusDTO();
-                    dto.setTier(null);
+                    dto.setTier(Tier.FREE);
                     dto.setStatus(null);
                     dto.setPremium(false);
                     dto.setUsedTrial(false);
+                    dto.setCanProcessSale(canProcess);
+                    dto.setCanStartTrial(true);
                     return dto;
                 });
     }

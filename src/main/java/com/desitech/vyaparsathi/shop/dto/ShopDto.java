@@ -12,7 +12,6 @@ public class ShopDto {
     private String name;
 
     private String ownerName;
-
     private String address;
 
     @NotBlank(message = "State is required")
@@ -28,7 +27,6 @@ public class ShopDto {
     @NotBlank(message = "Industry type is required")
     private String industryType;
 
-    // --- New Fields for Settings ---
     private String phone;
     private String email;
 
@@ -47,7 +45,7 @@ public class ShopDto {
     private String invoiceFooter;
     private String supportContact;
     private Integer invoiceDueDays;
+    private String accessToken;
+    private String refreshToken;
 
-    /** Drug license number for pharmacy shops (shown on pharmacy invoices). */
-    private String drugLicenseNumber;
 }

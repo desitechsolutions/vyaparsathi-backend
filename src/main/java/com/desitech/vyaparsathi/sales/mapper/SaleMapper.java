@@ -22,8 +22,24 @@ import java.util.List;
 public interface SaleMapper {
 
     // -------- ENTITY → DTO --------
-    @Mapping(target = "items", source = "saleItems")
-    @Mapping(target = "customer", source = "customer")
+    @Mapping(target = "items",              source = "saleItems")
+    @Mapping(target = "customer",           source = "customer")
+    // Issue 2: Bill-level discount/charges fields
+    @Mapping(target = "invoiceDiscount",    source = "invoiceDiscount")
+    @Mapping(target = "shippingCharges",    source = "shippingCharges")
+    @Mapping(target = "otherCharges",       source = "otherCharges")
+    // Issue 5: E-Invoice & E-Way Bill fields
+    @Mapping(target = "irn",                source = "irn")
+    @Mapping(target = "ackNo",              source = "ackNo")
+    @Mapping(target = "ackDate",            source = "ackDate")
+    @Mapping(target = "qrCodePath",         source = "qrCodePath")
+    @Mapping(target = "einvoiceStatus",     source = "einvoiceStatus")
+    @Mapping(target = "ewayBillNo",         source = "ewayBillNo")
+    @Mapping(target = "ewayBillDate",       source = "ewayBillDate")
+    @Mapping(target = "ewayBillValidUntil", source = "ewayBillValidUntil")
+    @Mapping(target = "vehicleNumber",      source = "vehicleNumber")
+    @Mapping(target = "transporterId",      source = "transporterId")
+    @Mapping(target = "transporterName",    source = "transporterName")
     SaleDto toDto(Sale sale);
 
     // -------- DTO → ENTITY --------

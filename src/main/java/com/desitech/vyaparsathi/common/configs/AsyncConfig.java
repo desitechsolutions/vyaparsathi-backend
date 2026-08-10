@@ -1,5 +1,7 @@
 package com.desitech.vyaparsathi.common.configs;
 
+import com.desitech.vyaparsathi.auth.security.ImpersonationContext;
+import com.desitech.vyaparsathi.auth.security.ImpersonationContext.ImpersonationDetails;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.TaskDecorator;
@@ -23,20 +25,37 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * Propagates request-scoped context onto pooled async threads and clears it
+     * on completion so a pooled thread never carries state across tasks:
+     *   - TenantContext (shop id) — otherwise a stale value from a prior task
+     *     could leak into a task submitted by another tenant.
+     *   - ImpersonationContext (super-admin impersonation session) — backed by a
+     *     plain (non-inheritable) ThreadLocal, so it is completely lost on
+     *     async threads without this snapshot/restore.
+     */
     private static class TenantContextTaskDecorator implements TaskDecorator {
         @Override
         public Runnable decorate(Runnable runnable) {
-            final Long currentShopId = TenantContext.getCurrentShopId();
+            final Long capturedShopId = TenantContext.getCurrentShopId();
+            final ImpersonationDetails capturedImpersonation = ImpersonationContext.get();
 
             return () -> {
                 try {
-                    if (currentShopId != null) {
-                        TenantContext.setCurrentShopId(currentShopId);
+                    if (capturedShopId != null) {
+                        TenantContext.setCurrentShopId(capturedShopId);
+                    }
+                    if (capturedImpersonation != null) {
+                        ImpersonationContext.set(
+                                capturedImpersonation.getActorAdminId(),
+                                capturedImpersonation.getImpersonationSessionId(),
+                                capturedImpersonation.getTargetShopId());
                     }
                     runnable.run();
                 } finally {
-                    // Always clean up
                     TenantContext.clear();
+                    ImpersonationContext.clear();
                 }
             };
         }

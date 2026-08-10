@@ -366,18 +366,30 @@ public class ReceivingService {
     }
 
     /**
-     * Gets default shop, configurable.
+     * Gets the current tenant's shop using TenantContext as the primary source.
+     *
+     * <p>Phase 0.7 fix: TenantContext.getCurrentShopId() is now the authoritative source.
+     * The {@code defaultShopId} config property is used ONLY when the context is not set
+     * (e.g. during application startup or scheduled jobs), not for normal web requests.
+     * This prevents cross-tenant stock assignments when events are processed on behalf of a PO.
      */
     private Shop getDefaultShop() {
+        // 1. Prefer TenantContext (set by JWT filter for all web requests)
+        Long tenantShopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        if (tenantShopId != null) {
+            return shopRepository.findById(tenantShopId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Shop not found for current tenant: " + tenantShopId));
+        }
+
+        // 2. Fallback: use configured defaultShopId (for event-driven / scheduled processing)
         if (defaultShopId != null) {
             return shopRepository.findById(defaultShopId)
                     .orElseThrow(() -> new ResourceNotFoundException("Default shop not found with ID: " + defaultShopId));
         }
-        List<Shop> shops = shopRepository.findAll();
-        if (shops.isEmpty()) {
-            throw new IllegalStateException("No shops found in the system.");
-        }
-        return shops.get(0);
+
+        // 3. Last resort: reject rather than guessing, to prevent cross-tenant contamination
+        throw new IllegalStateException(
+                "Cannot determine shop for receiving operation: TenantContext is not set and defaultShopId is not configured.");
     }
 
     /**

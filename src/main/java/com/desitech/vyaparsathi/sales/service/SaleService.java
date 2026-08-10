@@ -37,9 +37,11 @@ import com.desitech.vyaparsathi.sales.entity.SaleItem;
 import com.desitech.vyaparsathi.sales.enums.SaleStatus;
 import com.desitech.vyaparsathi.sales.mapper.SaleMapper;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
+import com.desitech.vyaparsathi.invoice.service.InvoiceNumberService;
 import com.desitech.vyaparsathi.invoice.service.InvoiceService;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
+import com.desitech.vyaparsathi.subscriptions.service.SubscriptionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -81,6 +83,8 @@ public class SaleService {
     @Autowired
     private InvoiceService invoiceService;
     @Autowired
+    private InvoiceNumberService invoiceNumberService;
+    @Autowired
     private SaleMapper mapper;
     @Autowired
     private ItemVariantRepository itemVariantRepository;
@@ -100,10 +104,15 @@ public class SaleService {
     @Autowired
     private AuditHelper auditHelper;
 
+    @Autowired
+    private SubscriptionService subscriptionService;
+
     @Transactional
     @LogAudit(action = "CREATE_SALE", entity = "SALE")
     @CheckSubscriptionLimit("SALES")
     public SaleDto createSale(SaleDto dto) {
+        subscriptionService.validateSaleProcessingEntitlement(TenantContext.getCurrentShopId());
+
         // 1. Fetch Context (Shop and Customer)
         Shop shop = shopRepository.findById(TenantContext.getCurrentShopId())
                 .orElseThrow(() -> new EntityNotFoundAppException("Shop", TenantContext.getCurrentShopId()));
@@ -132,8 +141,8 @@ public class SaleService {
             saleItem.setItemVariant(itemVariant);
             saleItem.setQty(itemDto.getQty());
             saleItem.setUnitPrice(itemDto.getUnitPrice());
+            saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
             // Persist the effective pack size so returns can reverse the same fractional qty
-            saleItem.setLoosePackSize(resolveLoosePackSize(itemVariant, itemDto));
             // Pharmacy batch tracking — persist per-item batch/expiry from the frontend
             saleItem.setBatchNumber(itemDto.getBatchNumber());
             saleItem.setExpiryDate(itemDto.getExpiryDate());
@@ -174,18 +183,42 @@ public class SaleService {
             saleItems.add(saleItem);
         }
 
-        // 3. Generate Invoice Number
-        String seq = String.format("%03d", saleRepository.count() + 1);
-        String invoiceNo = shop.getCode() + "-" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMM")) + "-" + seq;
+        // 3. Generate Invoice Number (atomic — no race condition)
+        String invoicePrefix = (shop.getInvoicePrefix() != null && !shop.getInvoicePrefix().isBlank())
+                ? shop.getInvoicePrefix()
+                : shop.getCode();
+        LocalDate saleDate = dto.getDate() != null ? dto.getDate().toLocalDate() : LocalDate.now();
+        String invoiceNo = invoiceNumberService.nextInvoiceNumber(shop.getId(), invoicePrefix, saleDate);
 
-        // 4. Calculate Final Totals and Rounding
+        // 4. Calculate Final Totals with Bill-Level Adjustments (Issue 2 Fix)
         BigDecimal totalBeforeRoundOff = totalTaxableValue.add(totalGSTAmount);
-        BigDecimal finalTotalAmount = totalBeforeRoundOff.setScale(0, RoundingMode.HALF_UP);
-        BigDecimal roundOff = finalTotalAmount.subtract(totalBeforeRoundOff);
+
+        // Read bill-level (invoice-level) discount — distinct from per-item discounts
+        BigDecimal invoiceDisc = (dto.getInvoiceDiscount() != null && dto.getInvoiceDiscount().compareTo(ZERO) > 0)
+                ? dto.getInvoiceDiscount() : ZERO;
+        // ShippingCharges: only include in grand total if collected by the store
+        // (deliveryPaidBy="STORE"). If paid directly to courier, keep informational only.
+        BigDecimal shippingCharges = ZERO;
+        BigDecimal otherCharges = (dto.getOtherCharges() != null && dto.getOtherCharges().compareTo(ZERO) > 0)
+                ? dto.getOtherCharges() : ZERO;
+        // Include shippingCharges in total only when collected by the shop (SHOP = store pays/bills)
+        if (dto.getDelivery() != null
+                && com.desitech.vyaparsathi.delivery.enums.DeliveryPaidBy.SHOP
+                        .equals(dto.getDelivery().getDeliveryPaidBy())) {
+            shippingCharges = (dto.getShippingCharges() != null) ? dto.getShippingCharges() : ZERO;
+        }
+
+        BigDecimal grandTotal = totalBeforeRoundOff
+                .subtract(invoiceDisc)
+                .add(shippingCharges)
+                .add(otherCharges)
+                .max(ZERO);
+        BigDecimal finalTotalAmount = grandTotal.setScale(0, RoundingMode.HALF_UP);
+        BigDecimal roundOff = finalTotalAmount.subtract(grandTotal);
 
         // 5. Deduct Stock
         for (SaleItem item : saleItems) {
-            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty(), item.getLoosePackSize());
+            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty());
             stockService.deductStock(item.getItemVariant().getId(), stockQty, "Sale Transaction", "Sale #" + invoiceNo);
         }
 
@@ -196,15 +229,14 @@ public class SaleService {
         sale.setCustomer(customer);
         sale.setTotalAmount(finalTotalAmount);
         sale.setRoundOff(roundOff);
+        // Issue 2 Fix: Persist bill-level charges on the Sale entity
+        sale.setInvoiceDiscount(invoiceDisc);
+        sale.setShippingCharges(shippingCharges);
+        sale.setOtherCharges(otherCharges);
         sale.setSyncedFlag(false);
         sale.setSaleItems(saleItems);
         saleItems.forEach(si -> si.setSale(sale));
 
-        // Pharmacy-specific fields
-        sale.setDoctorName(dto.getDoctorName());
-        sale.setPatientName(dto.getPatientName());
-        sale.setPrescriptionNumber(dto.getPrescriptionNumber());
-        sale.setDoctorRegistrationNumber(dto.getDoctorRegistrationNumber());
         sale.setIsGstRequired(Boolean.TRUE.equals(dto.getIsGstRequired()));
 
         Sale savedSale = saleRepository.saveAndFlush(sale);
@@ -290,8 +322,27 @@ public class SaleService {
 
             BigDecimal currentReturned = saleItem.getReturnedQty() != null ? saleItem.getReturnedQty() : BigDecimal.ZERO;
             BigDecimal requestedQty = returnItem.getReturnQuantity();
+            BigDecimal originalQty  = saleItem.getQty();
 
-            totalReturnAmount = totalReturnAmount.add(saleItem.getUnitPrice().multiply(requestedQty));
+            // FIX (Phase 0.5): Return amount must be proportional to the full line amount
+            // (taxableValue + GST), NOT just unitPrice × qty, which ignores discounts and tax.
+            BigDecimal lineGst = (saleItem.getCgstAmt() != null ? saleItem.getCgstAmt() : ZERO)
+                    .add(saleItem.getSgstAmt() != null ? saleItem.getSgstAmt() : ZERO)
+                    .add(saleItem.getIgstAmt() != null ? saleItem.getIgstAmt() : ZERO);
+            BigDecimal lineTaxableValue = saleItem.getTaxableValue() != null ? saleItem.getTaxableValue() : ZERO;
+            BigDecimal fullLineAmount   = lineTaxableValue.add(lineGst);
+
+            BigDecimal returnLineAmount;
+            if (originalQty != null && originalQty.compareTo(ZERO) > 0) {
+                // Proportional: returnAmt = (returnedQty / originalQty) * fullLineAmount
+                returnLineAmount = fullLineAmount
+                        .multiply(requestedQty)
+                        .divide(originalQty, 2, RoundingMode.HALF_UP);
+            } else {
+                returnLineAmount = ZERO;
+            }
+
+            totalReturnAmount = totalReturnAmount.add(returnLineAmount);
             saleItem.setReturnedQty(currentReturned.add(requestedQty));
             saleItem.setReturned(true);
 
@@ -299,7 +350,7 @@ public class SaleService {
             adjustment.setItemVariantId(saleItem.getItemVariant().getId());
             // Convert returned dispensing qty back to stock units using the same pack size
             // that was active when the original sale was made (stored on the SaleItem).
-            BigDecimal stockQty = toStockQty(saleItem.getItemVariant(), requestedQty, saleItem.getLoosePackSize());
+            BigDecimal stockQty = toStockQty(saleItem.getItemVariant(), requestedQty);
             adjustment.setAdjustmentQuantity(stockQty);
             adjustment.setReason("Return: Inv #" + sale.getInvoiceNo());
             stockService.adjustStock(adjustment);
@@ -366,7 +417,7 @@ public class SaleService {
             adjustment.setItemVariantId(saleItem.getItemVariant().getId());
             // For loose medicine, convert dispensing qty back to stock units using the
             // pack size stored at sale time.  Positive adjustment adds back to stock.
-            BigDecimal stockQty = toStockQty(saleItem.getItemVariant(), saleItem.getQty(), saleItem.getLoosePackSize());
+            BigDecimal stockQty = toStockQty(saleItem.getItemVariant(), saleItem.getQty());
             adjustment.setAdjustmentQuantity(stockQty);
             adjustment.setReason("Cancelled Sale #" + sale.getInvoiceNo());
             stockService.adjustStock(adjustment);
@@ -507,16 +558,20 @@ public class SaleService {
                 .collect(Collectors.toList());
     }
 
-    public List<SaleDueDto> getSalesHistory() {
-        // WARNING: For production, this should be Paginated!
-        List<Sale> sales = saleRepository.findAll();
+    public Page<SaleDueDto> getSalesHistory(Pageable pageable) {
+        // Phase 0.4 fix: paginated — no more full-table scan
+        Long shopId = TenantContext.getCurrentShopId();
+        Page<Sale> salesPage = saleRepository.findAllByShopId(shopId, pageable);
 
-        Set<Long> saleIds = sales.stream().map(Sale::getId).collect(Collectors.toSet());
+        Set<Long> saleIds = salesPage.getContent().stream()
+                .map(Sale::getId).collect(Collectors.toSet());
         Map<Long, BigDecimal> paidBySale = paymentService.getTotalPaidBySaleIds(saleIds);
 
-        return sales.stream()
+        List<SaleDueDto> dtos = salesPage.getContent().stream()
                 .map(sale -> mapToDueDto(sale, paidBySale.getOrDefault(sale.getId(), ZERO)))
                 .collect(Collectors.toList());
+
+        return new PageImpl<>(dtos, pageable, salesPage.getTotalElements());
     }
     public SaleDueDto getSaleDueBySaleId(Long saleId) {
         Sale sale = saleRepository.findById(saleId)
@@ -567,9 +622,14 @@ public class SaleService {
             sale.getSaleItems().clear();
         } else {
             sale = new Sale();
-            String seq = String.format("%03d", saleRepository.count() + 1);
-            // Ensure invoiceNo is assigned here for new drafts
-            sale.setInvoiceNo("DRF-" + shop.getCode() + "-" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMM")) + "-" + seq);
+            // Atomic draft invoice number — uses same sequence table with "DRF" prefix
+            String basePrefix = (shop.getInvoicePrefix() != null && !shop.getInvoicePrefix().isBlank())
+                    ? shop.getInvoicePrefix() : shop.getCode();
+            if (basePrefix.length() > 50) {
+                basePrefix = basePrefix.substring(0, 50);
+            }
+            String draftPrefix = "DRF-" + basePrefix;
+            sale.setInvoiceNo(invoiceNumberService.nextInvoiceNumber(shop.getId(), draftPrefix, LocalDate.now()));
             sale.setStatus(SaleStatus.DRAFT);
         }
 
@@ -608,11 +668,7 @@ public class SaleService {
         sale.setRoundOff(sale.getTotalAmount().subtract(totalTaxableValue)); // Difference for ledger balancing
         sale.getSaleItems().addAll(itemsToUpdate);
 
-        // Pharmacy-specific fields
-        sale.setDoctorName(dto.getDoctorName());
-        sale.setPatientName(dto.getPatientName());
-        sale.setPrescriptionNumber(dto.getPrescriptionNumber());
-        sale.setDoctorRegistrationNumber(dto.getDoctorRegistrationNumber());
+        // (Pharmacy-specific fields removed — Phase 1 will drop columns from DB)
 
         Sale saved = saleRepository.save(sale);
 
@@ -633,6 +689,8 @@ public class SaleService {
     @Transactional
     @LogAudit(action = "COMPLETE_SALE", entity = "SALE")
     public SaleDto completeDraft(SaleDto dto) {
+        subscriptionService.validateSaleProcessingEntitlement(TenantContext.getCurrentShopId());
+
         if (dto.getId() == null) {
             throw new BusinessValidationException("Sale ID is required to complete a draft");
         }
@@ -670,8 +728,6 @@ public class SaleService {
             saleItem.setQty(itemDto.getQty());
             saleItem.setUnitPrice(itemDto.getUnitPrice());
             saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
-            // Persist the effective pack size so returns can reverse the same fractional qty
-            saleItem.setLoosePackSize(resolveLoosePackSize(itemVariant, itemDto));
             // Pharmacy batch tracking — persist per-item batch/expiry from the frontend
             saleItem.setBatchNumber(itemDto.getBatchNumber());
             saleItem.setExpiryDate(itemDto.getExpiryDate());
@@ -715,25 +771,41 @@ public class SaleService {
 
         // Deduct stock
         for (SaleItem item : existing.getSaleItems()) {
-            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty(), item.getLoosePackSize());
+            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty());
             stockService.deductStock(item.getItemVariant().getId(), stockQty, "Sale Completion", "Sale #" + existing.getInvoiceNo());
         }
 
-        // Totals and Rounding
+        // Totals and Rounding with Bill-Level Adjustments (Issue 2 Fix)
         BigDecimal totalBeforeRoundOff = totalTaxableValue.add(totalGSTAmount);
-        BigDecimal finalTotal = totalBeforeRoundOff.setScale(0, RoundingMode.HALF_UP);
-        BigDecimal roundOff = finalTotal.subtract(totalBeforeRoundOff);
+
+        BigDecimal invoiceDisc = (dto.getInvoiceDiscount() != null && dto.getInvoiceDiscount().compareTo(ZERO) > 0)
+                ? dto.getInvoiceDiscount() : ZERO;
+        BigDecimal shippingCharges = ZERO;
+        BigDecimal otherCharges = (dto.getOtherCharges() != null && dto.getOtherCharges().compareTo(ZERO) > 0)
+                ? dto.getOtherCharges() : ZERO;
+        // Include shippingCharges in total only when collected by the shop (SHOP = store bills customer)
+        if (dto.getDelivery() != null
+                && com.desitech.vyaparsathi.delivery.enums.DeliveryPaidBy.SHOP
+                        .equals(dto.getDelivery().getDeliveryPaidBy())) {
+            shippingCharges = (dto.getShippingCharges() != null) ? dto.getShippingCharges() : ZERO;
+        }
+
+        BigDecimal grandTotal = totalBeforeRoundOff
+                .subtract(invoiceDisc)
+                .add(shippingCharges)
+                .add(otherCharges)
+                .max(ZERO);
+        BigDecimal finalTotal = grandTotal.setScale(0, RoundingMode.HALF_UP);
+        BigDecimal roundOff = finalTotal.subtract(grandTotal);
 
         existing.setTotalAmount(finalTotal);
         existing.setRoundOff(roundOff);
+        existing.setInvoiceDiscount(invoiceDisc);
+        existing.setShippingCharges(shippingCharges);
+        existing.setOtherCharges(otherCharges);
         existing.setCustomer(customer);
         existing.setStatus(SaleStatus.COMPLETED);
 
-        // Pharmacy-specific fields
-        existing.setDoctorName(dto.getDoctorName());
-        existing.setPatientName(dto.getPatientName());
-        existing.setPrescriptionNumber(dto.getPrescriptionNumber());
-        existing.setDoctorRegistrationNumber(dto.getDoctorRegistrationNumber());
         existing.setIsGstRequired(Boolean.TRUE.equals(dto.getIsGstRequired()));
 
         Sale saved = saleRepository.save(existing);
@@ -800,6 +872,12 @@ public class SaleService {
         dto.setPaidAmount(paidAmount);
         dto.setDate(sale.getDate());
         dto.setStatus(sale.getStatus().name());
+        dto.setEinvoiceStatus(sale.getEinvoiceStatus());
+        dto.setIrn(sale.getIrn());
+        dto.setAckNo(sale.getAckNo());
+        dto.setAckDate(sale.getAckDate());
+        dto.setQrCodePath(sale.getQrCodePath());
+        dto.setEwayBillNo(sale.getEwayBillNo());
 
         if (sale.getCustomer() != null) {
             Customer c = sale.getCustomer();
@@ -816,91 +894,19 @@ public class SaleService {
         return dto;
     }
 
-    /**
-     * Converts a dispensing-unit quantity to a stock-unit quantity for loose medicines.
-     * <p>
-     * This is the <em>legacy fallback</em> overload — it uses only the ItemVariant's
-     * database configuration ({@link ItemVariant#getIsLooseMedicine()} and
-     * {@link ItemVariant#getPackSize()}).  Prefer the overloads that accept an explicit
-     * {@code loosePackSize} or a {@link SaleItemDto} when those values are available,
-     * because the ItemVariant may not yet be configured as a loose medicine even when the
-     * pharmacist chooses to dispense loose at the point of sale.
-     *
-     * @param variant       the item variant being sold/returned
-     * @param dispensingQty quantity in the dispensing/selling unit (e.g. tablets)
-     * @return equivalent quantity in the stock unit (e.g. strips)
-     */
     private BigDecimal toStockQty(ItemVariant variant, BigDecimal dispensingQty) {
-        if (Boolean.TRUE.equals(variant.getIsLooseMedicine())
-                && variant.getPackSize() != null
-                && variant.getPackSize().compareTo(BigDecimal.ZERO) > 0) {
-            return dispensingQty.divide(variant.getPackSize(), STOCK_QUANTITY_SCALE, RoundingMode.HALF_UP);
-        }
         return dispensingQty;
     }
 
-    /**
-     * Returns {@code true} when {@code packSize} represents a valid positive pack size —
-     * the single source of truth for that check, shared by all {@code toStockQty} overloads
-     * and {@link #resolveLoosePackSize}.
-     */
-    private static boolean isValidPackSize(BigDecimal packSize) {
-        return packSize != null && packSize.compareTo(BigDecimal.ZERO) > 0;
-    }
-
-    /**
-     * Converts dispensing qty to stock qty, preferring an explicitly stored
-     * {@code loosePackSize} over the ItemVariant's default settings.
-     * <p>
-     * Used when a {@link SaleItem} entity is available (stock deduction loop, cancel,
-     * and return).  The stored {@code loosePackSize} was captured from the frontend at
-     * sale-creation time, so it reflects the pack size the pharmacist actually used —
-     * even if the ItemVariant is not pre-configured as a loose medicine.
-     *
-     * @param variant         the item variant
-     * @param dispensingQty   quantity in dispensing units
-     * @param loosePackSize   pack size persisted on the SaleItem, or {@code null} for full-pack sales
-     * @return equivalent quantity in stock units
-     */
     private BigDecimal toStockQty(ItemVariant variant, BigDecimal dispensingQty, BigDecimal loosePackSize) {
-        if (isValidPackSize(loosePackSize)) {
-            return dispensingQty.divide(loosePackSize, STOCK_QUANTITY_SCALE, RoundingMode.HALF_UP);
-        }
-        return toStockQty(variant, dispensingQty);
+        return dispensingQty;
     }
 
-    /**
-     * Converts dispensing qty to stock qty, preferring the sale-time pack size from
-     * the incoming {@link SaleItemDto} over the ItemVariant's database settings.
-     * <p>
-     * Used during sale creation / draft completion, where we have the DTO available.
-     * This allows the pharmacist to sell loose medicine even if
-     * {@link ItemVariant#getIsLooseMedicine()} is not yet set in the database.
-     *
-     * @param variant       the item variant
-     * @param dispensingQty quantity in dispensing units
-     * @param dto           the incoming sale-item DTO
-     * @return equivalent quantity in stock units
-     */
     private BigDecimal toStockQty(ItemVariant variant, BigDecimal dispensingQty, SaleItemDto dto) {
-        if (Boolean.TRUE.equals(dto.getIsLooseSale()) && isValidPackSize(dto.getLoosePackSize())) {
-            return dispensingQty.divide(dto.getLoosePackSize(), STOCK_QUANTITY_SCALE, RoundingMode.HALF_UP);
-        }
-        return toStockQty(variant, dispensingQty);
+        return dispensingQty;
     }
 
-    /**
-     * Determines the effective pack size to persist on a new {@link SaleItem}.
-     * Prefers the explicit value from the frontend DTO; falls back to the ItemVariant's
-     * database configuration.  Returns {@code null} for full-pack sales.
-     */
     private BigDecimal resolveLoosePackSize(ItemVariant variant, SaleItemDto dto) {
-        if (Boolean.TRUE.equals(dto.getIsLooseSale()) && isValidPackSize(dto.getLoosePackSize())) {
-            return dto.getLoosePackSize();
-        }
-        if (Boolean.TRUE.equals(variant.getIsLooseMedicine()) && isValidPackSize(variant.getPackSize())) {
-            return variant.getPackSize();
-        }
         return null;
     }
 }

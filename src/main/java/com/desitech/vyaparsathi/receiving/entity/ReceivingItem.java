@@ -7,6 +7,7 @@ import com.desitech.vyaparsathi.receiving.enums.ReceivingItemStatus;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 @Setter
@@ -33,17 +34,112 @@ public class ReceivingItem extends ShopAwareEntity {
     private Integer receivedQty;
 
     private Integer damagedQty;
-
     private String damageReason;
-
     private Integer rejectedQty;
-
     private String rejectReason;
-
     private String notes;
 
     @Column(name = "unit_cost", precision = 12, scale = 2)
-    private java.math.BigDecimal unitCost;
+    private BigDecimal unitCost;
+
+    @Column(name = "putaway_qty")
+    private Integer putawayQty;
+
+    @Column(name = "put_away_status")
+    private String putAwayStatus;
+
+    @Column(name = "is_overaged")
+    private Boolean isOveraged = false;
+
+    @Column(name = "overage_reason")
+    private String overageReason;
+
+    @Column(name = "overage_notes", length = 500)
+    private String overageNotes;
+
+    @Column(name = "batch_number")
+    private String batchNumber;
+
+    @Column(name = "manufacturing_date")
+    private LocalDate manufacturingDate;
+
+    @Column(name = "expiry_date")
+    private LocalDate expiryDate;
+
+    @Column(name = "serial_number", length = 1000)
+    private String serialNumber;
+
+    @Column(name = "warranty_start_date")
+    private LocalDate warrantyStartDate;
+
+    @Column(name = "part_reference", length = 100)
+    private String partReference;
+
+    public Receiving getReceiving() { return receiving; }
+    public void setReceiving(Receiving receiving) { this.receiving = receiving; }
+
+    public PurchaseOrderItem getPurchaseOrderItem() { return purchaseOrderItem; }
+    public void setPurchaseOrderItem(PurchaseOrderItem purchaseOrderItem) { this.purchaseOrderItem = purchaseOrderItem; }
+
+    public ReceivingItemStatus getStatus() { return status; }
+    public void setStatus(ReceivingItemStatus status) { this.status = status; }
+
+    public Integer getExpectedQty() { return expectedQty; }
+    public void setExpectedQty(Integer expectedQty) { this.expectedQty = expectedQty; }
+
+    public Integer getReceivedQty() { return receivedQty; }
+    public void setReceivedQty(Integer receivedQty) { this.receivedQty = receivedQty; }
+
+    public Integer getDamagedQty() { return damagedQty; }
+    public void setDamagedQty(Integer damagedQty) { this.damagedQty = damagedQty; }
+
+    public String getDamageReason() { return damageReason; }
+    public void setDamageReason(String damageReason) { this.damageReason = damageReason; }
+
+    public Integer getRejectedQty() { return rejectedQty; }
+    public void setRejectedQty(Integer rejectedQty) { this.rejectedQty = rejectedQty; }
+
+    public String getRejectReason() { return rejectReason; }
+    public void setRejectReason(String rejectReason) { this.rejectReason = rejectReason; }
+
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
+
+    public BigDecimal getUnitCost() { return unitCost; }
+    public void setUnitCost(BigDecimal unitCost) { this.unitCost = unitCost; }
+
+    public Integer getPutawayQty() { return putawayQty; }
+    public void setPutawayQty(Integer putawayQty) { this.putawayQty = putawayQty; }
+
+    public String getPutAwayStatus() { return putAwayStatus; }
+    public void setPutAwayStatus(String putAwayStatus) { this.putAwayStatus = putAwayStatus; }
+
+    public Boolean getIsOveraged() { return isOveraged; }
+    public void setIsOveraged(Boolean isOveraged) { this.isOveraged = isOveraged; }
+
+    public String getOverageReason() { return overageReason; }
+    public void setOverageReason(String overageReason) { this.overageReason = overageReason; }
+
+    public String getOverageNotes() { return overageNotes; }
+    public void setOverageNotes(String overageNotes) { this.overageNotes = overageNotes; }
+
+    public String getBatchNumber() { return batchNumber; }
+    public void setBatchNumber(String batchNumber) { this.batchNumber = batchNumber; }
+
+    public LocalDate getManufacturingDate() { return manufacturingDate; }
+    public void setManufacturingDate(LocalDate manufacturingDate) { this.manufacturingDate = manufacturingDate; }
+
+    public LocalDate getExpiryDate() { return expiryDate; }
+    public void setExpiryDate(LocalDate expiryDate) { this.expiryDate = expiryDate; }
+
+    public String getSerialNumber() { return serialNumber; }
+    public void setSerialNumber(String serialNumber) { this.serialNumber = serialNumber; }
+
+    public LocalDate getWarrantyStartDate() { return warrantyStartDate; }
+    public void setWarrantyStartDate(LocalDate warrantyStartDate) { this.warrantyStartDate = warrantyStartDate; }
+
+    public String getPartReference() { return partReference; }
+    public void setPartReference(String partReference) { this.partReference = partReference; }
 
     public int getAcceptedQty() {
         int r = receivedQty != null ? receivedQty : 0;
@@ -63,62 +159,4 @@ public class ReceivingItem extends ShopAwareEntity {
         int r = receivedQty != null ? receivedQty : 0;
         return Math.max(0, r - exp);
     }
-
-    @Column(name = "putaway_qty")
-    private Integer putawayQty;
-
-    @Column(name = "put_away_status")
-    private String putAwayStatus;
-
-    @Column(name = "is_overaged")
-    private Boolean isOveraged = false;
-
-    @Column(name = "overage_reason")
-    private String overageReason; // E.g., VENDOR_MIS-SHIPMENT
-
-    @Column(name = "overage_notes", length = 500)
-    private String overageNotes;
-
-    // --- Pharmacy-specific fields ---
-
-    /**
-     * Batch/lot number received from the supplier. Mandatory for pharmacy stock traceability.
-     */
-    @Column(name = "batch_number")
-    private String batchNumber;
-
-    /**
-     * Manufacturing date printed on the medicine packaging.
-     */
-    @Column(name = "manufacturing_date")
-    private LocalDate manufacturingDate;
-
-    /**
-     * Expiry date printed on the medicine packaging. Used for QC validation at receiving.
-     */
-    @Column(name = "expiry_date")
-    private LocalDate expiryDate;
-
-    // --- Electronics-specific fields ---
-
-    /**
-     * Serial / IMEI numbers captured at goods receipt.
-     * Comma-separated when multiple units are received on one line.
-     */
-    @Column(name = "serial_number", length = 1000)
-    private String serialNumber;
-
-    /**
-     * Warranty start date recorded when the electronics unit is received.
-     */
-    @Column(name = "warranty_start_date")
-    private LocalDate warrantyStartDate;
-
-    // --- Automobile-specific fields ---
-
-    /**
-     * OEM part reference number (e.g. manufacturer part number like 04465-0K080).
-     */
-    @Column(name = "part_reference", length = 100)
-    private String partReference;
 }

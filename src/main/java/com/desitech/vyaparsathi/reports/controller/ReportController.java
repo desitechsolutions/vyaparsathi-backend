@@ -271,26 +271,7 @@ public class ReportController {
         }
     }
 
-    @GetMapping("/narcotics-register")
-    @Operation(
-            summary = "Get narcotics and controlled drug register",
-            description = "Returns a mandatory register of all Schedule H, H1, and X (narcotic) drug sales " +
-                    "for the given date range. Required for Drugs & Cosmetics Act compliance."
-    )
-    public ResponseEntity<List<NarcoticsRegisterEntryDto>> getNarcoticsRegister(
-            @Parameter(description = "Start date in YYYY-MM-DD format", example = "2024-01-01")
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @Parameter(description = "End date in YYYY-MM-DD format", example = "2024-01-31")
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        try {
-            List<NarcoticsRegisterEntryDto> result = service.getNarcoticsRegister(from, to);
-            logger.info("Fetched narcotics register from {} to {}, {} entries", from, to, result.size());
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            logger.error("Error fetching narcotics register from {} to {}: {}", from, to, e.getMessage(), e);
-            throw new ApplicationException("Failed to fetch narcotics register", e);
-        }
-    }
+
 
     @GetMapping("/purchase-register")
     @Operation(

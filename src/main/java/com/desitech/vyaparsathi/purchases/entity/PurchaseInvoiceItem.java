@@ -63,6 +63,10 @@ public class PurchaseInvoiceItem extends BaseEntity {
     @Column(name = "igst_amount", precision = 12, scale = 2)
     private BigDecimal igstAmount = BigDecimal.ZERO;
 
+    /** UTGST — populated only for intra-UT purchases (shop and supplier both in the same Union Territory). */
+    @Column(name = "utgst_amount", precision = 12, scale = 2)
+    private BigDecimal utgstAmount = BigDecimal.ZERO;
+
     @Column(name = "line_total", nullable = false, precision = 12, scale = 2)
     private BigDecimal lineTotal;
 
@@ -107,6 +111,9 @@ public class PurchaseInvoiceItem extends BaseEntity {
 
     public BigDecimal getIgstAmount() { return igstAmount; }
     public void setIgstAmount(BigDecimal igstAmount) { this.igstAmount = igstAmount; }
+
+    public BigDecimal getUtgstAmount() { return utgstAmount; }
+    public void setUtgstAmount(BigDecimal utgstAmount) { this.utgstAmount = utgstAmount; }
 
     public BigDecimal getLineTotal() { return lineTotal; }
     public void setLineTotal(BigDecimal lineTotal) { this.lineTotal = lineTotal; }

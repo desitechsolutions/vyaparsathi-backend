@@ -17,6 +17,13 @@ public class PurchaseCreateDto {
     private String paymentTerms = "NET_30";
     private String notes;
 
+    /**
+     * Optional link to the GRN (Receiving) this invoice was created against.
+     * When present, {@code PurchaseInvoiceService} will NOT increment stock
+     * again — the GRN already did. Leave null for direct-invoice flows.
+     */
+    private Long receivingId;
+
     private Boolean isInterState = false;
 
     private BigDecimal initialPaymentAmount = BigDecimal.ZERO;
@@ -39,6 +46,9 @@ public class PurchaseCreateDto {
 
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+
+    public Long getReceivingId() { return receivingId; }
+    public void setReceivingId(Long receivingId) { this.receivingId = receivingId; }
 
     public Boolean getIsInterState() { return isInterState; }
     public void setIsInterState(Boolean isInterState) { this.isInterState = isInterState; }

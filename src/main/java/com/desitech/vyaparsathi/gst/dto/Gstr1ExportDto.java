@@ -110,6 +110,7 @@ public class Gstr1ExportDto {
         private BigDecimal iamti = BigDecimal.ZERO; // IGST
         private BigDecimal camti = BigDecimal.ZERO; // CGST
         private BigDecimal samti = BigDecimal.ZERO; // SGST
+        private BigDecimal uamti = BigDecimal.ZERO; // UTGST — for UT-based shops
 
         public String getPos() { return pos; }
         public void setPos(String pos) { this.pos = pos; }
@@ -128,6 +129,9 @@ public class Gstr1ExportDto {
 
         public BigDecimal getSamti() { return samti; }
         public void setSamti(BigDecimal samti) { this.samti = samti; }
+
+        public BigDecimal getUamti() { return uamti; }
+        public void setUamti(BigDecimal uamti) { this.uamti = uamti; }
     }
 
     @Data
@@ -164,11 +168,22 @@ public class Gstr1ExportDto {
 
     @Data
     public static class TaxItem {
+        /**
+         * Line number within the parent invoice/note. GSTN requires this as the
+         * "num" field in the JSON schema; kept optional here for backwards compat
+         * with earlier callers that don't set it.
+         */
+        private Integer num;
         private Double rt; // Tax Rate e.g. 18.0
         private BigDecimal txval; // Taxable Value
         private BigDecimal iamt = BigDecimal.ZERO;
         private BigDecimal camt = BigDecimal.ZERO;
         private BigDecimal samt = BigDecimal.ZERO;
+        private BigDecimal uamt = BigDecimal.ZERO; // UTGST — for UT-shop supplies
+        private BigDecimal csamt = BigDecimal.ZERO; // Cess — kept at zero until cess is modeled
+
+        public Integer getNum() { return num; }
+        public void setNum(Integer num) { this.num = num; }
 
         public Double getRt() { return rt; }
         public void setRt(Double rt) { this.rt = rt; }
@@ -184,19 +199,33 @@ public class Gstr1ExportDto {
 
         public BigDecimal getSamt() { return samt; }
         public void setSamt(BigDecimal samt) { this.samt = samt; }
+
+        public BigDecimal getUamt() { return uamt; }
+        public void setUamt(BigDecimal uamt) { this.uamt = uamt; }
+
+        public BigDecimal getCsamt() { return csamt; }
+        public void setCsamt(BigDecimal csamt) { this.csamt = csamt; }
     }
 
     @Data
     public static class HsnSummary {
+        /** Serial number within the HSN section — GSTN requires uniqueness per row. */
+        private Integer num;
         private String hsnSc;
         private String desc;
+        /** Unit Quantity Code (GSTN codes: NOS, KGS, PCS, MTR, LTR, BOX, GMS, …). */
         private String uqc;
-        private BigDecimal qty;
-        private BigDecimal val;
-        private BigDecimal txval;
-        private BigDecimal iamt;
-        private BigDecimal camt;
-        private BigDecimal samt;
+        private BigDecimal qty = BigDecimal.ZERO;
+        private BigDecimal val = BigDecimal.ZERO;
+        private BigDecimal txval = BigDecimal.ZERO;
+        private BigDecimal iamt = BigDecimal.ZERO;
+        private BigDecimal camt = BigDecimal.ZERO;
+        private BigDecimal samt = BigDecimal.ZERO;
+        private BigDecimal uamt = BigDecimal.ZERO;
+        private BigDecimal csamt = BigDecimal.ZERO;
+
+        public Integer getNum() { return num; }
+        public void setNum(Integer num) { this.num = num; }
 
         public String getHsnSc() { return hsnSc; }
         public void setHsnSc(String hsnSc) { this.hsnSc = hsnSc; }
@@ -224,5 +253,11 @@ public class Gstr1ExportDto {
 
         public BigDecimal getSamt() { return samt; }
         public void setSamt(BigDecimal samt) { this.samt = samt; }
+
+        public BigDecimal getUamt() { return uamt; }
+        public void setUamt(BigDecimal uamt) { this.uamt = uamt; }
+
+        public BigDecimal getCsamt() { return csamt; }
+        public void setCsamt(BigDecimal csamt) { this.csamt = csamt; }
     }
 }

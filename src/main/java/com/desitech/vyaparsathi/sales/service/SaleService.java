@@ -1,5 +1,7 @@
 package com.desitech.vyaparsathi.sales.service;
 
+import com.desitech.vyaparsathi.accounting.entity.CreditNote;
+import com.desitech.vyaparsathi.accounting.service.CreditNoteService;
 import com.desitech.vyaparsathi.common.annotations.CheckSubscriptionLimit;
 import com.desitech.vyaparsathi.common.annotations.LogAudit;
 import com.desitech.vyaparsathi.audit.helper.AuditHelper;
@@ -107,10 +109,39 @@ public class SaleService {
     @Autowired
     private SubscriptionService subscriptionService;
 
+    @Autowired
+    private CreditNoteService creditNoteService;
+
+    @Autowired
+    private com.desitech.vyaparsathi.accounting.repository.CreditNoteRepository creditNoteRepository;
+
+    @Autowired
+    private com.desitech.vyaparsathi.audit.repository.AuditLogRepository auditLogRepository;
+
+    @Autowired
+    private com.desitech.vyaparsathi.gst.service.GstJurisdictionService gstJurisdictionService;
+
     @Transactional
     @LogAudit(action = "CREATE_SALE", entity = "SALE")
     @CheckSubscriptionLimit("SALES")
     public SaleDto createSale(SaleDto dto) {
+        // Idempotency guard — client can send an Idempotency-Key to make the POST
+        // safe to retry. If we've already processed this key for this tenant,
+        // return the original sale instead of creating a duplicate.
+        // Aspect-based shopFilter scopes findByIdempotencyKey to the tenant.
+        if (dto.getIdempotencyKey() != null && !dto.getIdempotencyKey().isBlank()) {
+            Optional<Sale> existing = saleRepository.findByIdempotencyKey(dto.getIdempotencyKey().trim());
+            if (existing.isPresent()) {
+                Sale s = existing.get();
+                logger.info("Idempotent replay of createSale — returning existing sale id={} inv={}",
+                        s.getId(), s.getInvoiceNo());
+                SaleDto replay = mapper.toDto(s);
+                String signedToken = jwtUtil.generateInvoiceToken(s.getId(), s.getInvoiceNo());
+                replay.setSignedInvoiceUrl("/api/invoices/signed?token=" + signedToken);
+                return replay;
+            }
+        }
+
         subscriptionService.validateSaleProcessingEntitlement(TenantContext.getCurrentShopId());
 
         // 1. Fetch Context (Shop and Customer)
@@ -127,25 +158,52 @@ public class SaleService {
         BigDecimal totalTaxableValue = BigDecimal.ZERO;
         BigDecimal totalGSTAmount = BigDecimal.ZERO;
 
-        for (SaleItemDto itemDto : dto.getItems()) {
-            ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
-                    .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+        // Sale-type resolution — composition-scheme shops legally cannot issue
+        // a tax invoice, so BILL_OF_SUPPLY is forced regardless of what the
+        // caller sends. See Shop.isCompositionScheme.
+        com.desitech.vyaparsathi.sales.enums.SaleType parsedType =
+                effectiveSaleType(dto.getSaleType(), shop);
+        boolean isBillOfSupply = parsedType == com.desitech.vyaparsathi.sales.enums.SaleType.BILL_OF_SUPPLY;
+        boolean gstApplicable = Boolean.TRUE.equals(dto.getIsGstRequired()) && !isBillOfSupply;
 
-            BigDecimal stockQty = toStockQty(itemVariant, itemDto.getQty(), itemDto);
-            if (!stockService.isStockAvailable(itemDto.getItemVariantId(), stockQty)) {
-                logger.warn("Insufficient stock for item: {}", itemDto.getItemName());
-                throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
+        // HSN validation for real invoices — required for e-invoice / GSTR-1.
+        if (gstApplicable && parsedType == com.desitech.vyaparsathi.sales.enums.SaleType.INVOICE) {
+            validateHsnPresent(dto);
+        }
+
+        for (SaleItemDto itemDto : dto.getItems()) {
+            // Catalog line: item_variant_id present → look up variant + check stock.
+            // Custom line (free-text service / one-off): item_variant_id null → skip stock, use DTO-provided GST rate.
+            ItemVariant itemVariant = null;
+            if (itemDto.getItemVariantId() != null) {
+                itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
+                        .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+
+                if (!stockService.isStockAvailable(itemDto.getItemVariantId(), itemDto.getQty())) {
+                    logger.warn("Insufficient stock for item: {}", itemDto.getItemName());
+                    throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
+                }
             }
 
             SaleItem saleItem = new SaleItem();
             saleItem.setItemVariant(itemVariant);
+            if (itemVariant == null) {
+                String customName = (itemDto.getCustomItemName() != null && !itemDto.getCustomItemName().isBlank())
+                        ? itemDto.getCustomItemName()
+                        : itemDto.getItemName();
+                saleItem.setCustomItemName(customName);
+                saleItem.setCustomDescription(itemDto.getCustomDescription());
+                saleItem.setCustomHsnSac(itemDto.getCustomHsnSac());
+                saleItem.setCustomUnit(itemDto.getCustomUnit());
+            }
             saleItem.setQty(itemDto.getQty());
             saleItem.setUnitPrice(itemDto.getUnitPrice());
             saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
-            // Persist the effective pack size so returns can reverse the same fractional qty
-            // Pharmacy batch tracking — persist per-item batch/expiry from the frontend
+            // Optional batch/expiry — used by FMCG / food / any perishable inventory.
             saleItem.setBatchNumber(itemDto.getBatchNumber());
             saleItem.setExpiryDate(itemDto.getExpiryDate());
+            // Optional per-line salesperson attribution (V71 column).
+            if (itemDto.getSalespersonId() != null) saleItem.setSalespersonId(itemDto.getSalespersonId());
 
             // Calculate taxable value: (Qty * Price) - Discount
             BigDecimal itemTaxableValue = itemDto.getQty()
@@ -155,23 +213,43 @@ public class SaleService {
             saleItem.setTaxableValue(itemTaxableValue);
             totalTaxableValue = totalTaxableValue.add(itemTaxableValue);
 
-            if (Boolean.TRUE.equals(dto.getIsGstRequired()) && itemVariant.getGstRate() != null) {
-                GSTType gstType = GSTType.fromRate(itemVariant.getGstRate());
+            Integer effectiveGstRate = itemVariant != null
+                    ? itemVariant.getGstRate()
+                    : (itemDto.getGstRate() > 0 ? itemDto.getGstRate() : null);
+
+            if (gstApplicable && effectiveGstRate != null) {
+                GSTType gstType = GSTType.fromRate(effectiveGstRate);
                 BigDecimal rate = BigDecimal.valueOf(gstType.getRate());
                 BigDecimal gstAmount = itemTaxableValue.multiply(rate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
 
                 saleItem.setGstType(gstType);
-                boolean sameState = customer != null && shop.getState().equalsIgnoreCase(customer.getState());
+                // Route through the jurisdiction service — resolves stateCode (with
+                // fallbacks to state name and GSTIN prefix), then compares codes.
+                // Walk-in customers (no code) default to intra-state per service policy.
+                String shopCode = gstJurisdictionService.resolveStateCode(shop).orElse(null);
+                String customerCode = gstJurisdictionService.resolveStateCode(customer).orElse(null);
+                boolean sameState = gstJurisdictionService.isIntraState(shopCode, customerCode);
 
                 if (sameState) {
                     BigDecimal half = gstAmount.divide(BigDecimal.valueOf(2), RoundingMode.HALF_UP);
                     saleItem.setCgstAmt(half);
-                    saleItem.setSgstAmt(half);
+                    // UT shops split the intra-state half into UTGST; regular states use SGST.
+                    // Only one of {sgstAmt, utgstAmt} is non-zero per line — this preserves
+                    // downstream ledger math that sums {cgst + sgst + utgst + igst}.
+                    if (gstJurisdictionService.getIntraTaxRegime(shopCode)
+                            == com.desitech.vyaparsathi.gst.service.GstJurisdictionService.IntraTaxRegime.CGST_UTGST) {
+                        saleItem.setUtgstAmt(half);
+                        saleItem.setSgstAmt(BigDecimal.ZERO);
+                    } else {
+                        saleItem.setSgstAmt(half);
+                        saleItem.setUtgstAmt(BigDecimal.ZERO);
+                    }
                     saleItem.setIgstAmt(BigDecimal.ZERO);
                 } else {
                     saleItem.setIgstAmt(gstAmount);
                     saleItem.setCgstAmt(BigDecimal.ZERO);
                     saleItem.setSgstAmt(BigDecimal.ZERO);
+                    saleItem.setUtgstAmt(BigDecimal.ZERO);
                 }
                 totalGSTAmount = totalGSTAmount.add(gstAmount);
             } else {
@@ -179,16 +257,20 @@ public class SaleService {
                 saleItem.setCgstAmt(BigDecimal.ZERO);
                 saleItem.setSgstAmt(BigDecimal.ZERO);
                 saleItem.setIgstAmt(BigDecimal.ZERO);
+                saleItem.setUtgstAmt(BigDecimal.ZERO);
             }
             saleItems.add(saleItem);
         }
 
-        // 3. Generate Invoice Number (atomic — no race condition)
-        String invoicePrefix = (shop.getInvoicePrefix() != null && !shop.getInvoicePrefix().isBlank())
-                ? shop.getInvoicePrefix()
-                : shop.getCode();
+        com.desitech.vyaparsathi.sales.enums.SaleType saleType = parsedType;
+        boolean isProforma = saleType == com.desitech.vyaparsathi.sales.enums.SaleType.PROFORMA;
+
+        // 3. Generate Invoice Number (atomic — no race condition).
+        // Each sale type has a distinct number series so a real invoice sequence
+        // is never "wasted" by a proforma or a bill of supply.
         LocalDate saleDate = dto.getDate() != null ? dto.getDate().toLocalDate() : LocalDate.now();
-        String invoiceNo = invoiceNumberService.nextInvoiceNumber(shop.getId(), invoicePrefix, saleDate);
+        String numberPrefix = numberPrefixFor(saleType, shop);
+        String invoiceNo = invoiceNumberService.nextInvoiceNumber(shop.getId(), numberPrefix, saleDate);
 
         // 4. Calculate Final Totals with Bill-Level Adjustments (Issue 2 Fix)
         BigDecimal totalBeforeRoundOff = totalTaxableValue.add(totalGSTAmount);
@@ -216,10 +298,13 @@ public class SaleService {
         BigDecimal finalTotalAmount = grandTotal.setScale(0, RoundingMode.HALF_UP);
         BigDecimal roundOff = finalTotalAmount.subtract(grandTotal);
 
-        // 5. Deduct Stock
-        for (SaleItem item : saleItems) {
-            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty());
-            stockService.deductStock(item.getItemVariant().getId(), stockQty, "Sale Transaction", "Sale #" + invoiceNo);
+        // 5. Deduct Stock — skipped for PROFORMA sales (non-binding, no goods
+        // have moved yet). Custom/service lines are always skipped (no inventory).
+        if (!isProforma) {
+            for (SaleItem item : saleItems) {
+                if (item.getItemVariant() == null) continue;
+                stockService.deductStock(item.getItemVariant().getId(), item.getQty(), "Sale Transaction", "Sale #" + invoiceNo);
+            }
         }
 
         // 6. Persist Sale Entity
@@ -237,7 +322,15 @@ public class SaleService {
         sale.setSaleItems(saleItems);
         saleItems.forEach(si -> si.setSale(sale));
 
-        sale.setIsGstRequired(Boolean.TRUE.equals(dto.getIsGstRequired()));
+        sale.setIsGstRequired(gstApplicable);
+        sale.setReverseCharge(Boolean.TRUE.equals(dto.getReverseCharge()));
+        sale.setSaleType(saleType);
+        // Persist idempotency key + optional salesperson/notes.
+        if (dto.getIdempotencyKey() != null && !dto.getIdempotencyKey().isBlank()) {
+            sale.setIdempotencyKey(dto.getIdempotencyKey().trim());
+        }
+        if (dto.getSalespersonId() != null) sale.setSalespersonId(dto.getSalespersonId());
+        if (dto.getNotes() != null) sale.setNotes(dto.getNotes());
 
         Sale savedSale = saleRepository.saveAndFlush(sale);
 
@@ -250,8 +343,10 @@ public class SaleService {
             deliveryService.createDelivery(deliveryDTO);
         }
 
-        // 8. Ledger Entry & Advance Liquidation
-        if (customer != null) {
+        // 8. Ledger Entry & Advance Liquidation — skipped for PROFORMA.
+        // A proforma does not create a receivable; the customer does not owe
+        // money until a real invoice is issued via convertProformaToInvoice.
+        if (customer != null && !isProforma) {
             // A. Record the initial Debt (CREDIT increases Customer's payable balance)
             CustomerLedgerDto saleLedgerDto = new CustomerLedgerDto();
             saleLedgerDto.setAmount(finalTotalAmount);
@@ -311,18 +406,52 @@ public class SaleService {
         Sale sale = saleRepository.findById(returnDto.getSaleId())
                 .orElseThrow(() -> new EntityNotFoundAppException("Sale", returnDto.getSaleId()));
 
-        BigDecimal totalReturnAmount = BigDecimal.ZERO;
+        // Only completed sales (or partially-returned rows getting further returns) may be returned.
+        if (sale.getStatus() != SaleStatus.COMPLETED && sale.getStatus() != SaleStatus.PARTIALLY_RETURNED) {
+            throw new BusinessValidationException(
+                    "Cannot return items from a sale in state " + sale.getStatus() +
+                    ". Only COMPLETED or PARTIALLY_RETURNED sales are returnable.");
+        }
 
-        // 1. Process Items and Inventory
+        BigDecimal totalReturnAmount = BigDecimal.ZERO;
+        // Track (SaleItem → qty being returned on THIS pass) so we can hand the
+        // aggregated set to CreditNoteService and produce a document with proper
+        // line items after this loop completes.
+        Map<SaleItem, BigDecimal> returnedThisPass = new LinkedHashMap<>();
+
+        // 1. Process Items and Inventory. Backward-compatible lookup:
+        //   • First match by SaleItem PK (the intended semantics — supports custom lines).
+        //   • Fall back to matching by ItemVariant.id, because the legacy FE reads
+        //     SaleItemDto.id (which is JSON-aliased to itemVariantId via
+        //     @JsonProperty("id")) and sends it back as saleItemId. Custom lines
+        //     with no variant will only ever match via PK.
         for (SaleReturnDto.SaleReturnItemDto returnItem : returnDto.getReturnItems()) {
+            Long lookupId = returnItem.getSaleItemId();
             SaleItem saleItem = sale.getSaleItems().stream()
-                    .filter(si -> si.getItemVariant().getId().equals(returnItem.getSaleItemId()))
+                    .filter(si -> si.getId() != null && si.getId().equals(lookupId))
                     .findFirst()
-                    .orElseThrow(() -> new EntityNotFoundAppException("Sale Item", returnItem.getSaleItemId()));
+                    .or(() -> sale.getSaleItems().stream()
+                            .filter(si -> si.getItemVariant() != null
+                                    && si.getItemVariant().getId() != null
+                                    && si.getItemVariant().getId().equals(lookupId))
+                            .findFirst())
+                    .orElseThrow(() -> new EntityNotFoundAppException("Sale Item", lookupId));
 
             BigDecimal currentReturned = saleItem.getReturnedQty() != null ? saleItem.getReturnedQty() : BigDecimal.ZERO;
             BigDecimal requestedQty = returnItem.getReturnQuantity();
             BigDecimal originalQty  = saleItem.getQty();
+
+            // Over-return guard: cumulative returned qty must never exceed originally sold qty.
+            if (requestedQty == null || requestedQty.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new BusinessValidationException("Return quantity must be positive for sale item " + saleItem.getId());
+            }
+            if (currentReturned.add(requestedQty).compareTo(originalQty) > 0) {
+                throw new BusinessValidationException(
+                        "Return quantity (" + requestedQty + ") exceeds remaining sold quantity ("
+                                + originalQty.subtract(currentReturned) + ") for sale item " + saleItem.getId());
+            }
+
+            returnedThisPass.merge(saleItem, requestedQty, BigDecimal::add);
 
             // FIX (Phase 0.5): Return amount must be proportional to the full line amount
             // (taxableValue + GST), NOT just unitPrice × qty, which ignores discounts and tax.
@@ -346,14 +475,14 @@ public class SaleService {
             saleItem.setReturnedQty(currentReturned.add(requestedQty));
             saleItem.setReturned(true);
 
-            StockAdjustmentDto adjustment = new StockAdjustmentDto();
-            adjustment.setItemVariantId(saleItem.getItemVariant().getId());
-            // Convert returned dispensing qty back to stock units using the same pack size
-            // that was active when the original sale was made (stored on the SaleItem).
-            BigDecimal stockQty = toStockQty(saleItem.getItemVariant(), requestedQty);
-            adjustment.setAdjustmentQuantity(stockQty);
-            adjustment.setReason("Return: Inv #" + sale.getInvoiceNo());
-            stockService.adjustStock(adjustment);
+            if (saleItem.getItemVariant() != null) {
+                StockAdjustmentDto adjustment = new StockAdjustmentDto();
+                adjustment.setItemVariantId(saleItem.getItemVariant().getId());
+                adjustment.setAdjustmentQuantity(requestedQty);
+                adjustment.setReason("Return: Inv #" + sale.getInvoiceNo());
+                stockService.adjustStock(adjustment);
+            }
+            // Custom/service lines have no inventory to restore — return-amount only.
         }
 
         // 2. Calculate the Debt vs. Cash situation
@@ -361,10 +490,23 @@ public class SaleService {
         BigDecimal paidBeforeReturn = paymentService.getTotalPaidBySaleIds(Set.of(sale.getId())).getOrDefault(sale.getId(), BigDecimal.ZERO);
         BigDecimal unpaidDebtBeforeReturn = totalOriginalAmount.subtract(paidBeforeReturn).max(BigDecimal.ZERO);
 
-        // 3. Update Sale Header
+        // 3. Update Sale Header — distinguish full return from partial return
+        // so the audit trail reflects the actual state.
         sale.setTotalAmount(totalOriginalAmount.subtract(totalReturnAmount).max(BigDecimal.ZERO));
-        if (sale.getSaleItems().stream().allMatch(item -> item.getReturnedQty().compareTo(item.getQty()) >= 0)) {
+        boolean allFullyReturned = sale.getSaleItems().stream()
+                .allMatch(item -> {
+                    BigDecimal r = item.getReturnedQty() != null ? item.getReturnedQty() : BigDecimal.ZERO;
+                    return r.compareTo(item.getQty()) >= 0;
+                });
+        boolean anyReturned = sale.getSaleItems().stream()
+                .anyMatch(item -> {
+                    BigDecimal r = item.getReturnedQty() != null ? item.getReturnedQty() : BigDecimal.ZERO;
+                    return r.compareTo(BigDecimal.ZERO) > 0;
+                });
+        if (allFullyReturned) {
             sale.setStatus(SaleStatus.RETURNED);
+        } else if (anyReturned) {
+            sale.setStatus(SaleStatus.PARTIALLY_RETURNED);
         }
         saleRepository.save(sale);
 
@@ -400,6 +542,17 @@ public class SaleService {
                 }
             }
         }
+        // 5. Atomically issue the formal Credit Note document in the same
+        // transaction as the ledger adjustment. If it throws, the whole
+        // return rolls back — no more silent credit-note failures leaving
+        // the ledger adjusted but the document missing.
+        if (!returnedThisPass.isEmpty() && totalReturnAmount.compareTo(BigDecimal.ZERO) > 0) {
+            CreditNote issued = creditNoteService.createFromSaleReturn(sale, returnedThisPass,
+                    "Sales Return - Inv #" + sale.getInvoiceNo());
+            logger.info("Issued CreditNote {} for saleId={} total={}",
+                    issued.getCreditNoteNo(), sale.getId(), issued.getTotalAmount());
+        }
+
         auditHelper.log("PROCESS_RETURN", "SALE", sale.getId().toString(), "Returned: " + totalReturnAmount);
         changeLogService.append("SALE_RETURN", sale.getId(),
                 com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.RETURN, returnDto, "LOCAL_DEVICE");
@@ -411,14 +564,26 @@ public class SaleService {
         Sale sale = saleRepository.findById(saleId)
                 .orElseThrow(() -> new EntityNotFoundAppException("Sale", saleId));
 
-        // 1. Return Stock to Inventory
+        // Idempotency / correctness: cancelling an already-terminal sale must be a
+        // no-op-or-error, never re-restock inventory and re-post the ledger reversal.
+        if (sale.getStatus() == SaleStatus.CANCELLED) {
+            throw new BusinessValidationException("Sale " + sale.getInvoiceNo() + " is already cancelled.");
+        }
+        if (sale.getStatus() == SaleStatus.RETURNED) {
+            throw new BusinessValidationException(
+                    "Sale " + sale.getInvoiceNo() + " has been fully returned — cancel is not applicable.");
+        }
+        if (sale.getStatus() == SaleStatus.DRAFT) {
+            throw new BusinessValidationException(
+                    "Draft sale " + sale.getInvoiceNo() + " has no ledger or stock impact — delete the draft instead.");
+        }
+
+        // 1. Return Stock to Inventory (skip custom/service lines — no inventory to restore)
         for (SaleItem saleItem : sale.getSaleItems()) {
+            if (saleItem.getItemVariant() == null) continue;
             StockAdjustmentDto adjustment = new StockAdjustmentDto();
             adjustment.setItemVariantId(saleItem.getItemVariant().getId());
-            // For loose medicine, convert dispensing qty back to stock units using the
-            // pack size stored at sale time.  Positive adjustment adds back to stock.
-            BigDecimal stockQty = toStockQty(saleItem.getItemVariant(), saleItem.getQty());
-            adjustment.setAdjustmentQuantity(stockQty);
+            adjustment.setAdjustmentQuantity(saleItem.getQty());
             adjustment.setReason("Cancelled Sale #" + sale.getInvoiceNo());
             stockService.adjustStock(adjustment);
         }
@@ -474,6 +639,149 @@ public class SaleService {
                 java.util.Map.of("reason", reason != null ? reason : "No reason provided"), "LOCAL_DEVICE");
     }
 
+    /**
+     * Discard a DRAFT (or HELD) sale outright — used when the caller has moved on
+     * to a different sale-type (e.g. proforma) and the draft/held record would
+     * otherwise be orphaned. Rejects any other status (COMPLETED etc. must use
+     * cancelSale instead — they have ledger/stock impact).
+     */
+    @Transactional
+    public void discardDraft(Long saleId) {
+        Sale sale = saleRepository.findById(saleId)
+                .orElseThrow(() -> new EntityNotFoundAppException("Sale", saleId));
+        if (sale.getStatus() != SaleStatus.DRAFT && sale.getStatus() != SaleStatus.HELD) {
+            throw new BusinessValidationException(
+                    "Only DRAFT or HELD sales can be discarded — sale " + sale.getInvoiceNo()
+                            + " is in state " + sale.getStatus() + ". Use cancel for committed sales.");
+        }
+        auditHelper.log("DISCARD_DRAFT", "SALE", saleId.toString(),
+                "invoiceNo=" + sale.getInvoiceNo() + " status=" + sale.getStatus());
+        saleRepository.delete(sale);
+    }
+
+    /**
+     * Park a DRAFT sale — user explicitly parks a work-in-progress cart to serve
+     * the next customer. Same underlying state as DRAFT (no ledger, no stock) but
+     * the HELD label lets the UI list "parked" separately from "auto-saved draft"
+     * and offer a Resume action. Idempotent: parking a HELD sale is a no-op.
+     */
+    @Transactional
+    public SaleDto parkSale(Long saleId) {
+        Sale sale = saleRepository.findById(saleId)
+                .orElseThrow(() -> new EntityNotFoundAppException("Sale", saleId));
+        if (sale.getStatus() == SaleStatus.HELD) {
+            return mapper.toDto(sale);  // idempotent
+        }
+        if (sale.getStatus() != SaleStatus.DRAFT) {
+            throw new BusinessValidationException(
+                    "Only DRAFT sales can be parked — sale " + sale.getInvoiceNo()
+                            + " is in state " + sale.getStatus());
+        }
+        sale.setStatus(SaleStatus.HELD);
+        Sale saved = saleRepository.save(sale);
+        auditHelper.log("PARK_SALE", "SALE", saleId.toString(), null);
+        return mapper.toDto(saved);
+    }
+
+    /**
+     * Resume a HELD sale back to DRAFT so the standard complete-draft flow works
+     * unchanged. Idempotent for DRAFT.
+     */
+    @Transactional
+    public SaleDto resumeSale(Long saleId) {
+        Sale sale = saleRepository.findById(saleId)
+                .orElseThrow(() -> new EntityNotFoundAppException("Sale", saleId));
+        if (sale.getStatus() == SaleStatus.DRAFT) {
+            return mapper.toDto(sale);  // idempotent
+        }
+        if (sale.getStatus() != SaleStatus.HELD) {
+            throw new BusinessValidationException(
+                    "Only HELD sales can be resumed — sale " + sale.getInvoiceNo()
+                            + " is in state " + sale.getStatus());
+        }
+        sale.setStatus(SaleStatus.DRAFT);
+        Sale saved = saleRepository.save(sale);
+        auditHelper.log("RESUME_SALE", "SALE", saleId.toString(), null);
+        return mapper.toDto(saved);
+    }
+
+    /**
+     * Update sale-level notes only. Non-destructive: accepts null to explicitly
+     * clear notes ({@code PATCH} semantics). Any sale in any status may have its
+     * notes edited — notes are metadata and never affect ledger or stock.
+     */
+    @Transactional
+    public SaleDto updateNotes(Long saleId, String notes) {
+        Sale sale = saleRepository.findById(saleId)
+                .orElseThrow(() -> new EntityNotFoundAppException("Sale", saleId));
+        sale.setNotes(notes);
+        Sale saved = saleRepository.save(sale);
+        auditHelper.log("UPDATE_SALE_NOTES", "SALE", saleId.toString(),
+                notes == null ? "cleared" : ("len=" + notes.length()));
+        return mapper.toDto(saved);
+    }
+
+    /**
+     * Timeline of state-mutating events for a single sale — used by the FE
+     * "Void / refund history" dialog. Merges two sources:
+     *   • AuditLog rows filtered by (entity=SALE, entityId=saleId) — narrated
+     *     via {@code auditHelper.log()} on every mutation.
+     *   • Credit notes linked to the sale — carry the money impact of returns
+     *     that AuditLog alone can't render (CN number, amount).
+     * <p>Rows are returned newest-first. Both source queries are auto-scoped
+     * to the current shop by {@code ShopFilterAspect}, so no explicit shopId.
+     */
+    public java.util.List<com.desitech.vyaparsathi.sales.dto.SaleTimelineEventDto> getSaleTimeline(Long saleId) {
+        // Existence + shop-scope guard: findById is aspect-filtered, so a foreign
+        // shop's saleId looks unresolvable rather than leaking data.
+        Sale sale = saleRepository.findById(saleId)
+                .orElseThrow(() -> new EntityNotFoundAppException("Sale", saleId));
+
+        java.util.List<com.desitech.vyaparsathi.sales.dto.SaleTimelineEventDto> events = new java.util.ArrayList<>();
+
+        // Audit rows.
+        java.util.List<com.desitech.vyaparsathi.audit.entity.AuditLog> auditRows =
+                auditLogRepository.findByEntityAndEntityIdOrderByTimestampDesc("SALE", saleId.toString());
+        for (com.desitech.vyaparsathi.audit.entity.AuditLog row : auditRows) {
+            events.add(new com.desitech.vyaparsathi.sales.dto.SaleTimelineEventDto(
+                    "audit-" + row.getId(),
+                    row.getAction(),
+                    row.getDetails(),
+                    row.getUsername(),
+                    row.getTimestamp(),
+                    null,
+                    null));
+        }
+
+        // Credit notes for this sale — anchor at start of day so ordering with
+        // the timestamped audit rows is stable.
+        java.util.List<CreditNote> notes = creditNoteRepository.findBySaleIdOrderByIdDesc(saleId);
+        for (CreditNote cn : notes) {
+            LocalDateTime cnStamp = cn.getCreditNoteDate() == null
+                    ? sale.getDate()
+                    : cn.getCreditNoteDate().atStartOfDay();
+            events.add(new com.desitech.vyaparsathi.sales.dto.SaleTimelineEventDto(
+                    "cn-" + cn.getId(),
+                    "CREDIT_NOTE",
+                    "Credit note " + cn.getCreditNoteNo() + (cn.getReason() == null ? "" : " — " + cn.getReason()),
+                    null,
+                    cnStamp,
+                    cn.getCreditNoteNo(),
+                    cn.getTotalAmount()));
+        }
+
+        // Newest first — nulls at the bottom.
+        events.sort((a, b) -> {
+            LocalDateTime ta = a.getTimestamp();
+            LocalDateTime tb = b.getTimestamp();
+            if (ta == null && tb == null) return 0;
+            if (ta == null) return 1;
+            if (tb == null) return -1;
+            return tb.compareTo(ta);
+        });
+        return events;
+    }
+
     public Optional<SaleDto> getSaleById(Long saleId) {
         return saleRepository.findById(saleId)
                 .map(sale -> {
@@ -482,8 +790,10 @@ public class SaleService {
                     // Populate History for each item
                     if (dto.getItems() != null) {
                         for (SaleItemDto itemDto : dto.getItems()) {
+                            if (itemDto.getItemVariantId() == null) continue;
                             sale.getSaleItems().stream()
-                                    .filter(si -> si.getItemVariant().getId().equals(itemDto.getItemVariantId()))
+                                    .filter(si -> si.getItemVariant() != null
+                                            && si.getItemVariant().getId().equals(itemDto.getItemVariantId()))
                                     .findFirst()
                                     .ifPresent(si -> {
                                         BigDecimal purchased = si.getQty() != null ? si.getQty() : BigDecimal.ZERO;
@@ -551,24 +861,42 @@ public class SaleService {
 
         Set<Long> saleIds = sales.stream().map(Sale::getId).collect(Collectors.toSet());
         Map<Long, BigDecimal> paidBySale = paymentService.getTotalPaidBySaleIds(saleIds);
+        String shopName = currentShopName();
 
         return sales.stream()
-                .map(sale -> mapToDueDto(sale, paidBySale.getOrDefault(sale.getId(), ZERO)))
+                .map(sale -> mapToDueDto(sale, paidBySale.getOrDefault(sale.getId(), ZERO), shopName))
                 .filter(dto -> dto.getDueAmount().compareTo(ZERO) > 0)
                 .collect(Collectors.toList());
     }
 
     public Page<SaleDueDto> getSalesHistory(Pageable pageable) {
-        // Phase 0.4 fix: paginated — no more full-table scan
+        return getSalesHistory(null, null, null, null, null, pageable);
+    }
+
+    /**
+     * Filtered history — every param is optional (null = no filter). Backward-compatible
+     * with the older no-arg {@link #getSalesHistory(Pageable)} which delegates here.
+     */
+    public Page<SaleDueDto> getSalesHistory(
+            String q,
+            SaleStatus status,
+            Long customerId,
+            LocalDateTime from,
+            LocalDateTime to,
+            Pageable pageable
+    ) {
         Long shopId = TenantContext.getCurrentShopId();
-        Page<Sale> salesPage = saleRepository.findAllByShopId(shopId, pageable);
+        String normalizedQ = (q == null || q.isBlank()) ? null : q.trim();
+        Page<Sale> salesPage = saleRepository.searchHistory(
+                shopId, normalizedQ, status, customerId, from, to, pageable);
 
         Set<Long> saleIds = salesPage.getContent().stream()
                 .map(Sale::getId).collect(Collectors.toSet());
         Map<Long, BigDecimal> paidBySale = paymentService.getTotalPaidBySaleIds(saleIds);
+        String shopName = currentShopName();
 
         List<SaleDueDto> dtos = salesPage.getContent().stream()
-                .map(sale -> mapToDueDto(sale, paidBySale.getOrDefault(sale.getId(), ZERO)))
+                .map(sale -> mapToDueDto(sale, paidBySale.getOrDefault(sale.getId(), ZERO), shopName))
                 .collect(Collectors.toList());
 
         return new PageImpl<>(dtos, pageable, salesPage.getTotalElements());
@@ -593,12 +921,20 @@ public class SaleService {
 
         Set<Long> saleIds = salesPage.getContent().stream().map(Sale::getId).collect(Collectors.toSet());
         Map<Long, BigDecimal> paidBySale = paymentService.getTotalPaidBySaleIds(saleIds);
+        String shopName = currentShopName();
 
         List<SaleDueDto> dtos = salesPage.getContent().stream()
-                .map(sale -> mapToDueDto(sale, paidBySale.getOrDefault(sale.getId(), ZERO)))
+                .map(sale -> mapToDueDto(sale, paidBySale.getOrDefault(sale.getId(), ZERO), shopName))
                 .collect(Collectors.toList());
 
         return new PageImpl<>(dtos, pageable, salesPage.getTotalElements());
+    }
+
+    /** One shop lookup per request — hoisted out of the per-row map loop. */
+    private String currentShopName() {
+        Long shopId = TenantContext.getCurrentShopId();
+        if (shopId == null) return "";
+        return shopRepository.findById(shopId).map(Shop::getName).orElse("");
     }
     @Transactional
     public SaleDto saveOrUpdateDraft(SaleDto dto) {
@@ -622,14 +958,11 @@ public class SaleService {
             sale.getSaleItems().clear();
         } else {
             sale = new Sale();
-            // Atomic draft invoice number — uses same sequence table with "DRF" prefix
-            String basePrefix = (shop.getInvoicePrefix() != null && !shop.getInvoicePrefix().isBlank())
-                    ? shop.getInvoicePrefix() : shop.getCode();
-            if (basePrefix.length() > 50) {
-                basePrefix = basePrefix.substring(0, 50);
-            }
-            String draftPrefix = "DRF-" + basePrefix;
-            sale.setInvoiceNo(invoiceNumberService.nextInvoiceNumber(shop.getId(), draftPrefix, LocalDate.now()));
+            // Drafts get a distinct, short DRF sequence — separate from real invoices.
+            // This keeps the real invoice sequence gap-free (an abandoned draft
+            // does not "waste" a real invoice number, which matters for Indian GST
+            // audit trails that require unbroken sequential numbering).
+            sale.setInvoiceNo(invoiceNumberService.nextInvoiceNumber(shop.getId(), "DRF", LocalDate.now()));
             sale.setStatus(SaleStatus.DRAFT);
         }
 
@@ -637,11 +970,23 @@ public class SaleService {
         List<SaleItem> itemsToUpdate = new ArrayList<>();
 
         for (SaleItemDto itemDto : dto.getItems()) {
-            ItemVariant iv = itemVariantRepository.findById(itemDto.getItemVariantId())
-                    .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+            ItemVariant iv = null;
+            if (itemDto.getItemVariantId() != null) {
+                iv = itemVariantRepository.findById(itemDto.getItemVariantId())
+                        .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+            }
 
             SaleItem saleItem = new SaleItem();
             saleItem.setItemVariant(iv);
+            if (iv == null) {
+                String customName = (itemDto.getCustomItemName() != null && !itemDto.getCustomItemName().isBlank())
+                        ? itemDto.getCustomItemName()
+                        : itemDto.getItemName();
+                saleItem.setCustomItemName(customName);
+                saleItem.setCustomDescription(itemDto.getCustomDescription());
+                saleItem.setCustomHsnSac(itemDto.getCustomHsnSac());
+                saleItem.setCustomUnit(itemDto.getCustomUnit());
+            }
             saleItem.setQty(itemDto.getQty());
             saleItem.setUnitPrice(itemDto.getUnitPrice());
             saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
@@ -652,8 +997,19 @@ public class SaleService {
             saleItem.setTaxableValue(taxableValue);
             totalTaxableValue = totalTaxableValue.add(taxableValue);
 
-            // Drafts usually have 0 tax until completed
-            saleItem.setGstType(GSTType.GST_0);
+            // GST amounts are zero on drafts (final split is computed at completeDraft,
+            // where the shop-vs-customer state comparison decides CGST+SGST vs IGST),
+            // BUT the intended rate must still be persisted so:
+            //   - custom/service line items (no ItemVariant to re-derive from) keep their rate,
+            //   - the frontend can show "GST @ 18%" when the user reopens the draft.
+            Integer effectiveGstRate = iv != null
+                    ? iv.getGstRate()
+                    : (itemDto.getGstRate() > 0 ? itemDto.getGstRate() : null);
+            if (effectiveGstRate != null && effectiveGstRate > 0) {
+                saleItem.setGstType(GSTType.fromRate(effectiveGstRate));
+            } else {
+                saleItem.setGstType(GSTType.GST_0);
+            }
             saleItem.setCgstAmt(ZERO);
             saleItem.setSgstAmt(ZERO);
             saleItem.setIgstAmt(ZERO);
@@ -664,6 +1020,14 @@ public class SaleService {
 
         sale.setShop(shop);
         sale.setCustomer(customer);
+        // Preserve the "apply GST" intent on the draft — completeDraft re-reads
+        // this flag from the completion DTO (line ~889), but the DTO's default
+        // comes from what the frontend fetches back. Without persistence, the
+        // flag silently drops to false and drafts complete with zero GST.
+        // GST applicability is determined by the SHOP's registration status,
+        // not the customer's GSTIN — the customer's GSTIN only affects ITC eligibility.
+        sale.setIsGstRequired(Boolean.TRUE.equals(dto.getIsGstRequired()));
+        sale.setReverseCharge(Boolean.TRUE.equals(dto.getReverseCharge()));
         sale.setTotalAmount(totalTaxableValue.setScale(0, RoundingMode.HALF_UP));
         sale.setRoundOff(sale.getTotalAmount().subtract(totalTaxableValue)); // Difference for ledger balancing
         sale.getSaleItems().addAll(itemsToUpdate);
@@ -702,6 +1066,30 @@ public class SaleService {
             throw new BusinessValidationException("Only DRAFT sales can be completed");
         }
 
+        Shop existingShop = existing.getShop();
+
+        // Sale-type resolution FIRST — composition-scheme shops force BILL_OF_SUPPLY,
+        // which needs a different number-series prefix ("BOS") than a real invoice.
+        com.desitech.vyaparsathi.sales.enums.SaleType parsedType =
+                effectiveSaleType(dto.getSaleType(), existingShop);
+        boolean isBillOfSupply = parsedType == com.desitech.vyaparsathi.sales.enums.SaleType.BILL_OF_SUPPLY;
+        boolean gstApplicable  = Boolean.TRUE.equals(dto.getIsGstRequired()) && !isBillOfSupply;
+        if (gstApplicable && parsedType == com.desitech.vyaparsathi.sales.enums.SaleType.INVOICE) {
+            validateHsnPresent(dto);
+        }
+
+        // Reissue the invoice number from the real (non-DRF) sequence. Drafts
+        // carry a throwaway "DRF/YY-YY/NNNNN" number that must not appear on a
+        // completed invoice — that would be non-compliant with GST audit trails
+        // and confusing to customers. The old DRF number is discarded here.
+        LocalDate completionDate = LocalDate.now();
+        String finalInvoiceNo = invoiceNumberService.nextInvoiceNumber(
+                existingShop.getId(), numberPrefixFor(parsedType, existingShop), completionDate);
+        String previousDraftInvoiceNo = existing.getInvoiceNo();
+        existing.setInvoiceNo(finalInvoiceNo);
+        existing.setSaleType(parsedType);
+        logger.info("Draft {} completed → issued invoice number {}", previousDraftInvoiceNo, finalInvoiceNo);
+
         Customer customer = Optional.ofNullable(dto.getCustomer())
                 .map(c -> customerRepository.findById(c.getId())
                         .orElseThrow(() -> new EntityNotFoundAppException("Customer", c.getId())))
@@ -713,26 +1101,45 @@ public class SaleService {
         BigDecimal totalTaxableValue = ZERO;
         BigDecimal totalGSTAmount = ZERO;
 
-        for (SaleItemDto itemDto : dto.getItems()) {
-            ItemVariant itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
-                    .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+        // Jurisdiction resolved once — no per-item work.
+        String shopStateCode = gstJurisdictionService.resolveStateCode(existingShop).orElse(null);
+        String customerStateCode = gstJurisdictionService.resolveStateCode(customer).orElse(null);
+        boolean sameState = gstJurisdictionService.isIntraState(shopStateCode, customerStateCode);
+        boolean utRegime = gstJurisdictionService.getIntraTaxRegime(shopStateCode)
+                == com.desitech.vyaparsathi.gst.service.GstJurisdictionService.IntraTaxRegime.CGST_UTGST;
 
-            BigDecimal stockQty = toStockQty(itemVariant, itemDto.getQty(), itemDto);
-            if (!stockService.isStockAvailable(itemDto.getItemVariantId(), stockQty)) {
-                throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
+        for (SaleItemDto itemDto : dto.getItems()) {
+            ItemVariant itemVariant = null;
+            if (itemDto.getItemVariantId() != null) {
+                itemVariant = itemVariantRepository.findById(itemDto.getItemVariantId())
+                        .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemDto.getItemVariantId()));
+
+                if (!stockService.isStockAvailable(itemDto.getItemVariantId(), itemDto.getQty())) {
+                    throw new InsufficientStockException("Insufficient stock for item: " + itemDto.getItemName());
+                }
             }
 
             SaleItem saleItem = new SaleItem();
             saleItem.setSale(existing);
             saleItem.setItemVariant(itemVariant);
+            if (itemVariant == null) {
+                String customName = (itemDto.getCustomItemName() != null && !itemDto.getCustomItemName().isBlank())
+                        ? itemDto.getCustomItemName()
+                        : itemDto.getItemName();
+                saleItem.setCustomItemName(customName);
+                saleItem.setCustomDescription(itemDto.getCustomDescription());
+                saleItem.setCustomHsnSac(itemDto.getCustomHsnSac());
+                saleItem.setCustomUnit(itemDto.getCustomUnit());
+            }
             saleItem.setQty(itemDto.getQty());
             saleItem.setUnitPrice(itemDto.getUnitPrice());
             saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
-            // Pharmacy batch tracking — persist per-item batch/expiry from the frontend
+            // Optional batch/expiry — used by FMCG / food / any perishable inventory.
             saleItem.setBatchNumber(itemDto.getBatchNumber());
             saleItem.setExpiryDate(itemDto.getExpiryDate());
+            // Optional per-line salesperson attribution (V71 column).
+            if (itemDto.getSalespersonId() != null) saleItem.setSalespersonId(itemDto.getSalespersonId());
 
-            // FIX: Taxable value calculation for EVERY item (Required for Sales Volume Reports)
             BigDecimal taxableValue = itemDto.getQty()
                     .multiply(itemDto.getUnitPrice())
                     .subtract(saleItem.getDiscount());
@@ -740,24 +1147,34 @@ public class SaleService {
             saleItem.setTaxableValue(taxableValue);
             totalTaxableValue = totalTaxableValue.add(taxableValue);
 
-            if (Boolean.TRUE.equals(dto.getIsGstRequired()) && itemVariant.getGstRate() != null) {
-                GSTType gstType = GSTType.fromRate(itemVariant.getGstRate());
+            Integer effectiveGstRate = itemVariant != null
+                    ? itemVariant.getGstRate()
+                    : (itemDto.getGstRate() > 0 ? itemDto.getGstRate() : null);
+
+            if (gstApplicable && effectiveGstRate != null) {
+                GSTType gstType = GSTType.fromRate(effectiveGstRate);
                 BigDecimal gstAmount = taxableValue
                         .multiply(BigDecimal.valueOf(gstType.getRate()))
                         .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
 
                 saleItem.setGstType(gstType);
-                boolean sameState = customer != null && existing.getShop().getState().equalsIgnoreCase(customer.getState());
 
                 if (sameState) {
                     BigDecimal half = gstAmount.divide(BigDecimal.valueOf(2), RoundingMode.HALF_UP);
                     saleItem.setCgstAmt(half);
-                    saleItem.setSgstAmt(half);
+                    if (utRegime) {
+                        saleItem.setUtgstAmt(half);
+                        saleItem.setSgstAmt(ZERO);
+                    } else {
+                        saleItem.setSgstAmt(half);
+                        saleItem.setUtgstAmt(ZERO);
+                    }
                     saleItem.setIgstAmt(ZERO);
                 } else {
                     saleItem.setIgstAmt(gstAmount);
                     saleItem.setCgstAmt(ZERO);
                     saleItem.setSgstAmt(ZERO);
+                    saleItem.setUtgstAmt(ZERO);
                 }
                 totalGSTAmount = totalGSTAmount.add(gstAmount);
             } else {
@@ -765,14 +1182,15 @@ public class SaleService {
                 saleItem.setCgstAmt(ZERO);
                 saleItem.setSgstAmt(ZERO);
                 saleItem.setIgstAmt(ZERO);
+                saleItem.setUtgstAmt(ZERO);
             }
             existing.getSaleItems().add(saleItem);
         }
 
-        // Deduct stock
+        // Deduct stock (only for catalog line items — custom/service lines have no inventory)
         for (SaleItem item : existing.getSaleItems()) {
-            BigDecimal stockQty = toStockQty(item.getItemVariant(), item.getQty());
-            stockService.deductStock(item.getItemVariant().getId(), stockQty, "Sale Completion", "Sale #" + existing.getInvoiceNo());
+            if (item.getItemVariant() == null) continue;
+            stockService.deductStock(item.getItemVariant().getId(), item.getQty(), "Sale Completion", "Sale #" + existing.getInvoiceNo());
         }
 
         // Totals and Rounding with Bill-Level Adjustments (Issue 2 Fix)
@@ -806,7 +1224,9 @@ public class SaleService {
         existing.setCustomer(customer);
         existing.setStatus(SaleStatus.COMPLETED);
 
-        existing.setIsGstRequired(Boolean.TRUE.equals(dto.getIsGstRequired()));
+        existing.setIsGstRequired(gstApplicable);
+        if (dto.getSalespersonId() != null) existing.setSalespersonId(dto.getSalespersonId());
+        if (dto.getNotes() != null) existing.setNotes(dto.getNotes());
 
         Sale saved = saleRepository.save(existing);
 
@@ -860,7 +1280,7 @@ public class SaleService {
         return result;
     }
 
-    private SaleDueDto mapToDueDto(Sale sale, BigDecimal paidAmount) {
+    private SaleDueDto mapToDueDto(Sale sale, BigDecimal paidAmount, String shopName) {
         BigDecimal totalAmount = sale.getTotalAmount() != null ? sale.getTotalAmount() : ZERO;
         BigDecimal dueAmount = totalAmount.subtract(paidAmount);
 
@@ -878,6 +1298,8 @@ public class SaleService {
         dto.setAckDate(sale.getAckDate());
         dto.setQrCodePath(sale.getQrCodePath());
         dto.setEwayBillNo(sale.getEwayBillNo());
+        dto.setNotes(sale.getNotes());
+        dto.setSaleType(sale.getSaleType() != null ? sale.getSaleType().name() : null);
 
         if (sale.getCustomer() != null) {
             Customer c = sale.getCustomer();
@@ -889,24 +1311,181 @@ public class SaleService {
             dto.setAddressLine1(c.getAddressLine1());
             dto.setGSTIN(c.getGstNumber());
             dto.setPhone(c.getPhone());
-            dto.setShopName(shopRepository.findById(TenantContext.getCurrentShopId()).map(Shop::getName).orElse(""));
+            dto.setShopName(shopName);
         }
+
+        // Server-truth capability flags — mirror the guards in cancelSale / processSaleReturn.
+        // Anything other than COMPLETED or PARTIALLY_RETURNED is a terminal or pre-committed
+        // state (DRAFT / CANCELLED / RETURNED) where cancel and return are both no-ops.
+        SaleStatus st = sale.getStatus();
+        boolean actionable = st == SaleStatus.COMPLETED || st == SaleStatus.PARTIALLY_RETURNED;
+        dto.setCanCancel(actionable);
+        dto.setCanReturn(actionable);
+
         return dto;
     }
 
-    private BigDecimal toStockQty(ItemVariant variant, BigDecimal dispensingQty) {
-        return dispensingQty;
+    // ── Sale-type / prefix helpers ────────────────────────────────────
+
+    /**
+     * Composition-scheme shops are legally required to issue a Bill of Supply
+     * rather than a tax invoice. Otherwise, honour the DTO-supplied hint.
+     */
+    private com.desitech.vyaparsathi.sales.enums.SaleType effectiveSaleType(String dtoType, Shop shop) {
+        if (shop != null && Boolean.TRUE.equals(shop.getIsCompositionScheme())) {
+            return com.desitech.vyaparsathi.sales.enums.SaleType.BILL_OF_SUPPLY;
+        }
+        if ("PROFORMA".equalsIgnoreCase(dtoType)) return com.desitech.vyaparsathi.sales.enums.SaleType.PROFORMA;
+        if ("BILL_OF_SUPPLY".equalsIgnoreCase(dtoType) || "BOS".equalsIgnoreCase(dtoType)) {
+            return com.desitech.vyaparsathi.sales.enums.SaleType.BILL_OF_SUPPLY;
+        }
+        return com.desitech.vyaparsathi.sales.enums.SaleType.INVOICE;
     }
 
-    private BigDecimal toStockQty(ItemVariant variant, BigDecimal dispensingQty, BigDecimal loosePackSize) {
-        return dispensingQty;
+    /**
+     * Number-series prefix per sale type. Distinct series keep the tax-invoice
+     * sequence gap-free even when a proforma is dropped or a bill-of-supply
+     * is issued alongside.
+     */
+    private String numberPrefixFor(com.desitech.vyaparsathi.sales.enums.SaleType type, Shop shop) {
+        return switch (type) {
+            case PROFORMA -> "PI";
+            case BILL_OF_SUPPLY -> "BOS";
+            case INVOICE -> resolveInvoicePrefix(shop);
+        };
     }
 
-    private BigDecimal toStockQty(ItemVariant variant, BigDecimal dispensingQty, SaleItemDto dto) {
-        return dispensingQty;
+    /**
+     * Enforce HSN/SAC presence on every taxable line of a real tax invoice.
+     * The GSTN e-invoice API rejects payloads with blank HSN, so surface the
+     * problem here instead of letting IRN generation silently fail downstream.
+     */
+    private void validateHsnPresent(SaleDto dto) {
+        List<String> missing = new ArrayList<>();
+        if (dto.getItems() == null) return;
+        for (SaleItemDto line : dto.getItems()) {
+            if (line.getItemVariantId() != null) {
+                // Catalog variant — resolve and check its own HSN.
+                itemVariantRepository.findById(line.getItemVariantId()).ifPresent(v -> {
+                    if (v.getHsn() == null || v.getHsn().isBlank()) {
+                        missing.add(line.getItemName() != null ? line.getItemName() : ("variant #" + v.getId()));
+                    }
+                });
+            } else {
+                // Custom line — DTO must carry the HSN/SAC itself.
+                if (line.getCustomHsnSac() == null || line.getCustomHsnSac().isBlank()) {
+                    missing.add(line.getCustomItemName() != null ? line.getCustomItemName() : "custom line");
+                }
+            }
+        }
+        if (!missing.isEmpty()) {
+            throw new BusinessValidationException(
+                    "HSN/SAC code is required on every line for a tax invoice. Missing on: "
+                            + String.join(", ", missing));
+        }
     }
 
-    private BigDecimal resolveLoosePackSize(ItemVariant variant, SaleItemDto dto) {
-        return null;
+    /**
+     * Converts a PROFORMA sale into a real INVOICE sale.
+     *
+     * <p>A new Sale row is created (fresh {@code INVOICE} number from the shop's
+     * real sequence), stock is deducted, ledger CREDIT is posted, delivery is
+     * created if the source proforma had one. The source proforma stays intact
+     * with a back-link via the new invoice's {@link Sale#proformaSourceSale}.
+     *
+     * <p>Idempotency: the DB unique semantics of one proforma → at most one
+     * invoice is enforced by checking whether any Sale already references the
+     * given proforma via {@code proforma_source_sale_id}. If found, this
+     * throws — the caller must delete/void the old invoice first.
+     */
+    @Transactional
+    @LogAudit(action = "CONVERT_PROFORMA_TO_INVOICE", entity = "SALE")
+    public SaleDto convertProformaToInvoice(Long proformaSaleId) {
+        Sale proforma = saleRepository.findById(proformaSaleId)
+                .orElseThrow(() -> new EntityNotFoundAppException("Sale", proformaSaleId));
+
+        if (proforma.getSaleType() != com.desitech.vyaparsathi.sales.enums.SaleType.PROFORMA) {
+            throw new BusinessValidationException("Sale " + proforma.getInvoiceNo() + " is not a proforma");
+        }
+
+        // Guard against double conversion — indexed exists-query, no full-table scan.
+        if (saleRepository.existsByProformaSourceSale_Id(proforma.getId())) {
+            throw new BusinessValidationException(
+                    "Proforma " + proforma.getInvoiceNo() + " has already been converted to a real invoice");
+        }
+
+        // Build a SaleDto that mirrors the proforma, but as a real INVOICE
+        SaleDto sd = new SaleDto();
+        if (proforma.getCustomer() != null) {
+            com.desitech.vyaparsathi.customer.dto.CustomerDto cd =
+                    new com.desitech.vyaparsathi.customer.dto.CustomerDto();
+            cd.setId(proforma.getCustomer().getId());
+            cd.setName(proforma.getCustomer().getName());
+            sd.setCustomer(cd);
+        }
+        sd.setDate(LocalDateTime.now());
+        sd.setIsGstRequired(proforma.getIsGstRequired());
+        sd.setInvoiceDiscount(proforma.getInvoiceDiscount());
+        sd.setShippingCharges(proforma.getShippingCharges());
+        sd.setOtherCharges(proforma.getOtherCharges());
+        sd.setSaleType("INVOICE"); // explicit — real invoice this time
+        sd.setStatus(SaleStatus.COMPLETED.name());
+
+        List<SaleItemDto> items = new ArrayList<>();
+        for (SaleItem si : proforma.getSaleItems()) {
+            SaleItemDto s = new SaleItemDto();
+            s.setItemVariantId(si.getItemVariant() != null ? si.getItemVariant().getId() : null);
+            s.setItemName(si.getItemVariant() != null && si.getItemVariant().getItem() != null
+                    ? si.getItemVariant().getItem().getName() : si.getCustomItemName());
+            s.setQty(si.getQty());
+            s.setUnitPrice(si.getUnitPrice());
+            s.setDiscount(si.getDiscount() != null ? si.getDiscount() : ZERO);
+            if (si.getGstType() != null) s.setGstRate(si.getGstType().getRate());
+            if (si.getItemVariant() == null) {
+                s.setCustomItemName(si.getCustomItemName());
+                s.setCustomDescription(si.getCustomDescription());
+                s.setCustomHsnSac(si.getCustomHsnSac());
+                s.setCustomUnit(si.getCustomUnit());
+            }
+            items.add(s);
+        }
+        sd.setItems(items);
+
+        SaleDto newInvoiceDto = createSale(sd);
+
+        // Link the new invoice back to its source proforma
+        Sale newInvoice = saleRepository.findById(newInvoiceDto.getId())
+                .orElseThrow(() -> new IllegalStateException("New invoice " + newInvoiceDto.getId() + " vanished"));
+        newInvoice.setProformaSourceSale(proforma);
+        saleRepository.save(newInvoice);
+
+        logger.info("Converted proforma {} → invoice {}", proforma.getInvoiceNo(), newInvoice.getInvoiceNo());
+        newInvoiceDto.setProformaSourceSaleId(proforma.getId());
+        newInvoiceDto.setProformaSourceInvoiceNo(proforma.getInvoiceNo());
+        return newInvoiceDto;
+    }
+
+    /**
+     * Determines the invoice prefix for a shop and normalizes it.
+     *
+     * <p>Prefers {@code shop.invoicePrefix}, falls back to {@code shop.code}, and
+     * defaults to {@code "INV"} if neither is set. The result is:
+     *   <ul>
+     *     <li>trimmed and upper-cased for consistency</li>
+     *     <li>capped at 10 characters so the assembled invoice number
+     *         ({@code PREFIX/YY-YY/NNNNN}) stays visually compact and prints
+     *         cleanly on a standard invoice header</li>
+     *   </ul>
+     */
+    private String resolveInvoicePrefix(Shop shop) {
+        String raw = (shop != null && shop.getInvoicePrefix() != null && !shop.getInvoicePrefix().isBlank())
+                ? shop.getInvoicePrefix()
+                : (shop != null && shop.getCode() != null && !shop.getCode().isBlank()
+                        ? shop.getCode() : "INV");
+        String normalized = raw.trim().toUpperCase();
+        if (normalized.length() > 10) {
+            normalized = normalized.substring(0, 10);
+        }
+        return normalized;
     }
 }

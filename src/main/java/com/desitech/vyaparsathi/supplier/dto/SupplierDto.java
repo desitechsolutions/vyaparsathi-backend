@@ -12,6 +12,9 @@ public class SupplierDto {
     private String address;
     private String gstin;
 
+    /** 2-digit GSTN state code (01–38, 97). May be derived from gstin[0..1] when unset. */
+    private String stateCode;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 

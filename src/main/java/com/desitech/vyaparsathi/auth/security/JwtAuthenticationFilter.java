@@ -84,7 +84,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         ImpersonationContext.set(originalAdminId, sessionUuid, shopId);
                     }
 
-                    // 2. Instant Shop Suspension Guard for Merchant APIs
+                    // 2. Instant Shop Suspension Guard for Merchant APIs.
+                    //    Only the SUSPENSION check is skipped for /api/admin/* routes
+                    //    — those are platform-level controllers (super-admin ops on
+                    //    tenants, entitlements, feature flags) which must remain
+                    //    reachable even when a shop is suspended.
                     if (shopId != null && !request.getRequestURI().startsWith("/api/admin/")) {
                         if (!shopStatusCacheManager.isShopActive(shopId)) {
                             logger.warn("Blocked request for suspended shopId: {}", shopId);
@@ -93,6 +97,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             response.getWriter().write("{\"error\": \"SHOP_SUSPENDED\", \"message\": \"Shop account has been suspended by platform administration.\"}");
                             return;
                         }
+                    }
+
+                    // 3. Tenant context — MUST be set for every authenticated request
+                    //    that carries a shop-scoped JWT, regardless of URL. Not all
+                    //    /api/admin/* URLs are platform-level: /api/admin/users is a
+                    //    shop-scoped controller (staff management inside the shop),
+                    //    and its service reads TenantContext.getCurrentShopId() to
+                    //    filter results. Bundling this line inside the suspension
+                    //    check above caused an empty user list for shop admins.
+                    if (shopId != null) {
                         TenantContext.setCurrentShopId(shopId);
                     }
                 } else {

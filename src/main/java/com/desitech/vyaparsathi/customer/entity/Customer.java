@@ -30,6 +30,10 @@ public class Customer extends ShopAwareEntity {
     private String addressLine2;
     private String city;
     private String state;
+
+    @Column(name = "state_code", length = 2)
+    private String stateCode;
+
     private String postalCode;
     private String country;
     private String gstNumber;
@@ -59,6 +63,9 @@ public class Customer extends ShopAwareEntity {
 
     public String getState() { return state; }
     public void setState(String state) { this.state = state; }
+
+    public String getStateCode() { return stateCode; }
+    public void setStateCode(String stateCode) { this.stateCode = stateCode; }
 
     public String getPostalCode() { return postalCode; }
     public void setPostalCode(String postalCode) { this.postalCode = postalCode; }

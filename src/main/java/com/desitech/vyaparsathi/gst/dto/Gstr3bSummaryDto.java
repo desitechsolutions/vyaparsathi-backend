@@ -12,6 +12,8 @@ public class Gstr3bSummaryDto {
     private OutwardSupplies outwardTaxableSupplies = new OutwardSupplies();
     private OutwardSupplies zeroRatedSupplies = new OutwardSupplies();
     private OutwardSupplies nilRatedExemptSupplies = new OutwardSupplies();
+    /** Section 3.1(d) — Inward supplies liable to reverse charge (buyer pays tax). */
+    private OutwardSupplies inwardReverseChargeSupplies = new OutwardSupplies();
 
     private ItcDetails itcAvailable = new ItcDetails();
     private ItcDetails itcIneligible = new ItcDetails();
@@ -33,6 +35,9 @@ public class Gstr3bSummaryDto {
     public OutwardSupplies getNilRatedExemptSupplies() { return nilRatedExemptSupplies; }
     public void setNilRatedExemptSupplies(OutwardSupplies nilRatedExemptSupplies) { this.nilRatedExemptSupplies = nilRatedExemptSupplies; }
 
+    public OutwardSupplies getInwardReverseChargeSupplies() { return inwardReverseChargeSupplies; }
+    public void setInwardReverseChargeSupplies(OutwardSupplies inwardReverseChargeSupplies) { this.inwardReverseChargeSupplies = inwardReverseChargeSupplies; }
+
     public ItcDetails getItcAvailable() { return itcAvailable; }
     public void setItcAvailable(ItcDetails itcAvailable) { this.itcAvailable = itcAvailable; }
 
@@ -48,6 +53,7 @@ public class Gstr3bSummaryDto {
         private BigDecimal igst = BigDecimal.ZERO;
         private BigDecimal cgst = BigDecimal.ZERO;
         private BigDecimal sgst = BigDecimal.ZERO;
+        private BigDecimal utgst = BigDecimal.ZERO;
         private BigDecimal cess = BigDecimal.ZERO;
 
         public BigDecimal getTaxableValue() { return taxableValue; }
@@ -62,6 +68,9 @@ public class Gstr3bSummaryDto {
         public BigDecimal getSgst() { return sgst; }
         public void setSgst(BigDecimal sgst) { this.sgst = sgst; }
 
+        public BigDecimal getUtgst() { return utgst; }
+        public void setUtgst(BigDecimal utgst) { this.utgst = utgst; }
+
         public BigDecimal getCess() { return cess; }
         public void setCess(BigDecimal cess) { this.cess = cess; }
     }
@@ -71,6 +80,7 @@ public class Gstr3bSummaryDto {
         private BigDecimal igst = BigDecimal.ZERO;
         private BigDecimal cgst = BigDecimal.ZERO;
         private BigDecimal sgst = BigDecimal.ZERO;
+        private BigDecimal utgst = BigDecimal.ZERO;
         private BigDecimal cess = BigDecimal.ZERO;
 
         public BigDecimal getIgst() { return igst; }
@@ -82,6 +92,9 @@ public class Gstr3bSummaryDto {
         public BigDecimal getSgst() { return sgst; }
         public void setSgst(BigDecimal sgst) { this.sgst = sgst; }
 
+        public BigDecimal getUtgst() { return utgst; }
+        public void setUtgst(BigDecimal utgst) { this.utgst = utgst; }
+
         public BigDecimal getCess() { return cess; }
         public void setCess(BigDecimal cess) { this.cess = cess; }
     }
@@ -91,6 +104,7 @@ public class Gstr3bSummaryDto {
         private BigDecimal igstPayable = BigDecimal.ZERO;
         private BigDecimal cgstPayable = BigDecimal.ZERO;
         private BigDecimal sgstPayable = BigDecimal.ZERO;
+        private BigDecimal utgstPayable = BigDecimal.ZERO;
 
         public BigDecimal getIgstPayable() { return igstPayable; }
         public void setIgstPayable(BigDecimal igstPayable) { this.igstPayable = igstPayable; }
@@ -100,5 +114,8 @@ public class Gstr3bSummaryDto {
 
         public BigDecimal getSgstPayable() { return sgstPayable; }
         public void setSgstPayable(BigDecimal sgstPayable) { this.sgstPayable = sgstPayable; }
+
+        public BigDecimal getUtgstPayable() { return utgstPayable; }
+        public void setUtgstPayable(BigDecimal utgstPayable) { this.utgstPayable = utgstPayable; }
     }
 }

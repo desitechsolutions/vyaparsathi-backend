@@ -260,6 +260,16 @@
       <version>1.17.1</version>
     </dependency>
 
+    <!-- Spring cache abstraction + Caffeine for the analytics @Cacheable reads (5-min TTL) -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-cache</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.github.ben-manes.caffeine</groupId>
+      <artifactId>caffeine</artifactId>
+    </dependency>
+
   </dependencies>
 
   <build>

@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.purchases.entity;
 
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
+import com.desitech.vyaparsathi.receiving.entity.Receiving;
 import com.desitech.vyaparsathi.supplier.entity.Supplier;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
@@ -30,6 +31,17 @@ public class PurchaseInvoice extends ShopAwareEntity {
     @JoinColumn(name = "supplier_id", nullable = false)
     private Supplier supplier;
 
+    /**
+     * The GRN (goods receipt) this invoice was created against. When present,
+     * {@code PurchaseInvoiceService} skips its own stock-add step — inventory
+     * was already incremented when the GRN was recorded. When null, the invoice
+     * is a direct-purchase flow (no prior GRN) and still owns the stock-in.
+     * Added by V62 to fix the double-stock-count bug.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "receiving_id")
+    private Receiving receiving;
+
     @Column(name = "purchase_date", nullable = false)
     private LocalDate purchaseDate;
 
@@ -48,6 +60,9 @@ public class PurchaseInvoice extends ShopAwareEntity {
     @Column(name = "total_igst", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalIgst = BigDecimal.ZERO;
 
+    @Column(name = "total_utgst", nullable = false, precision = 12, scale = 2)
+    private BigDecimal totalUtgst = BigDecimal.ZERO;
+
     @Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalAmount = BigDecimal.ZERO;
 
@@ -63,6 +78,28 @@ public class PurchaseInvoice extends ShopAwareEntity {
     @Column(name = "notes", length = 500)
     private String notes;
 
+    /**
+     * Tax payable under reverse charge on this inward supply. When TRUE,
+     * the shop is liable to pay GST to the government directly and may
+     * claim it as ITC (subject to eligibility rules). Feeds into GSTR-3B
+     * Section 3.1(d) — Inward supplies liable to reverse charge.
+     */
+    @Column(name = "reverse_charge", nullable = false)
+    private Boolean reverseCharge = false;
+
+    /**
+     * Whether the ITC on this purchase invoice can be claimed. Column added by V48
+     * (defaults TRUE). Non-eligible cases: blocked credit under §17(5) — motor
+     * vehicles for personal use, food & beverages, membership fees, works
+     * contract on immovable property, etc. Feeds GSTR-3B Section 4(D).
+     */
+    @Column(name = "is_itc_eligible", nullable = false)
+    private Boolean isItcEligible = true;
+
+    /** ITC eligibility category (INPUTS / CAPITAL_GOODS / SERVICES / INELIGIBLE). Column from V48. */
+    @Column(name = "itc_eligibility", length = 30, nullable = false)
+    private String itcEligibility = "INPUTS";
+
     @OneToMany(mappedBy = "purchaseInvoice", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference
     private List<PurchaseInvoiceItem> items = new ArrayList<>();
@@ -75,6 +112,9 @@ public class PurchaseInvoice extends ShopAwareEntity {
 
     public Supplier getSupplier() { return supplier; }
     public void setSupplier(Supplier supplier) { this.supplier = supplier; }
+
+    public Receiving getReceiving() { return receiving; }
+    public void setReceiving(Receiving receiving) { this.receiving = receiving; }
 
     public LocalDate getPurchaseDate() { return purchaseDate; }
     public void setPurchaseDate(LocalDate purchaseDate) { this.purchaseDate = purchaseDate; }
@@ -98,6 +138,10 @@ public class PurchaseInvoice extends ShopAwareEntity {
     public void setTotalIgst(BigDecimal totalIgst) { this.totalIgst = totalIgst; }
     public BigDecimal getIgstAmount() { return totalIgst; }
 
+    public BigDecimal getTotalUtgst() { return totalUtgst; }
+    public void setTotalUtgst(BigDecimal totalUtgst) { this.totalUtgst = totalUtgst; }
+    public BigDecimal getUtgstAmount() { return totalUtgst; }
+
     public BigDecimal getTotalAmount() { return totalAmount; }
     public void setTotalAmount(BigDecimal totalAmount) { this.totalAmount = totalAmount; }
 
@@ -112,6 +156,17 @@ public class PurchaseInvoice extends ShopAwareEntity {
 
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+
+    public Boolean getReverseCharge() { return reverseCharge; }
+    public void setReverseCharge(Boolean reverseCharge) { this.reverseCharge = reverseCharge != null && reverseCharge; }
+    public boolean isReverseCharge() { return Boolean.TRUE.equals(reverseCharge); }
+
+    public Boolean getIsItcEligible() { return isItcEligible; }
+    public void setIsItcEligible(Boolean isItcEligible) { this.isItcEligible = isItcEligible == null || isItcEligible; }
+    public boolean isItcEligible() { return isItcEligible == null || isItcEligible; }
+
+    public String getItcEligibility() { return itcEligibility; }
+    public void setItcEligibility(String itcEligibility) { this.itcEligibility = itcEligibility; }
 
     public List<PurchaseInvoiceItem> getItems() { return items; }
     public void setItems(List<PurchaseInvoiceItem> items) { this.items = items; }

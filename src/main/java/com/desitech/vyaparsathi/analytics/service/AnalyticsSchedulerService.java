@@ -103,7 +103,7 @@ public class AnalyticsSchedulerService {
     public void sendVIPChurnAlerts() {
         logger.info("Analyzing customer churn risks for VIPs...");
 
-        List<ChurnPredictionDto> churnRisks = analyticsService.predictChurn();
+        List<ChurnPredictionDto> churnRisks = analyticsService.predictChurn(AnalyticsService.DEFAULT_CHURN_THRESHOLD_DAYS);
 
         // Define a "High Value" risk as someone with more than ₹10,000 at risk
         List<ChurnPredictionDto> vipRisks = churnRisks.stream()

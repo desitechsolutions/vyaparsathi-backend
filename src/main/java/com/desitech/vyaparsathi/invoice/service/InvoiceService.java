@@ -57,6 +57,9 @@ public class InvoiceService {
     @Autowired
     private InvoiceUtil invoiceUtil;
 
+    @Autowired
+    private com.desitech.vyaparsathi.gst.service.GstJurisdictionService gstJurisdictionService;
+
     @Value("${shop.banking.details:Bank Name: XYZ Bank\nAccount: 123456789\nIFSC: XYZB0001234}")
     private String defaultBankingDetails;
 
@@ -171,13 +174,29 @@ public class InvoiceService {
         right.setPadding(0);
 
         boolean isComposition = !saleHasGst(sale);
-        String invoiceTitle = isComposition ? "BILL OF SUPPLY" : "TAX INVOICE";
+        boolean isProforma = sale.getSaleType() == com.desitech.vyaparsathi.sales.enums.SaleType.PROFORMA;
+
+        // Title precedence: PROFORMA overrides everything (a proforma is neither
+        // a tax invoice nor a bill of supply — it's a non-binding quote-like doc).
+        String invoiceTitle;
+        if (isProforma) {
+            invoiceTitle = "PROFORMA INVOICE";
+        } else if (isComposition) {
+            invoiceTitle = "BILL OF SUPPLY";
+        } else {
+            invoiceTitle = "TAX INVOICE";
+        }
         Paragraph titlePara = new Paragraph(invoiceTitle, f.title);
         titlePara.setAlignment(Element.ALIGN_RIGHT);
         right.addElement(titlePara);
 
-        if (isComposition) {
-            Font declFont = FontFactory.getFont(FontFactory.HELVETICA_OBLIQUE, 7, Font.NORMAL, TEXT_MUTED);
+        Font declFont = FontFactory.getFont(FontFactory.HELVETICA_OBLIQUE, 7, Font.NORMAL, TEXT_MUTED);
+        if (isProforma) {
+            Paragraph decl = new Paragraph(
+                    "Not a tax invoice — no ownership of goods has transferred", declFont);
+            decl.setAlignment(Element.ALIGN_RIGHT);
+            right.addElement(decl);
+        } else if (isComposition) {
             Paragraph decl = new Paragraph("Composition taxable person, not eligible to collect tax on supplies", declFont);
             decl.setAlignment(Element.ALIGN_RIGHT);
             right.addElement(decl);
@@ -535,12 +554,17 @@ public class InvoiceService {
             boolean zebra = (rowNum % 2 == 0);
             Color rowBg = zebra ? ROW_ALT_BG : Color.WHITE;
 
-            String desc = buildItemDescription(item);
-            if (retQty.compareTo(ZERO) > 0) desc += " (Returned: " + retQty + ")";
+            ItemDescriptionParts desc = buildItemDescriptionParts(item);
+            if (retQty.compareTo(ZERO) > 0) {
+                desc = new ItemDescriptionParts(desc.name, appendComma(desc.attrs, "Returned: " + retQty));
+            }
 
             table.addCell(bodyCell(String.valueOf(rowNum), f.body, Element.ALIGN_CENTER, rowBg));
-            table.addCell(bodyCell(desc, f.body, Element.ALIGN_LEFT, rowBg));
-            table.addCell(bodyCell(nvl(item.getItemVariant().getHsn()), f.body, Element.ALIGN_CENTER, rowBg));
+            table.addCell(itemDescCell(desc.name, desc.attrs, f.bodyBold, f.smallMuted, rowBg));
+            String hsn = item.getItemVariant() != null
+                    ? nvl(item.getItemVariant().getHsn())
+                    : nvl(item.getCustomHsnSac());
+            table.addCell(bodyCell(hsn, f.body, Element.ALIGN_CENTER, rowBg));
 
             if (showBatchExpiry) {
                 table.addCell(bodyCell(nvl(item.getBatchNumber()), f.body, Element.ALIGN_CENTER, rowBg));
@@ -549,7 +573,10 @@ public class InvoiceService {
             }
 
             table.addCell(bodyCell(qty.toString(), f.body, Element.ALIGN_CENTER, rowBg));
-            table.addCell(bodyCell(nvl(item.getItemVariant().getUnit()), f.body, Element.ALIGN_CENTER, rowBg));
+            String unit = item.getItemVariant() != null
+                    ? nvl(item.getItemVariant().getUnit())
+                    : nvl(item.getCustomUnit());
+            table.addCell(bodyCell(unit, f.body, Element.ALIGN_CENTER, rowBg));
             table.addCell(bodyCell(currency.format(rate), f.body, Element.ALIGN_RIGHT, rowBg));
 
             if (!isComposition) {
@@ -588,26 +615,89 @@ public class InvoiceService {
         return false;
     }
 
-    private String buildItemDescription(SaleItem item) {
+    /** Split representation of an item description: main line vs. attribute line. */
+    private static final class ItemDescriptionParts {
+        final String name;
+        final String attrs;
+        ItemDescriptionParts(String name, String attrs) {
+            this.name = name;
+            this.attrs = attrs;
+        }
+    }
+
+    /**
+     * Builds a two-part item descriptor:
+     * <ul>
+     *   <li><b>name</b> — the primary line, e.g. {@code "Shirts — Louis Philippe"}. Rendered bold.</li>
+     *   <li><b>attrs</b> — a dot-separated attribute list without labels, e.g.
+     *       {@code "Beige · 38 · Checked · Loose Fit"}. Rendered small and muted.
+     *       {@code null}/empty when the item has no variant attributes.</li>
+     * </ul>
+     *
+     * <p>SKUs are intentionally excluded — they are internal identifiers for
+     * packing/inventory, not customer-facing. Labels ("Color:", "Size:", …)
+     * are dropped because context makes them obvious and shorter values print
+     * cleaner in narrow table cells.
+     */
+    private ItemDescriptionParts buildItemDescriptionParts(SaleItem item) {
+        // Custom / free-text line: no variant, use captured display fields.
+        if (item.getItemVariant() == null) {
+            String name = item.getCustomItemName() != null ? item.getCustomItemName() : "Custom Item";
+            String attrs = isNonBlank(item.getCustomDescription()) ? item.getCustomDescription() : null;
+            return new ItemDescriptionParts(name, attrs);
+        }
+
         com.desitech.vyaparsathi.inventory.entity.ItemVariant variant = item.getItemVariant();
         com.desitech.vyaparsathi.inventory.entity.Item parentItem = variant.getItem();
 
-        StringBuilder sb = new StringBuilder(parentItem.getName() != null ? parentItem.getName() : "Item");
-
+        StringBuilder name = new StringBuilder(parentItem.getName() != null ? parentItem.getName() : "Item");
         if (isNonBlank(parentItem.getBrandName())) {
-            sb.append(" - ").append(parentItem.getBrandName());
+            name.append(" — ").append(parentItem.getBrandName());
         }
 
-        StringJoiner attrs = new StringJoiner(", ", " (", ")");
-        attrs.setEmptyValue("");
-        if (isNonBlank(variant.getColor()))  attrs.add("Color: "  + variant.getColor());
-        if (isNonBlank(variant.getSize()))   attrs.add("Size: "   + variant.getSize());
-        if (isNonBlank(variant.getSku()))    attrs.add("SKU: "    + variant.getSku());
-        if (isNonBlank(variant.getDesign())) attrs.add("Design: " + variant.getDesign());
-        if (isNonBlank(variant.getFit()))    attrs.add("Fit: "    + variant.getFit());
+        StringJoiner attrs = new StringJoiner(" · ");
+        if (isNonBlank(variant.getColor()))  attrs.add(variant.getColor());
+        if (isNonBlank(variant.getSize()))   attrs.add(variant.getSize());
+        if (isNonBlank(variant.getDesign())) attrs.add(variant.getDesign());
+        if (isNonBlank(variant.getFit()))    attrs.add(variant.getFit());
+        // SKU intentionally omitted — customer-facing document
 
-        sb.append(attrs.toString());
-        return sb.toString();
+        String attrsStr = attrs.length() == 0 ? null : attrs.toString();
+        return new ItemDescriptionParts(name.toString(), attrsStr);
+    }
+
+    private static String appendComma(String existing, String addition) {
+        if (addition == null || addition.isBlank()) return existing;
+        if (existing == null || existing.isBlank()) return addition;
+        return existing + " · " + addition;
+    }
+
+    /**
+     * Two-line item description cell: bold name on line 1, small-muted
+     * attribute list on line 2 (when attrs is non-empty). Matches the visual
+     * hierarchy customers expect from Zoho / QuickBooks-style invoices.
+     */
+    private PdfPCell itemDescCell(String name, String attrs, Font nameFont, Font attrsFont, Color bg) {
+        PdfPCell cell = new PdfPCell();
+        cell.setBackgroundColor(bg);
+        cell.setBorder(Rectangle.BOX);
+        cell.setBorderColor(BORDER_LIGHT);
+        cell.setBorderWidth(0.5f);
+        cell.setPaddingTop(5);
+        cell.setPaddingBottom(5);
+        cell.setPaddingLeft(4);
+        cell.setPaddingRight(4);
+
+        Paragraph p1 = new Paragraph(name != null ? name : "", nameFont);
+        p1.setLeading(11f);
+        cell.addElement(p1);
+
+        if (attrs != null && !attrs.isBlank()) {
+            Paragraph p2 = new Paragraph(attrs, attrsFont);
+            p2.setLeading(10f);
+            cell.addElement(p2);
+        }
+        return cell;
     }
 
     // ============================================================
@@ -630,6 +720,13 @@ public class InvoiceService {
         BigDecimal totalCgst = ZERO;
         BigDecimal totalSgst = ZERO;
         BigDecimal totalIgst = ZERO;
+        BigDecimal totalUtgst = ZERO;
+
+        // Union-territory shops split intra-state GST as CGST + UTGST (not CGST + SGST).
+        // Decide which column set this specific invoice needs so we don't waste a column
+        // on a field that will always be zero.
+        String shopStateCodeForGst = gstJurisdictionService.resolveStateCode(sale.getShop()).orElse(null);
+        boolean shopIsUt = gstJurisdictionService.isUnionTerritory(shopStateCodeForGst);
 
         if (!isComposition) {
             Map<BigDecimal, GstSummary> gstMap = new LinkedHashMap<>();
@@ -639,6 +736,7 @@ public class InvoiceService {
                 summary.addCgst(item.getCgstAmt());
                 summary.addSgst(item.getSgstAmt());
                 summary.addIgst(item.getIgstAmt());
+                summary.addUtgst(item.getUtgstAmt());
             }
 
             PdfPTable gstWrap = new PdfPTable(1);
@@ -647,7 +745,8 @@ public class InvoiceService {
 
             PdfPTable gstTable = new PdfPTable(4);
             gstTable.setWidthPercentage(100);
-            String[] gstHeaders = {"GST Rate", "CGST", "SGST", "IGST"};
+            String intraLabel = shopIsUt ? "UTGST" : "SGST";
+            String[] gstHeaders = {"GST Rate", "CGST", intraLabel, "IGST"};
             for (String h : gstHeaders) {
                 PdfPCell c = new PdfPCell(new Phrase(h, f.bodyBold));
                 c.setBackgroundColor(SECTION_LABEL_BG);
@@ -661,10 +760,12 @@ public class InvoiceService {
             for (GstSummary s : gstMap.values()) {
                 gstTable.addCell(bodyCell(s.getRate() + "%", f.body, Element.ALIGN_CENTER, Color.WHITE));
                 gstTable.addCell(bodyCell(currency.format(s.getCgst()), f.body, Element.ALIGN_RIGHT, Color.WHITE));
-                gstTable.addCell(bodyCell(currency.format(s.getSgst()), f.body, Element.ALIGN_RIGHT, Color.WHITE));
+                BigDecimal intraValue = shopIsUt ? s.getUtgst() : s.getSgst();
+                gstTable.addCell(bodyCell(currency.format(intraValue), f.body, Element.ALIGN_RIGHT, Color.WHITE));
                 gstTable.addCell(bodyCell(currency.format(s.getIgst()), f.body, Element.ALIGN_RIGHT, Color.WHITE));
                 totalCgst = totalCgst.add(s.getCgst());
                 totalSgst = totalSgst.add(s.getSgst());
+                totalUtgst = totalUtgst.add(s.getUtgst());
                 totalIgst = totalIgst.add(s.getIgst());
             }
             PdfPCell gstBox = new PdfPCell(gstTable);
@@ -672,6 +773,26 @@ public class InvoiceService {
             gstBox.setPadding(0);
             gstWrap.addCell(gstBox);
             left.addElement(gstWrap);
+        }
+
+        // Reverse-charge notice — mandatory legal disclosure when tax burden
+        // shifts to the recipient. Placed prominently between the tax summary
+        // and the amount-in-words box so buyers cannot miss it.
+        if (sale.isReverseCharge()) {
+            PdfPTable rcWrap = new PdfPTable(1);
+            rcWrap.setWidthPercentage(100);
+            rcWrap.setSpacingBefore(8f);
+            PdfPCell rcCell = new PdfPCell(new Phrase(
+                    "TAX PAYABLE UNDER REVERSE CHARGE — Recipient is liable to pay GST to the government (CGST Act §9(3)/§9(4)).",
+                    f.bodyBold));
+            rcCell.setBackgroundColor(new Color(254, 243, 199)); // soft amber
+            rcCell.setBorder(Rectangle.BOX);
+            rcCell.setBorderColor(new Color(217, 119, 6));
+            rcCell.setBorderWidth(0.8f);
+            rcCell.setPadding(8);
+            rcCell.setHorizontalAlignment(Element.ALIGN_CENTER);
+            rcWrap.addCell(rcCell);
+            left.addElement(rcWrap);
         }
 
         // Amount in Words box
@@ -701,12 +822,18 @@ public class InvoiceService {
                 .filter(Objects::nonNull)
                 .reduce(ZERO, BigDecimal::add);
 
-        BigDecimal grossSubtotal = taxableTotal.add(totalCgst).add(totalSgst).add(totalIgst);
+        BigDecimal grossSubtotal = taxableTotal.add(totalCgst).add(totalSgst).add(totalUtgst).add(totalIgst);
 
         if (!isComposition) {
             styledTotalRow(totals, "Taxable Amount", currency.format(taxableTotal), f.body, false);
             styledTotalRow(totals, "Total CGST",     currency.format(totalCgst),   f.body, false);
-            styledTotalRow(totals, "Total SGST",     currency.format(totalSgst),   f.body, false);
+            // Render whichever intra-state component is non-zero. UT shops accumulate UTGST;
+            // regular states accumulate SGST. Both are never non-zero on the same invoice.
+            if (shopIsUt) {
+                styledTotalRow(totals, "Total UTGST", currency.format(totalUtgst), f.body, false);
+            } else {
+                styledTotalRow(totals, "Total SGST",  currency.format(totalSgst),  f.body, false);
+            }
             styledTotalRow(totals, "Total IGST",     currency.format(totalIgst),   f.body, false);
         }
         if (sale.getInvoiceDiscount() != null && sale.getInvoiceDiscount().compareTo(ZERO) > 0) {

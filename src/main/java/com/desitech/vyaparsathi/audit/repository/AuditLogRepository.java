@@ -25,6 +25,13 @@ public interface AuditLogRepository extends BaseRepository<AuditLog, Long> {
     List<AuditLog> findByUsernameOrderByTimestampDesc(String username);
 
     /**
+     * All audit rows for a single entity instance (e.g. a sale), newest first.
+     * Auto-scoped to the current shop via {@code ShopFilterAspect}. Used by the
+     * per-sale timeline view (void/refund history).
+     */
+    List<AuditLog> findByEntityAndEntityIdOrderByTimestampDesc(String entity, String entityId);
+
+    /**
      * Future-proofing for your Bulk Selection / Advance Payment implementation.
      * This allows you to delete old logs in one go to keep the DB size under control.
      */

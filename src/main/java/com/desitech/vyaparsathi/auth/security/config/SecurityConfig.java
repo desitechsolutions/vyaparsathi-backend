@@ -43,7 +43,17 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",
                                 "/media/**",
+                                // Signed-URL PDF endpoints — access is gated by a document-specific
+                                // JWT embedded in the URL, not by session auth. The URL filter must
+                                // allow the request through so the controller can validate the token.
                                 "/api/invoices/signed",
+                                "/api/receipts/signed",
+                                "/api/refunds/signed",
+                                "/api/quotations/signed",
+                                "/api/sales-orders/signed",
+                                "/api/deliveries/challan/signed",
+                                "/api/v1/credit-notes/signed",
+                                "/api/v1/debit-notes/signed",
                                 "/ws/**",
                                 "/api/notifications/public/**",
                                 "/api/newsletter/subscribe",

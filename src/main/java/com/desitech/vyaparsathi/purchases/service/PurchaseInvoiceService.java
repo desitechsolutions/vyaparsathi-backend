@@ -11,10 +11,14 @@ import com.desitech.vyaparsathi.purchases.dto.PurchaseInvoiceItemDto;
 import com.desitech.vyaparsathi.purchases.entity.PurchaseInvoice;
 import com.desitech.vyaparsathi.purchases.entity.PurchaseInvoiceItem;
 import com.desitech.vyaparsathi.purchases.repository.PurchaseInvoiceRepository;
+import com.desitech.vyaparsathi.receiving.entity.Receiving;
+import com.desitech.vyaparsathi.receiving.repository.ReceivingRepository;
 import com.desitech.vyaparsathi.supplier.dto.SupplierDto;
 import com.desitech.vyaparsathi.supplier.entity.Supplier;
 import com.desitech.vyaparsathi.supplier.repository.SupplierRepository;
 import com.desitech.vyaparsathi.supplier.service.SupplierLedgerService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -30,22 +34,27 @@ import java.util.List;
 @Service
 public class PurchaseInvoiceService {
 
+    private static final Logger logger = LoggerFactory.getLogger(PurchaseInvoiceService.class);
+
     private final PurchaseInvoiceRepository purchaseRepo;
     private final SupplierRepository supplierRepo;
     private final ItemVariantRepository variantRepo;
     private final StockService stockService;
     private final SupplierLedgerService ledgerService;
+    private final ReceivingRepository receivingRepo;
 
     public PurchaseInvoiceService(PurchaseInvoiceRepository purchaseRepo,
                                   SupplierRepository supplierRepo,
                                   ItemVariantRepository variantRepo,
                                   StockService stockService,
-                                  SupplierLedgerService ledgerService) {
+                                  SupplierLedgerService ledgerService,
+                                  ReceivingRepository receivingRepo) {
         this.purchaseRepo = purchaseRepo;
         this.supplierRepo = supplierRepo;
         this.variantRepo = variantRepo;
         this.stockService = stockService;
         this.ledgerService = ledgerService;
+        this.receivingRepo = receivingRepo;
     }
 
     @Transactional
@@ -61,6 +70,17 @@ public class PurchaseInvoiceService {
         invoice.setPurchaseDate(createDto.getPurchaseDate() != null ? createDto.getPurchaseDate() : LocalDate.now());
         invoice.setPaymentTerms(createDto.getPaymentTerms() != null ? createDto.getPaymentTerms() : "NET_30");
         invoice.setNotes(createDto.getNotes());
+
+        // 1.8 fix: link to the GRN this invoice is against (if any). When linked,
+        // the GRN owns the stock increment — this service must NOT add stock again.
+        Receiving linkedReceiving = null;
+        if (createDto.getReceivingId() != null) {
+            linkedReceiving = receivingRepo.findById(createDto.getReceivingId())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Receiving (GRN) not found: " + createDto.getReceivingId()));
+            invoice.setReceiving(linkedReceiving);
+        }
+        final boolean stockAlreadyAddedByGrn = linkedReceiving != null;
 
         // Generate unique purchase invoice sequence
         String purchaseNo = "PUR/" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyMM")) + "/" + System.currentTimeMillis() % 100000;
@@ -129,14 +149,22 @@ public class PurchaseInvoiceService {
             totalIgst = totalIgst.add(igst);
             grandTotal = grandTotal.add(lineTotal);
 
-            // Increment inventory stock
-            com.desitech.vyaparsathi.inventory.dto.StockAddDto stockAddDto = new com.desitech.vyaparsathi.inventory.dto.StockAddDto();
-            stockAddDto.setItemVariantId(variant.getId());
-            stockAddDto.setQuantity(qty);
-            stockAddDto.setCostPerUnit(cost);
-            stockAddDto.setBatch(itemReq.getBatchNumber());
-            stockAddDto.setExpiryDate(itemReq.getExpiryDate());
-            stockService.addStockFromDto(stockAddDto);
+            // 1.8 fix: only add stock when this invoice was NOT created against a GRN.
+            // A linked GRN has already added inventory via ReceivingService; adding here
+            // would double-count. Direct-invoice flows (no GRN) still own the stock-in.
+            if (!stockAlreadyAddedByGrn) {
+                com.desitech.vyaparsathi.inventory.dto.StockAddDto stockAddDto = new com.desitech.vyaparsathi.inventory.dto.StockAddDto();
+                stockAddDto.setItemVariantId(variant.getId());
+                stockAddDto.setQuantity(qty);
+                stockAddDto.setCostPerUnit(cost);
+                stockAddDto.setBatch(itemReq.getBatchNumber());
+                stockAddDto.setExpiryDate(itemReq.getExpiryDate());
+                stockService.addStockFromDto(stockAddDto);
+            }
+        }
+        if (stockAlreadyAddedByGrn) {
+            logger.info("PurchaseInvoice linked to GRN receivingId={} — skipped stock-add (GRN owns it)",
+                    linkedReceiving.getId());
         }
 
         invoice.setItems(itemsList);
@@ -216,6 +244,7 @@ public class PurchaseInvoiceService {
         dto.setPaymentStatus(entity.getPaymentStatus());
         dto.setStatus(entity.getStatus());
         dto.setNotes(entity.getNotes());
+        dto.setReceivingId(entity.getReceiving() != null ? entity.getReceiving().getId() : null);
 
         if (entity.getItems() != null) {
             dto.setItems(entity.getItems().stream().map(it -> {

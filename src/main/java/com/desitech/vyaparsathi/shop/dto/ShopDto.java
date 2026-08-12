@@ -17,6 +17,9 @@ public class ShopDto {
     @NotBlank(message = "State is required")
     private String state;
 
+    /** 2-digit GSTN state code (e.g. "27" for Maharashtra). Optional on write during transition; required for accurate GST split downstream. */
+    private String stateCode;
+
     private String gstin;
 
     @NotBlank(message = "Shop code is required")

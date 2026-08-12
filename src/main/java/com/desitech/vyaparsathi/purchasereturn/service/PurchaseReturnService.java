@@ -1,5 +1,7 @@
 package com.desitech.vyaparsathi.purchasereturn.service;
 
+import com.desitech.vyaparsathi.accounting.entity.DebitNote;
+import com.desitech.vyaparsathi.accounting.service.DebitNoteService;
 import com.desitech.vyaparsathi.common.annotations.LogAudit;
 import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.common.exception.ResourceNotFoundException;
@@ -78,6 +80,10 @@ public class PurchaseReturnService {
     // Issue 4 Fix: Inject SupplierLedgerService to record debit notes on approval
     @Autowired
     private SupplierLedgerService supplierLedgerService;
+
+    // 1.6: Auto-issue a formal DebitNote document (with number, items, status) on approve
+    @Autowired
+    private DebitNoteService debitNoteService;
 
     @Transactional
     public PurchaseReturnDto createPurchaseReturn(CreatePurchaseReturnDto dto) {
@@ -177,20 +183,13 @@ public class PurchaseReturnService {
         purchaseReturn.setStatus(PurchaseReturnStatus.APPROVED);
         PurchaseReturn updated = purchaseReturnRepository.save(purchaseReturn);
 
-        // Issue 4 Fix: Record a Debit Note in Supplier Ledger to reduce payable balance
-        // This ensures Supplier Payment screen shows net payable = originalAmount - returns - cashPaid
-        Supplier supplier = updated.getSupplier();
-        supplierLedgerService.recordEntry(
-                supplier,
-                "DEBIT_NOTE",
-                updated.getReturnNo(),
-                updated.getTotalAmount(),  // debitAmount: reduces supplier payable
-                java.math.BigDecimal.ZERO, // no creditAmount for a return/debit note
-                "Purchase Return Debit Note: " + updated.getReturnNo()
-        );
-
-        logger.info("Approved Purchase Return {} (ID: {}) - Stock deducted, Debit Note recorded",
-                updated.getReturnNo(), updated.getId());
+        // 1.6: Issue a formal DebitNote document (own number, per-line detail,
+        // status lifecycle) — DebitNoteService also records the supplier-ledger
+        // debit internally, so we do NOT call supplierLedgerService.recordEntry
+        // directly here (that would double-post the payable reduction).
+        DebitNote debitNote = debitNoteService.createFromPurchaseReturn(updated);
+        logger.info("Approved Purchase Return {} (ID: {}) — Stock deducted, DebitNote {} issued",
+                updated.getReturnNo(), updated.getId(), debitNote.getDebitNoteNo());
 
         return purchaseReturnMapper.toDto(updated);
     }

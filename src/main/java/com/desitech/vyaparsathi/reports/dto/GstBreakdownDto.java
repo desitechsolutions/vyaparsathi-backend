@@ -10,4 +10,6 @@ public class GstBreakdownDto {
     private BigDecimal cgst;
     private BigDecimal sgst;
     private BigDecimal igst;
+    /** UTGST — non-zero only for intra-UT sales made by shops located in a Union Territory. */
+    private BigDecimal utgst;
 }

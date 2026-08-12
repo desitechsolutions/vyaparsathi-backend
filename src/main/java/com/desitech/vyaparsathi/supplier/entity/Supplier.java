@@ -29,6 +29,14 @@ public class Supplier extends ShopAwareEntity {
     @Column
     private String gstin;
 
+    /**
+     * 2-digit GSTN state code (01–38, 97). Drives intra/inter-state tax
+     * decisions on inward invoices. May also be derived from the first
+     * two characters of gstin when the supplier is GST-registered.
+     */
+    @Column(name = "state_code", length = 2)
+    private String stateCode;
+
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
 
@@ -50,4 +58,7 @@ public class Supplier extends ShopAwareEntity {
     public void setGstin(String gstin) { this.gstin = gstin; }
 
     public String getGstNumber() { return gstin; }
+
+    public String getStateCode() { return stateCode; }
+    public void setStateCode(String stateCode) { this.stateCode = stateCode; }
 }

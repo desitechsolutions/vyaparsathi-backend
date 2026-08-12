@@ -351,12 +351,18 @@ public class ReportService {
                             .filter(Objects::nonNull)
                             .reduce(ZERO, BigDecimal::add);
 
+                    BigDecimal utgst = items.stream()
+                            .map(SaleItem::getUtgstAmt)
+                            .filter(Objects::nonNull)
+                            .reduce(ZERO, BigDecimal::add);
+
                     GstBreakdownDto dto = new GstBreakdownDto();
                     dto.setGstRate(gstRate);
                     dto.setTaxableValue(taxable);
                     dto.setCgst(cgst);
                     dto.setSgst(sgst);
                     dto.setIgst(igst);
+                    dto.setUtgst(utgst);
                     return dto;
                 })
                 .collect(Collectors.toList());
@@ -369,6 +375,7 @@ public class ReportService {
 
         for (Sale sale : sales) {
             for (SaleItem item : sale.getSaleItems()) {
+                if (item.getItemVariant() == null) continue; // skip custom/service lines — no catalog identity
                 Long itemId = item.getItemVariant().getId();
                 ItemsSoldDto dto = itemMap.getOrDefault(itemId, new ItemsSoldDto(
                         itemId,
@@ -397,6 +404,7 @@ public class ReportService {
 
         for (Sale sale : sales) {
             for (SaleItem item : sale.getSaleItems()) {
+                if (item.getItemVariant() == null) continue; // skip custom/service lines — no category
                 Category category = item.getItemVariant().getItem().getCategory();
                 if (category == null) continue;
                 CategorySalesDto dto = categoryMap.getOrDefault(category.getName(), new CategorySalesDto(
@@ -538,16 +546,26 @@ public class ReportService {
 
     private String generateHsnSummaryCsv(LocalDate from, LocalDate to) {
         List<Sale> sales = getSalesByDateRange(from, to);
+        // Group by HSN — catalog lines use variant.hsn; custom lines use their captured customHsnSac.
         Map<String, List<SaleItem>> hsnMap = sales.stream()
                 .flatMap(s -> s.getSaleItems().stream())
-                .collect(Collectors.groupingBy(si -> si.getItemVariant().getHsn() != null ? si.getItemVariant().getHsn() : "NA"));
+                .collect(Collectors.groupingBy(si -> {
+                    if (si.getItemVariant() != null && si.getItemVariant().getHsn() != null) {
+                        return si.getItemVariant().getHsn();
+                    }
+                    return si.getCustomHsnSac() != null ? si.getCustomHsnSac() : "NA";
+                }));
 
         StringBuilder csv = new StringBuilder("HSN,Description,UQC,Qty,Taxable,IGST,CGST,SGST\n");
         hsnMap.forEach((hsn, items) -> {
             BigDecimal qty = items.stream().map(SaleItem::getQty).reduce(ZERO, BigDecimal::add);
             BigDecimal tx = items.stream().map(si -> si.getTaxableValue() != null ? si.getTaxableValue() : ZERO).reduce(ZERO, BigDecimal::add);
+            SaleItem first = items.get(0);
+            String description = first.getItemVariant() != null
+                    ? first.getItemVariant().getItem().getName()
+                    : (first.getCustomItemName() != null ? first.getCustomItemName() : "Custom");
             csv.append(String.format("%s,\"%s\",NOS,%s,%s,%s,%s,%s\n",
-                    hsn, items.get(0).getItemVariant().getItem().getName(), qty, tx,
+                    hsn, description, qty, tx,
                     items.stream().map(si -> si.getIgstAmt() != null ? si.getIgstAmt() : ZERO).reduce(ZERO, BigDecimal::add),
                     items.stream().map(si -> si.getCgstAmt() != null ? si.getCgstAmt() : ZERO).reduce(ZERO, BigDecimal::add),
                     items.stream().map(si -> si.getSgstAmt() != null ? si.getSgstAmt() : ZERO).reduce(ZERO, BigDecimal::add)));

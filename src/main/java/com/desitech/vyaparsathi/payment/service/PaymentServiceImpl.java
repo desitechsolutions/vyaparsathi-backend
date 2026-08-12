@@ -16,6 +16,12 @@ import com.desitech.vyaparsathi.payment.repository.PaymentRepository;
 import com.desitech.vyaparsathi.payment.mapper.PaymentMapper;
 import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrder;
 import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderRepository;
+import com.desitech.vyaparsathi.receipt.entity.PaymentReceipt;
+import com.desitech.vyaparsathi.receipt.service.PaymentReceiptService;
+import com.desitech.vyaparsathi.refund.dto.RefundDto;
+import com.desitech.vyaparsathi.refund.dto.RefundRequest;
+import com.desitech.vyaparsathi.refund.entity.Refund;
+import com.desitech.vyaparsathi.refund.service.RefundService;
 import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -64,6 +70,12 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Autowired
     private CustomerLedgerService ledgerService;
+
+    @Autowired
+    private PaymentReceiptService paymentReceiptService;
+
+    @Autowired
+    private RefundService refundService;
 
     // Methods whose payments are instantly settled
     private static final Set<PaymentMethod> INSTANTLY_SETTLED_METHODS = Set.of(
@@ -131,7 +143,23 @@ public class PaymentServiceImpl implements PaymentService {
             updateSourcePaymentStatus(payment.getSourceType(), payment.getSourceId());
         }
 
+        // 6. Issue printable receipt (idempotent — returns existing if already issued)
+        issueReceiptSafely(saved);
+
         return paymentMapper.toDto(saved);
+    }
+
+    /**
+     * Best-effort receipt issuance. A receipt failure must never block payment
+     * completion — the payment is already persisted and ledger entries committed.
+     */
+    private void issueReceiptSafely(Payment saved) {
+        try {
+            paymentReceiptService.createFromPayment(saved);
+        } catch (Exception e) {
+            logger.error("Failed to issue receipt for payment id={} — payment succeeded, receipt can be regenerated later",
+                    saved.getId(), e);
+        }
     }
 
     /**
@@ -361,6 +389,8 @@ public class PaymentServiceImpl implements PaymentService {
         // After saving, update parent source payment status (sale/purchase/etc.)
         updateSourcePaymentStatus(payment.getSourceType(), payment.getSourceId());
 
+        issueReceiptSafely(saved);
+
         return paymentMapper.toDto(saved);
     }
 
@@ -524,29 +554,24 @@ public class PaymentServiceImpl implements PaymentService {
         return totalApplied;
     }
 
-/*    @Transactional
-    public void processCashRefund(Long customerId, BigDecimal amount, String reason) {
-        // 1. Verify they have enough 'Advance' to refund
-        BigDecimal currentAdvance = customerService.getCustomerAdvanceBalance(customerId);
-        if (amount.compareTo(currentAdvance) > 0) {
-            throw new BusinessValidationException("Refund amount exceeds available customer credit.");
+    @Override
+    @Transactional
+    @LogAudit(action = "REFUND_PAYMENT", entity = "PAYMENT")
+    public RefundDto refundPayment(Long originalPaymentId, RefundRequest request) {
+        Payment original = paymentRepository.findById(originalPaymentId)
+                .orElseThrow(() -> new EntityNotFoundException("Payment not found: " + originalPaymentId));
+
+        // Delegates validation (amount ≤ refundable balance), Refund creation,
+        // number allocation, and ledger reversal to RefundService — everything
+        // happens inside this transaction so refund + ledger commit atomically.
+        Refund refund = refundService.processRefund(original, request);
+
+        // If the refunded payment was tied to a Sale, its payment status may
+        // now be different (e.g. was PAID → back to PARTIALLY_PAID).
+        if (original.getSourceType() != null && original.getSourceId() != null) {
+            updateSourcePaymentStatus(original.getSourceType(), original.getSourceId());
         }
 
-        // 2. Create a Negative Payment (The Payout)
-        Payment refundPayout = new Payment();
-        refundPayout.setCustomerId(customerId);
-        refundPayout.setAmount(amount.negate()); // IMPORTANT: Negative amount reduces the balance
-        refundPayout.setPaymentMethod(PaymentMethod.CASH); // Or however you paid them back
-        refundPayout.setPaymentDate(LocalDateTime.now());
-        refundPayout.setReference("CASH_REFUND: " + reason);
-        refundPayout.setSourceType(PaymentSourceType.ADVANCE); // Mark as advance withdrawal
-        paymentRepository.save(refundPayout);
-
-        // 3. Record in Ledger
-        CustomerLedgerDto ledgerDto = new CustomerLedgerDto();
-        ledgerDto.setAmount(amount);
-        ledgerDto.setType(CustomerLedgerType.CREDIT); // Or a new type 'REFUND_PAYOUT'
-        ledgerDto.setDescription("Cash Refund Paid to Customer: " + reason);
-        ledgerService.addEntry(customerId, ledgerDto);
-    }*/
+        return refundService.toDto(refund);
+    }
 }

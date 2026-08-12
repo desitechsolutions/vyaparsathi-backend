@@ -1,23 +1,37 @@
 package com.desitech.vyaparsathi.einvoice.service;
 
+import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.einvoice.dto.EInvoiceResponseDto;
+import com.desitech.vyaparsathi.einvoice.provider.EInvoiceProvider;
+import com.desitech.vyaparsathi.einvoice.provider.EInvoiceProviderException;
 import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.HexFormat;
-import java.util.UUID;
 
+/**
+ * Orchestrator for the e-invoicing flow.
+ *
+ * Owns persistence + idempotency + status transitions. The actual IRN
+ * acquisition (network call to NIC or a local mock hash) lives behind
+ * {@link EInvoiceProvider} so this class stays provider-agnostic.
+ */
 @Service
 public class EInvoiceService {
 
-    private final SaleRepository saleRepo;
+    private static final Logger log = LoggerFactory.getLogger(EInvoiceService.class);
 
-    public EInvoiceService(SaleRepository saleRepo) {
+    private final SaleRepository saleRepo;
+    private final EInvoiceProvider provider;
+
+    public EInvoiceService(SaleRepository saleRepo, EInvoiceProvider provider) {
         this.saleRepo = saleRepo;
+        this.provider = provider;
     }
 
     @Transactional
@@ -25,69 +39,98 @@ public class EInvoiceService {
         Sale sale = saleRepo.findById(saleId)
                 .orElseThrow(() -> new IllegalArgumentException("Sale not found with id: " + saleId));
 
+        // Idempotency guard — the front-end can double-click "Generate", the
+        // scheduler can retry, etc. If we already have an active IRN, echo it
+        // instead of hitting NIC again (which would return a duplicate error
+        // anyway, and duplicate errors are billed too).
         if ("GENERATED".equalsIgnoreCase(sale.getEinvoiceStatus())) {
-            EInvoiceResponseDto response = new EInvoiceResponseDto();
-            response.setSaleId(sale.getId());
-            response.setInvoiceNo(sale.getInvoiceNo());
-            response.setIrn(sale.getIrn());
-            response.setAckNo(sale.getAckNo());
-            response.setAckDate(sale.getAckDate());
-            response.setQrCodePath(sale.getQrCodePath());
-            response.setEinvoiceStatus(sale.getEinvoiceStatus());
-            return response;
+            return toResponse(sale, "GENERATED");
         }
 
-        // Generate 64-character SHA-256 IRN Hash (Seller GSTIN + Fin Year + Doc Type + Doc Number)
-        Long shopId = sale.getShop() != null ? sale.getShop().getId() : 1L;
-        String rawKey = shopId + ":" + sale.getInvoiceNo() + ":" + System.currentTimeMillis();
-        String irn = hashSha256(rawKey);
-
-        String ackNo = "11" + (System.currentTimeMillis() % 10000000000L);
-        LocalDateTime ackDate = LocalDateTime.now();
-        String qrCode = "https://einvoice.gst.gov.in/qr?irn=" + irn;
-
-        sale.setIrn(irn);
-        sale.setAckNo(ackNo);
-        sale.setAckDate(ackDate);
-        sale.setQrCodePath(qrCode);
-        sale.setEinvoiceStatus("GENERATED");
-
-        saleRepo.save(sale);
-
-        EInvoiceResponseDto dto = new EInvoiceResponseDto();
-        dto.setSaleId(sale.getId());
-        dto.setInvoiceNo(sale.getInvoiceNo());
-        dto.setIrn(irn);
-        dto.setAckNo(ackNo);
-        dto.setAckDate(ackDate);
-        dto.setQrCodePath(qrCode);
-        dto.setEinvoiceStatus("GENERATED");
-        return dto;
+        try {
+            EInvoiceProvider.GenerateResult result = provider.generateIrn(sale);
+            sale.setIrn(result.irn);
+            sale.setAckNo(result.ackNo);
+            sale.setAckDate(result.ackDate);
+            // Real NIC returns a signed-QR JWT. If the provider gave us a plain
+            // URL (mock) we store it; otherwise the JWT — the PDF renderer
+            // knows to encode the JWT into a QR image.
+            String qrPath = result.signedQrCode != null && !result.signedQrCode.isBlank()
+                    ? result.signedQrCode
+                    : result.qrCodePath;
+            sale.setQrCodePath(qrPath);
+            sale.setEinvoiceStatus("GENERATED");
+            saleRepo.save(sale);
+            log.info("E-invoice generated via {} for sale {} (invoice {})",
+                    provider.getProviderName(), sale.getId(), sale.getInvoiceNo());
+            return toResponse(sale, "GENERATED");
+        } catch (EInvoiceProviderException e) {
+            log.error("E-invoice generation failed for sale {} via {}: code={} msg={}",
+                    saleId, provider.getProviderName(), e.getErrorCode(), e.getMessage());
+            throw e;
+        }
     }
+
+    /**
+     * NIC's e-invoice cancellation window: 24 hours from IRN generation for a
+     * production IRP. We enforce 24 h here (per the current GST portal rule).
+     * Kept as a constant so it can be nudged if NIC changes the policy without
+     * hunting through the code.
+     */
+    private static final Duration IRN_CANCEL_WINDOW = Duration.ofHours(24);
 
     @Transactional
     public EInvoiceResponseDto cancelIrn(Long saleId, String reason) {
         Sale sale = saleRepo.findById(saleId)
                 .orElseThrow(() -> new IllegalArgumentException("Sale not found with id: " + saleId));
 
-        sale.setEinvoiceStatus("CANCELLED");
-        saleRepo.save(sale);
+        if (!"GENERATED".equalsIgnoreCase(sale.getEinvoiceStatus())) {
+            // Idempotent cancel — nothing to do; return current status.
+            return toResponse(sale, sale.getEinvoiceStatus());
+        }
 
+        // Enforce NIC's cancellation window. Once the window has passed, the caller
+        // must issue a credit note against the invoice instead of cancelling the IRN.
+        // We compare against ackDate (when NIC accepted the IRN) — that's the clock
+        // NIC starts from. Fall back to Sale.date if ackDate is missing (defensive).
+        LocalDateTime issuedAt = sale.getAckDate() != null ? sale.getAckDate() : sale.getDate();
+        if (issuedAt != null) {
+            Duration age = Duration.between(issuedAt, LocalDateTime.now());
+            if (age.compareTo(IRN_CANCEL_WINDOW) > 0) {
+                long hoursLate = age.minus(IRN_CANCEL_WINDOW).toHours();
+                log.warn("Rejecting IRN cancellation for sale {} — window expired {} h ago (issued {}, cutoff {}h)",
+                        saleId, hoursLate, issuedAt, IRN_CANCEL_WINDOW.toHours());
+                throw new BusinessValidationException(
+                        "IRN cancellation window (" + IRN_CANCEL_WINDOW.toHours() + " hours from generation) has expired. " +
+                                "Issue a credit note instead.");
+            }
+        }
+
+        try {
+            // Reason 1: Duplicate, 2: Data Entry Error, 3: Order Cancelled, 4: Other
+            String cnlRsn = "3";
+            provider.cancelIrn(sale, cnlRsn);
+            sale.setEinvoiceStatus("CANCELLED");
+            saleRepo.save(sale);
+            log.info("E-invoice cancelled via {} for sale {} (irn {})",
+                    provider.getProviderName(), sale.getId(), sale.getIrn());
+            return toResponse(sale, "CANCELLED");
+        } catch (EInvoiceProviderException e) {
+            log.error("E-invoice cancellation failed for sale {} via {}: code={} msg={}",
+                    saleId, provider.getProviderName(), e.getErrorCode(), e.getMessage());
+            throw e;
+        }
+    }
+
+    private EInvoiceResponseDto toResponse(Sale sale, String status) {
         EInvoiceResponseDto dto = new EInvoiceResponseDto();
         dto.setSaleId(sale.getId());
         dto.setInvoiceNo(sale.getInvoiceNo());
         dto.setIrn(sale.getIrn());
-        dto.setEinvoiceStatus("CANCELLED");
+        dto.setAckNo(sale.getAckNo());
+        dto.setAckDate(sale.getAckDate());
+        dto.setQrCodePath(sale.getQrCodePath());
+        dto.setEinvoiceStatus(status);
         return dto;
-    }
-
-    private String hashSha256(String input) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(input.getBytes());
-            return HexFormat.of().formatHex(hash);
-        } catch (Exception e) {
-            return UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", "");
-        }
     }
 }

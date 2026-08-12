@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.delivery.dto;
 
+import com.desitech.vyaparsathi.delivery.enums.DeliveryHistoryEventType;
 import com.desitech.vyaparsathi.delivery.enums.DeliveryStatus;
 import lombok.Data;
 
@@ -10,6 +11,8 @@ public class DeliveryStatusHistoryDTO {
     private Long id;
     private Long deliveryId;
     private DeliveryStatus status;
+    private DeliveryHistoryEventType eventType;
+    private String note;
     private LocalDateTime changedAt;
     private String changedBy;
 
@@ -21,6 +24,12 @@ public class DeliveryStatusHistoryDTO {
 
     public DeliveryStatus getStatus() { return status; }
     public void setStatus(DeliveryStatus status) { this.status = status; }
+
+    public DeliveryHistoryEventType getEventType() { return eventType; }
+    public void setEventType(DeliveryHistoryEventType eventType) { this.eventType = eventType; }
+
+    public String getNote() { return note; }
+    public void setNote(String note) { this.note = note; }
 
     public LocalDateTime getChangedAt() { return changedAt; }
     public void setChangedAt(LocalDateTime changedAt) { this.changedAt = changedAt; }

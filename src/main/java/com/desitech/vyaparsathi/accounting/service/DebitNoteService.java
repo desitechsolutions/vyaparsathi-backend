@@ -3,9 +3,13 @@ package com.desitech.vyaparsathi.accounting.service;
 import com.desitech.vyaparsathi.accounting.dto.DebitNoteCreateDto;
 import com.desitech.vyaparsathi.accounting.dto.DebitNoteDto;
 import com.desitech.vyaparsathi.accounting.entity.DebitNote;
+import com.desitech.vyaparsathi.accounting.entity.DebitNoteItem;
+import com.desitech.vyaparsathi.accounting.enums.DebitNoteStatus;
 import com.desitech.vyaparsathi.accounting.repository.DebitNoteRepository;
 import com.desitech.vyaparsathi.common.annotations.LogAudit;
 import com.desitech.vyaparsathi.common.util.TenantUtils;
+import com.desitech.vyaparsathi.purchasereturn.entity.PurchaseReturn;
+import com.desitech.vyaparsathi.purchasereturn.entity.PurchaseReturnItem;
 import com.desitech.vyaparsathi.purchases.entity.PurchaseInvoice;
 import com.desitech.vyaparsathi.purchases.repository.PurchaseInvoiceRepository;
 import com.desitech.vyaparsathi.supplier.dto.SupplierDto;
@@ -19,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
+import java.util.Objects;
 
 @Service
 public class DebitNoteService {
@@ -28,15 +32,18 @@ public class DebitNoteService {
     private final PurchaseInvoiceRepository purchaseRepo;
     private final SupplierRepository supplierRepo;
     private final SupplierLedgerService ledgerService;
+    private final DebitNoteNumberService debitNoteNumberService;
 
     public DebitNoteService(DebitNoteRepository debitRepo,
                             PurchaseInvoiceRepository purchaseRepo,
                             SupplierRepository supplierRepo,
-                            SupplierLedgerService ledgerService) {
+                            SupplierLedgerService ledgerService,
+                            DebitNoteNumberService debitNoteNumberService) {
         this.debitRepo = debitRepo;
         this.purchaseRepo = purchaseRepo;
         this.supplierRepo = supplierRepo;
         this.ledgerService = ledgerService;
+        this.debitNoteNumberService = debitNoteNumberService;
     }
 
     @Transactional
@@ -61,10 +68,11 @@ public class DebitNoteService {
         }
 
         DebitNote note = new DebitNote();
-        note.setDebitNoteNo("DN/" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyMM")) + "/" + (System.currentTimeMillis() % 100000));
+        LocalDate noteDate = createDto.getDebitNoteDate() != null ? createDto.getDebitNoteDate() : LocalDate.now();
+        note.setDebitNoteNo(debitNoteNumberService.nextDebitNoteNumber(shopId, noteDate));
         note.setPurchaseInvoice(purchase);
         note.setSupplier(supplier);
-        note.setDebitNoteDate(createDto.getDebitNoteDate() != null ? createDto.getDebitNoteDate() : LocalDate.now());
+        note.setDebitNoteDate(noteDate);
         note.setReason(createDto.getReason());
 
         BigDecimal taxable = createDto.getTaxableAmount();
@@ -79,7 +87,7 @@ public class DebitNoteService {
         note.setIgstAmount(igst);
         note.setTotalAmount(total);
         note.setNotes(createDto.getNotes());
-        note.setStatus("ISSUED");
+        note.setStatus(DebitNoteStatus.ISSUED);
 
         DebitNote saved = debitRepo.save(note);
 
@@ -94,6 +102,84 @@ public class DebitNoteService {
     public Page<DebitNoteDto> getAllDebitNotes(Pageable pageable) {
         Long shopId = TenantUtils.getCurrentShopId();
         return debitRepo.findAllByShopId(shopId, pageable).map(this::toDto);
+    }
+
+    /**
+     * Atomically creates a persisted {@link DebitNote} for a just-approved
+     * purchase return, with one {@link DebitNoteItem} per returned line.
+     * Also records the ledger entry that reduces the supplier's payable.
+     *
+     * <p>Note: {@link PurchaseReturnItem} carries only pre-tax cost — no GST
+     * breakdown — so the item's CGST/SGST/IGST default to zero and
+     * {@code taxableValue = totalCost}. A future migration will add GST
+     * columns to purchase-side lines.
+     */
+    @Transactional
+    public DebitNote createFromPurchaseReturn(PurchaseReturn purchaseReturn) {
+        Objects.requireNonNull(purchaseReturn, "purchaseReturn");
+        Supplier supplier = purchaseReturn.getSupplier();
+        if (supplier == null) {
+            throw new IllegalArgumentException("PurchaseReturn " + purchaseReturn.getId() + " has no supplier — cannot issue debit note");
+        }
+
+        Long shopId = purchaseReturn.getShop() != null ? purchaseReturn.getShop().getId() : TenantUtils.getCurrentShopId();
+
+        DebitNote note = new DebitNote();
+        note.setShop(purchaseReturn.getShop());
+        note.setSupplier(supplier);
+        note.setPurchaseReturn(purchaseReturn);
+        note.setDebitNoteDate(LocalDate.now());
+        note.setDebitNoteNo(debitNoteNumberService.nextDebitNoteNumber(shopId, note.getDebitNoteDate()));
+        note.setReason("Purchase Return - " + purchaseReturn.getReturnNo());
+        note.setStatus(DebitNoteStatus.ISSUED);
+
+        BigDecimal taxableTotal = BigDecimal.ZERO;
+
+        if (purchaseReturn.getItems() != null) {
+            for (PurchaseReturnItem pri : purchaseReturn.getItems()) {
+                BigDecimal qty = pri.getQuantity() != null ? BigDecimal.valueOf(pri.getQuantity()) : BigDecimal.ZERO;
+                BigDecimal unitCost = pri.getUnitCost() != null ? pri.getUnitCost() : BigDecimal.ZERO;
+                BigDecimal lineTotal = pri.getTotalCost() != null ? pri.getTotalCost() : unitCost.multiply(qty);
+
+                DebitNoteItem item = new DebitNoteItem();
+                item.setShop(purchaseReturn.getShop());
+                item.setPurchaseReturnItem(pri);
+                item.setItemName(lineName(pri));
+                item.setHsnSac(lineHsnSac(pri));
+                item.setBatchNumber(pri.getBatchNumber());
+                item.setQty(qty);
+                item.setUnitCost(unitCost);
+                item.setTaxableValue(lineTotal);
+                item.setTotalAmount(lineTotal);
+                note.addItem(item);
+
+                taxableTotal = taxableTotal.add(lineTotal);
+            }
+        }
+
+        note.setTaxableAmount(taxableTotal);
+        note.setTotalAmount(taxableTotal);
+
+        DebitNote saved = debitRepo.save(note);
+
+        // Reduce supplier payable
+        ledgerService.recordEntry(supplier, "DEBIT_NOTE", saved.getDebitNoteNo(),
+                saved.getTotalAmount(), BigDecimal.ZERO,
+                "Debit Note: " + saved.getDebitNoteNo() + " (Return " + purchaseReturn.getReturnNo() + ")");
+
+        return saved;
+    }
+
+    private static String lineName(PurchaseReturnItem pri) {
+        if (pri.getItemVariant() != null && pri.getItemVariant().getItem() != null
+                && pri.getItemVariant().getItem().getName() != null) {
+            return pri.getItemVariant().getItem().getName();
+        }
+        return "Item";
+    }
+
+    private static String lineHsnSac(PurchaseReturnItem pri) {
+        return pri.getItemVariant() != null ? pri.getItemVariant().getHsn() : null;
     }
 
     private DebitNoteDto toDto(DebitNote entity) {
@@ -119,8 +205,9 @@ public class DebitNoteService {
         dto.setSgstAmount(entity.getSgstAmount());
         dto.setIgstAmount(entity.getIgstAmount());
         dto.setTotalAmount(entity.getTotalAmount());
-        dto.setStatus(entity.getStatus());
+        dto.setStatus(entity.getStatus() != null ? entity.getStatus().name() : null);
         dto.setNotes(entity.getNotes());
+        dto.setAppliedAmount(entity.getAppliedAmount());
 
         return dto;
     }

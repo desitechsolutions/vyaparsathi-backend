@@ -1,17 +1,20 @@
 package com.desitech.vyaparsathi.analytics.controller;
 
 import com.desitech.vyaparsathi.analytics.dto.*;
+import com.desitech.vyaparsathi.analytics.model.AnalyticsRange;
 import com.desitech.vyaparsathi.analytics.service.AnalyticsExportService;
 import com.desitech.vyaparsathi.analytics.service.AnalyticsService;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.common.exception.ExportAppException;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +22,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -71,24 +75,40 @@ public class AnalyticsController {
     }
 
     @GetMapping("/item-demand")
-    @Operation(summary = "Get Item Demand Prediction", description = "Forecasts units needed for the next 30 days.")
+    @Operation(summary = "Get Item Demand Prediction",
+            description = "Forecasts units needed based on sales in [from, to]; trend is versus the equally-sized prior window.")
     public ResponseEntity<List<ItemDemandPredictionDto>> getItemDemandPrediction(
-            @RequestParam(required = false) Long itemId
+            @RequestParam(required = false) Long itemId,
+            @Parameter(description = "Range start (inclusive). Defaults to 30 days before today.")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @Parameter(description = "Range end (inclusive). Defaults to today.")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) {
-        logger.debug("Fetching demand prediction for itemId: {}", itemId);
-        return ResponseEntity.ok(analyticsService.predictItemDemand(itemId));
+        AnalyticsRange range = defaultLast30Days(from, to);
+        logger.debug("Fetching demand prediction for itemId={} in {}..{}", itemId, range.getFrom(), range.getTo());
+        return ResponseEntity.ok(analyticsService.predictItemDemand(itemId, range));
     }
 
     @GetMapping("/top-items")
-    @Operation(summary = "Top rising/falling items", description = "Returns top rising and falling items based on sales trends.")
-    public ResponseEntity<List<TopItemDto>> getTopRisingFallingItems() {
-        return ResponseEntity.ok(analyticsService.getTopRisingFallingItems());
+    @Operation(summary = "Top rising/falling items",
+            description = "Returns top rising and falling items comparing [from, to] against the equally-sized prior window.")
+    public ResponseEntity<List<TopItemDto>> getTopRisingFallingItems(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+    ) {
+        return ResponseEntity.ok(analyticsService.getTopRisingFallingItems(defaultLast30Days(from, to)));
     }
+
     @GetMapping("/seasonal-trends")
-    @Operation(summary = "Seasonal trends", description = "Returns seasonal sales trends.")
-    public ResponseEntity<List<SeasonalTrendDto>> getSeasonalTrends() {
-        return ResponseEntity.ok(analyticsService.getSeasonalTrends());
+    @Operation(summary = "Seasonal trends",
+            description = "Returns seasonal sales trends over [from, to]. Defaults to the last 12 months if unspecified.")
+    public ResponseEntity<List<SeasonalTrendDto>> getSeasonalTrends(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+    ) {
+        return ResponseEntity.ok(analyticsService.getSeasonalTrends(defaultLast12Months(from, to)));
     }
+
     @GetMapping("/future-purchase-orders")
     @Operation(summary = "Get Purchase Suggestions", description = "Returns items below threshold with suggested restock quantities.")
     public ResponseEntity<List<PurchaseOrderSuggestionDto>> getFuturePurchaseOrderSuggestions() {
@@ -96,15 +116,21 @@ public class AnalyticsController {
     }
 
     @GetMapping("/churn-prediction")
-    @Operation(summary = "Get Churn Prediction", description = "Identifies customers at risk and the revenue they represent.")
-    public ResponseEntity<List<ChurnPredictionDto>> getChurnPrediction() {
-        return ResponseEntity.ok(analyticsService.predictChurn());
+    @Operation(summary = "Get Churn Prediction",
+            description = "Identifies customers with no purchase in the last N days (default 90).")
+    public ResponseEntity<List<ChurnPredictionDto>> getChurnPrediction(
+            @Parameter(description = "Days of inactivity that mark a customer as at-risk.")
+            @RequestParam(defaultValue = "90") int thresholdDays
+    ) {
+        return ResponseEntity.ok(analyticsService.predictChurn(thresholdDays));
     }
 
     @GetMapping("/revenue-leakage")
     @Operation(summary = "Get Financial Analytics", description = "Aggregates revenue at risk and total investment needed.")
-    public ResponseEntity<Map<String, BigDecimal>> getRevenueLeakage() {
-        List<ChurnPredictionDto> churns = analyticsService.predictChurn();
+    public ResponseEntity<Map<String, BigDecimal>> getRevenueLeakage(
+            @RequestParam(defaultValue = "90") int thresholdDays
+    ) {
+        List<ChurnPredictionDto> churns = analyticsService.predictChurn(thresholdDays);
         List<PurchaseOrderSuggestionDto> purchases = analyticsService.suggestFuturePurchaseOrders();
 
         BigDecimal totalLost = churns.stream()
@@ -122,11 +148,70 @@ public class AnalyticsController {
     }
 
     @GetMapping("/customer-trends")
-    @Operation(summary = "Get Customer Trends", description = "Analyzes buying patterns and frequently bought items.")
+    @Operation(summary = "Get Customer Trends",
+            description = "Analyzes buying patterns and frequently bought items in [from, to].")
     public ResponseEntity<List<CustomerTrendDto>> getCustomerTrends(
-            @RequestParam(required = false) Long customerId
+            @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) {
-        return ResponseEntity.ok(analyticsService.getCustomerTrends(customerId));
+        return ResponseEntity.ok(analyticsService.getCustomerTrends(customerId, defaultLast30Days(from, to)));
+    }
+
+    @GetMapping("/kpis")
+    @Operation(summary = "KPI summary",
+            description = "Total revenue, sale count, average order value and unique customers for [from, to], each paired with the equally-sized prior period.")
+    public ResponseEntity<KpiSummaryDto> getKpis(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+    ) {
+        return ResponseEntity.ok(analyticsService.getKpiSummary(defaultLast30Days(from, to)));
+    }
+
+    @GetMapping("/revenue-timeseries")
+    @Operation(summary = "Revenue time series",
+            description = "Bucketed revenue and sale count. Granularity = DAY (default), WEEK or MONTH. Buckets are dense — empty periods return zeros so the chart has no gaps.")
+    public ResponseEntity<RevenueTimeSeriesDto> getRevenueTimeSeries(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false, defaultValue = "DAY") String granularity
+    ) {
+        AnalyticsRange base = defaultLast30Days(from, to);
+        AnalyticsRange range = AnalyticsRange.of(
+                base.getFrom(), base.getTo(), AnalyticsRange.Granularity.fromString(granularity));
+        return ResponseEntity.ok(analyticsService.getRevenueTimeSeries(range));
+    }
+
+    @GetMapping("/gross-margin")
+    @Operation(summary = "Gross margin",
+            description = "Revenue, COGS and gross-margin percentage over [from, to]. COGS uses the most recent purchase-invoice unit cost per variant.")
+    public ResponseEntity<GrossMarginDto> getGrossMargin(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+    ) {
+        return ResponseEntity.ok(analyticsService.getGrossMargin(defaultLast30Days(from, to)));
+    }
+
+    @GetMapping("/payment-mix")
+    @Operation(summary = "Payment method mix",
+            description = "Share of sale-side payments by method (Cash/UPI/Card/etc.) with amount, transaction count and percentage.")
+    public ResponseEntity<PaymentMixDto> getPaymentMix(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+    ) {
+        return ResponseEntity.ok(analyticsService.getPaymentMix(defaultLast30Days(from, to)));
+    }
+
+    private AnalyticsRange defaultLast30Days(LocalDate from, LocalDate to) {
+        return (from == null && to == null) ? AnalyticsRange.last30Days() : AnalyticsRange.of(from, to);
+    }
+
+    private AnalyticsRange defaultLast12Months(LocalDate from, LocalDate to) {
+        if (from == null && to == null) {
+            LocalDate today = LocalDate.now();
+            return AnalyticsRange.of(today.minusMonths(12), today);
+        }
+        return AnalyticsRange.of(from, to);
     }
 
     /**

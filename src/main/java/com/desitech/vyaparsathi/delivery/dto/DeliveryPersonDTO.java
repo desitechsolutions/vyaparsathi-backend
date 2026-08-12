@@ -4,10 +4,14 @@ import lombok.Data;
 
 @Data
 public class DeliveryPersonDTO {
-    public Long id;
-    public String name;
-    public String phone;
-    public String notes;
+    private Long id;
+    private String name;
+    private String phone;
+    private String notes;
+    private String vehicleNumber;
+    private String licenseNumber;
+    private String employeeId;
+    private Boolean active;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -20,4 +24,16 @@ public class DeliveryPersonDTO {
 
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+
+    public String getVehicleNumber() { return vehicleNumber; }
+    public void setVehicleNumber(String vehicleNumber) { this.vehicleNumber = vehicleNumber; }
+
+    public String getLicenseNumber() { return licenseNumber; }
+    public void setLicenseNumber(String licenseNumber) { this.licenseNumber = licenseNumber; }
+
+    public String getEmployeeId() { return employeeId; }
+    public void setEmployeeId(String employeeId) { this.employeeId = employeeId; }
+
+    public Boolean getActive() { return active; }
+    public void setActive(Boolean active) { this.active = active; }
 }

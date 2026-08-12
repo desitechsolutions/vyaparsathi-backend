@@ -20,8 +20,12 @@ public class DebitNoteDto {
     private BigDecimal sgstAmount;
     private BigDecimal igstAmount;
     private BigDecimal totalAmount;
+    private BigDecimal appliedAmount;
     private String status;
     private String notes;
+
+    private String signedUrl;
+    private Long purchaseReturnId;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -58,6 +62,15 @@ public class DebitNoteDto {
 
     public BigDecimal getTotalAmount() { return totalAmount; }
     public void setTotalAmount(BigDecimal totalAmount) { this.totalAmount = totalAmount; }
+
+    public BigDecimal getAppliedAmount() { return appliedAmount; }
+    public void setAppliedAmount(BigDecimal appliedAmount) { this.appliedAmount = appliedAmount; }
+
+    public String getSignedUrl() { return signedUrl; }
+    public void setSignedUrl(String signedUrl) { this.signedUrl = signedUrl; }
+
+    public Long getPurchaseReturnId() { return purchaseReturnId; }
+    public void setPurchaseReturnId(Long purchaseReturnId) { this.purchaseReturnId = purchaseReturnId; }
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }

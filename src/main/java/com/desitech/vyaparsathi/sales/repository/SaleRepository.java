@@ -73,4 +73,47 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
 
     @Query("SELECT COUNT(s) FROM Sale s WHERE s.shop.id = :shopId AND s.date >= :startDate AND s.status <> com.desitech.vyaparsathi.sales.enums.SaleStatus.DRAFT")
     long countMonthlySalesByShop(@Param("shopId") Long shopId, @Param("startDate") LocalDateTime startDate);
+
+    /**
+     * Fast idempotency lookup — replaces a whole-table scan on POST /api/sales
+     * retry. Auto-scoped by shop via {@code ShopFilterAspect}, so no shopId param.
+     */
+    Optional<Sale> findByIdempotencyKey(String idempotencyKey);
+
+    /**
+     * Has this proforma already been converted to a real invoice? Replaces the
+     * previous full-table {@code findAll().stream().anyMatch(...)} scan.
+     */
+    boolean existsByProformaSourceSale_Id(Long proformaSaleId);
+
+    /**
+     * Paginated + filtered history — all filter params are optional (null = no filter).
+     * Semantics:
+     *   • q          — substring match against invoiceNo OR customer.name (case-insensitive).
+     *   • status     — exact match; when null, exclude only CANCELLED (matches prior default).
+     *   • customerId — exact match on the linked customer.
+     *   • from / to  — inclusive date range on {@code sale.date}.
+     *
+     * Ordering follows the caller's {@link Pageable} sort, defaulting to date DESC via
+     * the controller / service layer.
+     */
+    @EntityGraph(attributePaths = {"saleItems", "customer"}, type = EntityGraph.EntityGraphType.LOAD)
+    @Query("SELECT s FROM Sale s LEFT JOIN s.customer c WHERE s.shop.id = :shopId " +
+            "AND ((:status IS NOT NULL AND s.status = :status) " +
+            "     OR (:status IS NULL AND s.status <> com.desitech.vyaparsathi.sales.enums.SaleStatus.CANCELLED)) " +
+            "AND (:customerId IS NULL OR c.id = :customerId) " +
+            "AND (:startDate IS NULL OR s.date >= :startDate) " +
+            "AND (:endDate IS NULL OR s.date <= :endDate) " +
+            "AND (:q IS NULL " +
+            "     OR LOWER(COALESCE(s.invoiceNo, '')) LIKE LOWER(CONCAT('%', :q, '%')) " +
+            "     OR LOWER(COALESCE(c.name, '')) LIKE LOWER(CONCAT('%', :q, '%')))")
+    Page<Sale> searchHistory(
+            @Param("shopId") Long shopId,
+            @Param("q") String q,
+            @Param("status") SaleStatus status,
+            @Param("customerId") Long customerId,
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate,
+            Pageable pageable
+    );
 }

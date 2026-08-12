@@ -50,4 +50,21 @@ public interface PaymentRepository extends BaseRepository<Payment, Long> {
 
     List<Payment> findBySupplierIdAndShopIdAndPaymentDateBefore(
             Long supplierId, Long shopId, java.time.LocalDateTime date);
+
+    /**
+     * Aggregate payment volume by method for a shop's sale-side payments in a range.
+     * Returns rows of {@code [PaymentMethod, sumAmount, txnCount]}.
+     * Filters to {@link PaymentSourceType#SALE} — supplier/refund payments are excluded.
+     */
+    @Query("SELECT p.paymentMethod, COALESCE(SUM(p.amount), 0), COUNT(p) " +
+            "FROM Payment p " +
+            "WHERE p.shop.id = :shopId " +
+            "AND p.sourceType = com.desitech.vyaparsathi.payment.enums.PaymentSourceType.SALE " +
+            "AND p.paymentDate >= :start AND p.paymentDate <= :end " +
+            "GROUP BY p.paymentMethod")
+    List<Object[]> sumSalePaymentsByMethodForShop(
+            @Param("shopId") Long shopId,
+            @Param("start") java.time.LocalDateTime start,
+            @Param("end") java.time.LocalDateTime end
+    );
 }

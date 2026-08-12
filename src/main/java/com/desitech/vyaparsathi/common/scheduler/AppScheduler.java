@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.common.scheduler;
 
 import com.desitech.vyaparsathi.auth.repository.PasswordResetTokenRepository;
+import com.desitech.vyaparsathi.quotation.service.QuotationService;
 import com.desitech.vyaparsathi.subscriptions.repository.SubscriptionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +22,9 @@ public class AppScheduler {
 
     @Autowired
     private SubscriptionRepository subscriptionRepository;
+
+    @Autowired
+    private QuotationService quotationService;
 
     /**
      * Cleans up security tokens that are no longer valid.
@@ -49,6 +53,27 @@ public class AppScheduler {
 
         if (updatedCount > 0) {
             logger.info("Subscription Job: {} shops moved to EXPIRED status", updatedCount);
+        }
+    }
+
+    /**
+     * Marks quotations past their expiry date as EXPIRED across all shops.
+     * Runs daily at 1:15 AM (staggered from the subscription job to reduce
+     * contention on the DB during the nightly maintenance window).
+     *
+     * <p>The underlying query is a single {@code @Modifying} JPQL update that
+     * runs outside the Hibernate {@code shopFilter} (no {@code TenantContext}
+     * is set on scheduler threads), so it correctly sweeps every shop.
+     */
+    @Scheduled(cron = "0 15 1 * * ?")
+    public void processQuotationExpirations() {
+        try {
+            int updated = quotationService.expireStaleQuotations();
+            if (updated > 0) {
+                logger.info("Quotation Expiry Job: {} quotations moved to EXPIRED status", updated);
+            }
+        } catch (Exception e) {
+            logger.error("Quotation expiry job failed", e);
         }
     }
 }

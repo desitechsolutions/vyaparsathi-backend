@@ -47,9 +47,17 @@ public class SaleController {
     private JwtUtil jwtUtil;
 
     @PostMapping
-    public ResponseEntity<SaleCreateResponse> create(@Valid @RequestBody SaleDto dto) {
+    public ResponseEntity<SaleCreateResponse> create(
+            @Valid @RequestBody SaleDto dto,
+            @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        // Prefer HTTP header over body value — but honour whichever is provided.
+        // Duplicate POSTs with the same key return the original sale via the
+        // service-level guard (see SaleService.createSale).
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            dto.setIdempotencyKey(idempotencyKey);
+        }
         Long customerId = dto.getCustomer() != null ? dto.getCustomer().getId() : null;
-        logger.info("Creating sale for customerId={}", customerId);
+        logger.info("Creating sale for customerId={} idem={}", customerId, dto.getIdempotencyKey());
         SaleDto sale = service.createSale(dto);
         logger.info("Created sale for customerId={}", customerId);
         SaleCreateResponse response = new SaleCreateResponse(
@@ -63,7 +71,10 @@ public class SaleController {
 
     @PostMapping("/drafts")
     public ResponseEntity<SaleCreateResponse> saveDraft(@Valid @RequestBody SaleDto dto) {
-        logger.info("Saving draft for customerId={}, existingId={}", dto.getCustomer().getId(), dto.getId());
+        // Walk-in / not-yet-selected customer is a valid POS case (esp. for "Hold" —
+        // cashier parks the cart, then looks up the customer). Null-safe the log.
+        Long customerId = (dto.getCustomer() != null) ? dto.getCustomer().getId() : null;
+        logger.info("Saving draft for customerId={}, existingId={}", customerId, dto.getId());
         SaleDto draft = service.saveOrUpdateDraft(dto);
         return ResponseEntity.ok(new SaleCreateResponse(draft.getId(), draft.getInvoiceNo(), null));
     }
@@ -133,11 +144,25 @@ public class SaleController {
     @GetMapping("/history")
     public ResponseEntity<Page<SaleDueDto>> getSalesHistory(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "50") int size) {
+            @RequestParam(defaultValue = "50") int size,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) com.desitech.vyaparsathi.sales.enums.SaleStatus status,
+            @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
+            java.time.LocalDate from,
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
+            java.time.LocalDate to
+    ) {
         try {
-            Pageable pageable = PageRequest.of(page, size);
-            var result = service.getSalesHistory(pageable);
-            logger.info("Fetched sales history page={}, size={}, total={}", page, size, result.getTotalElements());
+            Pageable pageable = PageRequest.of(page, size,
+                    org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "date"));
+            LocalDateTime fromDt = from == null ? null : from.atStartOfDay();
+            LocalDateTime toDt   = to   == null ? null : to.atTime(23, 59, 59, 999_999_999);
+            var result = service.getSalesHistory(q, status, customerId, fromDt, toDt, pageable);
+            logger.info("Fetched sales history page={}, size={}, filters(q={}, status={}, customerId={}, from={}, to={}), total={}",
+                    page, size, q, status, customerId, from, to, result.getTotalElements());
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error fetching sales history: {}", e.getMessage(), e);
@@ -173,9 +198,49 @@ public class SaleController {
         }
     }
 
+    @DeleteMapping("/drafts/{id}")
+    @Operation(summary = "Discard a DRAFT or HELD sale",
+               description = "Hard-delete a work-in-progress sale that never became a committed row. Rejects COMPLETED / CANCELLED / RETURNED (those have ledger + stock impact — use /cancel for those). Used when a caller pivots (e.g. save-as-proforma after a draft) and the draft would otherwise orphan.")
+    public ResponseEntity<Void> discardDraft(@PathVariable Long id) {
+        service.discardDraft(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{id}/park")
+    @Operation(summary = "Park a DRAFT sale (POS 'hold order for later')",
+               description = "DRAFT → HELD. Same underlying state (no ledger, no stock) but flagged HELD so the UI can list parked orders separately from auto-saved drafts. Idempotent — parking a HELD sale is a no-op. Rejects any other status.")
+    public ResponseEntity<SaleDto> parkSale(@PathVariable Long id) {
+        return ResponseEntity.ok(service.parkSale(id));
+    }
+
+    @PostMapping("/{id}/resume")
+    @Operation(summary = "Resume a parked sale",
+               description = "HELD → DRAFT. Returns the sale to active editing so the standard complete-draft flow works unchanged. Idempotent for DRAFT.")
+    public ResponseEntity<SaleDto> resumeSale(@PathVariable Long id) {
+        return ResponseEntity.ok(service.resumeSale(id));
+    }
+
+    @PatchMapping("/{id}/notes")
+    @Operation(summary = "Update sale notes",
+               description = "Non-destructive metadata edit. Accepts a JSON body {\"notes\":\"…\"} — pass null or an empty string to clear. Works on sales in any status.")
+    public ResponseEntity<SaleDto> updateSaleNotes(
+            @PathVariable Long id,
+            @RequestBody UpdateNotesRequest body) {
+        SaleDto updated = service.updateNotes(id, body == null ? null : body.getNotes());
+        return ResponseEntity.ok(updated);
+    }
+
+    /** Minimal payload for {@link #updateSaleNotes} so we don't pull a full SaleDto over the wire. */
+    public static class UpdateNotesRequest {
+        private String notes;
+        public String getNotes() { return notes; }
+        public void setNotes(String notes) { this.notes = notes; }
+    }
+
     @PostMapping("/{id}/return")
-    @Operation(summary = "Process sale return", 
-               description = "Process partial or full return of items from a sale. Automatically restores stock and handles payment/ledger reversal if requested.")
+    @PreAuthorize("hasAnyRole('OWNER', 'ADMIN')")
+    @Operation(summary = "Process sale return",
+               description = "Process partial or full return of items from a sale. Automatically restores stock and handles payment/ledger reversal if requested. Restricted to OWNER/ADMIN — staff can raise the request but not commit it.")
     @ApiResponse(responseCode = "200", description = "Sale return processed successfully")
     public ResponseEntity<Void> processSaleReturn(
             @Parameter(description = "Sale ID") @PathVariable Long id, 
@@ -192,8 +257,9 @@ public class SaleController {
     }
 
     @PostMapping("/{id}/cancel")
-    @Operation(summary = "Cancel entire sale", 
-               description = "Cancel an entire sale transaction. Restores all stock, reverses all payments and ledger entries. Irreversible action.")
+    @PreAuthorize("hasAnyRole('OWNER', 'ADMIN')")
+    @Operation(summary = "Cancel entire sale",
+               description = "Cancel an entire sale transaction. Restores all stock, reverses all payments and ledger entries. Irreversible action. Restricted to OWNER/ADMIN.")
     @ApiResponse(responseCode = "200", description = "Sale cancelled successfully")
     public ResponseEntity<Void> cancelSale(
             @Parameter(description = "Sale ID") @PathVariable Long id, 
@@ -216,5 +282,22 @@ public class SaleController {
         String url = "/api/invoices/signed?token=" + token;
 
         return ResponseEntity.ok(url);
+    }
+
+    @GetMapping("/{id}/timeline")
+    @Operation(summary = "Sale timeline (void / refund / cancel history)",
+               description = "Read-only list of state-mutating events for a single sale — merges AuditLog rows and linked credit notes, newest first. Used by the FE 'Void / refund history' dialog. Shop-scoped and RBAC-gated at the controller class level.")
+    public ResponseEntity<List<com.desitech.vyaparsathi.sales.dto.SaleTimelineEventDto>> getSaleTimeline(@PathVariable Long id) {
+        return ResponseEntity.ok(service.getSaleTimeline(id));
+    }
+
+    @PostMapping("/{id}/convert-proforma-to-invoice")
+    @Operation(summary = "Convert a proforma sale to a real invoice",
+               description = "Creates a new INVOICE sale from a PROFORMA sale. Deducts stock, posts customer ledger, links the new invoice back to the source proforma. Rejects if the proforma has already been converted.")
+    @ApiResponse(responseCode = "200", description = "Proforma converted successfully")
+    public ResponseEntity<SaleDto> convertProformaToInvoice(@PathVariable Long id) {
+        SaleDto result = service.convertProformaToInvoice(id);
+        logger.info("Converted proforma id={} → invoice {}", id, result.getInvoiceNo());
+        return ResponseEntity.ok(result);
     }
 }

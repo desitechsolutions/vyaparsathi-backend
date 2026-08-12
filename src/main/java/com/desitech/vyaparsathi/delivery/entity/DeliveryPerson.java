@@ -18,4 +18,16 @@ public class DeliveryPerson extends ShopAwareEntity {
     private String name;
     private String phone;
     private String notes;
+
+    @Column(name = "vehicle_number", length = 50)
+    private String vehicleNumber;
+
+    @Column(name = "license_number", length = 50)
+    private String licenseNumber;
+
+    @Column(name = "employee_id", length = 50)
+    private String employeeId;
+
+    @Column(nullable = false)
+    private boolean active = true;
 }

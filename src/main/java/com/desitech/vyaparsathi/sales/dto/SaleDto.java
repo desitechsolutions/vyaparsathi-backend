@@ -27,6 +27,22 @@ public class SaleDto {
     private BigDecimal discount;
     private Boolean isGstRequired;
 
+    /** Reverse-charge outward supply. Recipient is liable to pay tax; PDF shows the notice; GSTR-1 rchrg="Y". */
+    private Boolean reverseCharge;
+
+    /**
+     * Client-supplied idempotency key for POST /api/sales. Same key + same
+     * shop within retention window returns the original sale instead of a
+     * duplicate — safe to retry on network hiccups or POS double-tap.
+     */
+    private String idempotencyKey;
+
+    /** Optional user id of the salesperson responsible for this sale. */
+    private Long salespersonId;
+
+    /** Free-text notes on the sale. */
+    private String notes;
+
     @AuditValue
     private String invoiceNo;
 
@@ -35,6 +51,17 @@ public class SaleDto {
 
     private String signedInvoiceUrl;
     private String status;
+
+    /**
+     * Either {@code "INVOICE"} (default) or {@code "PROFORMA"}. Frontend sets
+     * PROFORMA to create a proforma sale (no stock deduction, no ledger post,
+     * PI/YY-YY/NNNNN number series).
+     */
+    private String saleType;
+
+    /** Populated on GET when this row is a real invoice created from a proforma. */
+    private Long proformaSourceSaleId;
+    private String proformaSourceInvoiceNo;
 
     private java.time.LocalDate dueDate;
     private BigDecimal invoiceDiscount;
@@ -77,6 +104,9 @@ public class SaleDto {
     public Boolean getIsGstRequired() { return isGstRequired; }
     public void setIsGstRequired(Boolean isGstRequired) { this.isGstRequired = isGstRequired; }
 
+    public Boolean getReverseCharge() { return reverseCharge; }
+    public void setReverseCharge(Boolean reverseCharge) { this.reverseCharge = reverseCharge; }
+
     public String getInvoiceNo() { return invoiceNo; }
     public void setInvoiceNo(String invoiceNo) { this.invoiceNo = invoiceNo; }
 
@@ -88,6 +118,15 @@ public class SaleDto {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    public String getSaleType() { return saleType; }
+    public void setSaleType(String saleType) { this.saleType = saleType; }
+
+    public Long getProformaSourceSaleId() { return proformaSourceSaleId; }
+    public void setProformaSourceSaleId(Long proformaSourceSaleId) { this.proformaSourceSaleId = proformaSourceSaleId; }
+
+    public String getProformaSourceInvoiceNo() { return proformaSourceInvoiceNo; }
+    public void setProformaSourceInvoiceNo(String proformaSourceInvoiceNo) { this.proformaSourceInvoiceNo = proformaSourceInvoiceNo; }
 
     public java.time.LocalDate getDueDate() { return dueDate; }
     public void setDueDate(java.time.LocalDate dueDate) { this.dueDate = dueDate; }

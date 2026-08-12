@@ -12,6 +12,7 @@ public class GstSummary {
     private BigDecimal cgst = ZERO;
     private BigDecimal sgst = ZERO;
     private BigDecimal igst = ZERO;
+    private BigDecimal utgst = ZERO;
 
     public GstSummary(BigDecimal rate) { this.rate = rate; }
 
@@ -19,8 +20,10 @@ public class GstSummary {
     public BigDecimal getCgst() { return cgst; }
     public BigDecimal getSgst() { return sgst; }
     public BigDecimal getIgst() { return igst; }
+    public BigDecimal getUtgst() { return utgst; }
 
     public void addCgst(BigDecimal amt) { if (amt != null) cgst = cgst.add(amt); }
     public void addSgst(BigDecimal amt) { if (amt != null) sgst = sgst.add(amt); }
     public void addIgst(BigDecimal amt) { if (amt != null) igst = igst.add(amt); }
+    public void addUtgst(BigDecimal amt) { if (amt != null) utgst = utgst.add(amt); }
 }

@@ -19,12 +19,20 @@ public class PurchaseInvoiceDto {
     private BigDecimal totalCgst;
     private BigDecimal totalSgst;
     private BigDecimal totalIgst;
+    private BigDecimal totalUtgst;
     private BigDecimal totalAmount;
     private BigDecimal paidAmount;
     private String paymentStatus;
     private String status;
     private String notes;
+    /** Reverse-charge inward supply — shop pays GST to government directly. */
+    private Boolean reverseCharge;
+    /** ID of the GRN this invoice was created against, if any (V62). */
+    private Long receivingId;
     private List<PurchaseInvoiceItemDto> items;
+
+    public Long getReceivingId() { return receivingId; }
+    public void setReceivingId(Long receivingId) { this.receivingId = receivingId; }
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }

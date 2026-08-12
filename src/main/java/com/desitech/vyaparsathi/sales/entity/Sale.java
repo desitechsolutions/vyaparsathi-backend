@@ -8,6 +8,7 @@ import com.desitech.vyaparsathi.delivery.entity.Delivery;
 import com.desitech.vyaparsathi.delivery.enums.DeliveryStatus;
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
 import com.desitech.vyaparsathi.sales.enums.SaleStatus;
+import com.desitech.vyaparsathi.sales.enums.SaleType;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.*;
@@ -63,6 +64,23 @@ public class Sale extends ShopAwareEntity {
     @Column(name = "synced_flag", nullable = false)
     private boolean syncedFlag = false;
 
+    /**
+     * Client-supplied idempotency key for {@code POST /api/sales}. When present,
+     * a duplicate request with the same (shop_id, idempotency_key) returns the
+     * originally-created sale instead of a new one — prevents double-charge on
+     * network retry or POS "Charge" double-tap.
+     */
+    @Column(name = "idempotency_key", length = 80)
+    private String idempotencyKey;
+
+    /** Optional user id of the salesperson responsible for this sale. */
+    @Column(name = "salesperson_id")
+    private Long salespersonId;
+
+    /** Free-text notes on the sale (delivery instructions, private memo). */
+    @Column(name = "notes", columnDefinition = "TEXT")
+    private String notes;
+
     @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference
     private List<SaleItem> saleItems = new ArrayList<>();
@@ -76,12 +94,41 @@ public class Sale extends ShopAwareEntity {
     private SaleStatus status = SaleStatus.COMPLETED;
 
     /**
+     * Whether this row is a real tax invoice or a proforma. Defaults to
+     * {@link SaleType#INVOICE}; PROFORMA rows skip stock deduction and ledger
+     * posting. See {@link SaleType}.
+     */
+    @Column(name = "sale_type", nullable = false, length = 20)
+    @Enumerated(EnumType.STRING)
+    private SaleType saleType = SaleType.INVOICE;
+
+    /**
+     * When this row is a real invoice created from a proforma, points to the
+     * source proforma sale. Used to prevent double-conversion of a proforma
+     * and to keep the audit trail intact.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "proforma_source_sale_id")
+    private Sale proformaSourceSale;
+
+    /**
      * Whether GST was intended for this sale at creation time.
      * Stored so that invoices generated after a shop changes its composition-scheme
      * flag still render the correct GST columns for historical sales.
      */
     @Column(name = "is_gst_required", nullable = false)
     private Boolean isGstRequired = false;
+
+    /**
+     * Tax payable under reverse charge — recipient is liable to pay GST
+     * to the government instead of the supplier. Drives PDF rendering
+     * (a "Tax payable under reverse charge" note appears near the tax
+     * summary) and GSTR-1 rchrg = "Y" for B2B invoices. Applies to
+     * §9(3) mandatory reverse-charge supplies (GTA, legal, etc.) and
+     * §9(4) supplies from unregistered persons.
+     */
+    @Column(name = "reverse_charge", nullable = false)
+    private Boolean reverseCharge = false;
 
     @Column(name = "place_of_supply", length = 100)
     private String placeOfSupply;
@@ -119,6 +166,15 @@ public class Sale extends ShopAwareEntity {
     public boolean isSyncedFlag() { return syncedFlag; }
     public void setSyncedFlag(boolean syncedFlag) { this.syncedFlag = syncedFlag; }
 
+    public String getIdempotencyKey() { return idempotencyKey; }
+    public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
+
+    public Long getSalespersonId() { return salespersonId; }
+    public void setSalespersonId(Long salespersonId) { this.salespersonId = salespersonId; }
+
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
+
     public List<SaleItem> getSaleItems() { return saleItems; }
     public void setSaleItems(List<SaleItem> saleItems) { this.saleItems = saleItems; }
 
@@ -128,8 +184,20 @@ public class Sale extends ShopAwareEntity {
     public SaleStatus getStatus() { return status; }
     public void setStatus(SaleStatus status) { this.status = status; }
 
+    public SaleType getSaleType() { return saleType; }
+    public void setSaleType(SaleType saleType) { this.saleType = saleType; }
+
+    public Sale getProformaSourceSale() { return proformaSourceSale; }
+    public void setProformaSourceSale(Sale proformaSourceSale) { this.proformaSourceSale = proformaSourceSale; }
+
+    public boolean isProforma() { return saleType == SaleType.PROFORMA; }
+
     public Boolean getIsGstRequired() { return isGstRequired; }
     public void setIsGstRequired(Boolean isGstRequired) { this.isGstRequired = isGstRequired; }
+
+    public Boolean getReverseCharge() { return reverseCharge; }
+    public void setReverseCharge(Boolean reverseCharge) { this.reverseCharge = reverseCharge != null && reverseCharge; }
+    public boolean isReverseCharge() { return Boolean.TRUE.equals(reverseCharge); }
 
     public java.time.LocalDate getDueDate() { return dueDate; }
     public void setDueDate(java.time.LocalDate dueDate) { this.dueDate = dueDate; }
@@ -241,6 +309,13 @@ public class Sale extends ShopAwareEntity {
         if (saleItems == null || saleItems.isEmpty()) return BigDecimal.ZERO;
         return saleItems.stream()
                 .map(item -> item.getIgstAmt() != null ? item.getIgstAmt() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    public BigDecimal getUtgstAmount() {
+        if (saleItems == null || saleItems.isEmpty()) return BigDecimal.ZERO;
+        return saleItems.stream()
+                .map(item -> item.getUtgstAmt() != null ? item.getUtgstAmt() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 

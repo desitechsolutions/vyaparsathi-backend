@@ -32,6 +32,9 @@ public class Shop {
     @Column(nullable = false)
     private String state;
 
+    @Column(name = "state_code", length = 2)
+    private String stateCode;
+
     private String gstin;
 
     @Column(unique = true, nullable = false)
@@ -104,6 +107,9 @@ public class Shop {
 
     public String getState() { return state; }
     public void setState(String state) { this.state = state; }
+
+    public String getStateCode() { return stateCode; }
+    public void setStateCode(String stateCode) { this.stateCode = stateCode; }
 
     public String getGstin() { return gstin; }
     public void setGstin(String gstin) { this.gstin = gstin; }

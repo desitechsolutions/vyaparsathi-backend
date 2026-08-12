@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 @Mapper(componentModel = "spring")
 public interface SaleItemMapper {
 
+    @Mapping(target = "saleItemId",       source = "id")
     @Mapping(target = "itemVariantId",    source = "itemVariant.id")
     @Mapping(target = "itemName",         source = "itemVariant.item.name")
     @Mapping(target = "itemId",           source = "itemVariant.item.id")
@@ -17,6 +18,7 @@ public interface SaleItemMapper {
     @Mapping(target = "costPerUnit",      source = "itemVariant.pricePerUnit")
     @Mapping(target = "batchNumber",      source = "batchNumber")
     @Mapping(target = "expiryDate",       source = "expiryDate")
+    @Mapping(target = "salespersonId",    source = "salespersonId")
     // Issue 1: Map variant attributes for frontend display and invoice rendering
     @Mapping(target = "variantSku",       source = "itemVariant.sku")
     @Mapping(target = "variantColor",     source = "itemVariant.color")

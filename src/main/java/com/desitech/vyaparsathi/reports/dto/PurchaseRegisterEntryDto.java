@@ -7,7 +7,7 @@ import java.time.LocalDate;
 
 /**
  * DTO for a single row in the batch-wise Purchase Register.
- * Required for drug recall traceability and pharmacy regulatory audits.
+ * Required for supplier traceability and regulatory audits (recall trails).
  * Returned by GET /api/reports/purchase-register?from={from}&amp;to={to}
  */
 @Data

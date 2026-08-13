@@ -31,6 +31,8 @@ public class SalesOrderDto {
     private BigDecimal shippingCharges = BigDecimal.ZERO;
     private BigDecimal otherCharges = BigDecimal.ZERO;
     private BigDecimal totalAmount;
+    /** Rounding adjustment applied to reach a whole-rupee total. */
+    private BigDecimal roundOff = BigDecimal.ZERO;
 
     private Boolean isGstRequired = Boolean.TRUE;
 

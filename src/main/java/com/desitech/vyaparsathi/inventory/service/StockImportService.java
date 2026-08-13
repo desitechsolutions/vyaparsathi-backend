@@ -33,7 +33,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Handles bulk stock import for pharmacy shops via Excel files.
+ * Handles bulk stock import via Excel files (batch-tracking retail: FMCG, food, cosmetics).
  * <p>
  * Each row in the spreadsheet represents one batch entry. If the Item does not exist
  * it is created automatically. If the ItemVariant (identified by SKU) already exists

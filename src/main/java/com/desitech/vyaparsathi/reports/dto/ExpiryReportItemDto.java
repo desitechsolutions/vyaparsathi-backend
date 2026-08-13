@@ -9,7 +9,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
- * DTO for a single row in the pharmacy expiry report.
+ * DTO for a single row in the batch/expiry report.
  * Returned by GET /api/reports/expiry-report?days={days}
  */
 @Getter

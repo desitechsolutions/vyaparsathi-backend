@@ -89,7 +89,7 @@ public class SaleItem extends ShopAwareEntity {
     private String batchNumber;
 
     /**
-     * Expiry date of the specific batch dispensed.
+     * Expiry date of the specific batch sold.
      * Stored per sale-item for invoice printing and traceability compliance.
      */
     @Column(name = "expiry_date")

@@ -233,7 +233,7 @@ public class ReceivingService {
             item.setOverageReason(itemDto.getOverageReason());
             item.setOverageNotes(itemDto.getOverageNotes());
 
-            // Pharmacy batch/expiry tracking
+            // Batch / expiry tracking (FMCG, food perishables, cosmetics)
             item.setBatchNumber(itemDto.getBatchNumber());
             item.setManufacturingDate(itemDto.getManufacturingDate());
             item.setExpiryDate(itemDto.getExpiryDate());
@@ -448,7 +448,7 @@ public class ReceivingService {
     }
 
     /**
-     * Creates a stock movement, including optional batch and expiry for pharmacy shops.
+     * Creates a stock movement, including optional batch and expiry (FMCG / food perishables).
      */
     private void createStockMovement(ItemVariant variant, BigDecimal cost, StockMovementType type, int quantity, String reference,
                                      String batchNumber, LocalDate expiryDate) {

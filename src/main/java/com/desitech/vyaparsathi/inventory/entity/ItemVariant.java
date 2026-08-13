@@ -75,7 +75,7 @@ public class ItemVariant extends ShopAwareEntity {
 
     /**
      * Expiry date of this batch. Used for expiry alerts and preventing sale of expired items.
-     * Relevant for food, FMCG, cosmetics, and pharmaceutical retail.
+     * Relevant for food, FMCG, and cosmetics retail.
      */
     @Column(name = "expiry_date")
     private LocalDate expiryDate;

@@ -303,9 +303,18 @@ public class QuotationService {
             BigDecimal taxable = qty.multiply(unitPrice).subtract(discount).max(BigDecimal.ZERO);
             item.setTaxableValue(taxable);
 
-            Integer gstRate = variant != null && variant.getGstRate() != null
-                    ? variant.getGstRate()
-                    : (d.getGstRate() != null ? d.getGstRate() : 0);
+            // DTO's gstRate is the source of truth — the user may deliberately
+            // override the variant's stored default (e.g. quoting a discounted
+            // slab for a bulk order). Fall back to the variant only when the
+            // DTO didn't send a rate.
+            Integer gstRate;
+            if (d.getGstRate() != null) {
+                gstRate = d.getGstRate();
+            } else if (variant != null && variant.getGstRate() != null) {
+                gstRate = variant.getGstRate();
+            } else {
+                gstRate = 0;
+            }
             item.setGstRate(gstRate);
 
             if (Boolean.TRUE.equals(q.getIsGstRequired()) && gstRate > 0) {
@@ -349,12 +358,19 @@ public class QuotationService {
         q.setTotalCgst(cgst);
         q.setTotalSgst(sgst);
         q.setTotalIgst(igst);
-        BigDecimal grand = taxable.add(cgst).add(sgst).add(igst)
+        BigDecimal grandRaw = taxable.add(cgst).add(sgst).add(igst)
                 .subtract(nz(q.getInvoiceDiscount()))
                 .add(nz(q.getShippingCharges()))
                 .add(nz(q.getOtherCharges()))
                 .max(BigDecimal.ZERO);
-        q.setTotalAmount(grand.setScale(2, RoundingMode.HALF_UP));
+        // Round to whole rupee and persist the delta — matches Sale's flow so
+        // the number the user sees in the editor, the number stored, and the
+        // number printed on the PDF all agree. Section 170 of the CGST Act
+        // permits rounding to the nearest rupee on tax invoices; we mirror
+        // that here on quotations for consistency after conversion.
+        BigDecimal grandRounded = grandRaw.setScale(0, RoundingMode.HALF_UP);
+        q.setRoundOff(grandRounded.subtract(grandRaw).setScale(2, RoundingMode.HALF_UP));
+        q.setTotalAmount(grandRounded);
     }
 
     private SaleDto buildSaleDraftDto(Quotation q) {
@@ -428,6 +444,7 @@ public class QuotationService {
         dto.setShippingCharges(q.getShippingCharges());
         dto.setOtherCharges(q.getOtherCharges());
         dto.setTotalAmount(q.getTotalAmount());
+        dto.setRoundOff(q.getRoundOff());
         dto.setIsGstRequired(q.getIsGstRequired());
         dto.setNotes(q.getNotes());
         dto.setTerms(q.getTerms());

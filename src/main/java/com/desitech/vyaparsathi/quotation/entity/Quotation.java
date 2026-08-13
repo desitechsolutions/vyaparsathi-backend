@@ -69,6 +69,16 @@ public class Quotation extends ShopAwareEntity {
     @Column(name = "total_amount", nullable = false, precision = 15, scale = 2)
     private BigDecimal totalAmount = BigDecimal.ZERO;
 
+    /**
+     * Difference between the mathematically-computed grand total and the
+     * printed total after rounding to the nearest rupee. Positive when
+     * we rounded up (customer pays a bit more), negative when down.
+     * Mirrors the Sale entity's roundOff so quotation totals line up
+     * with the resulting invoice on conversion.
+     */
+    @Column(name = "round_off", nullable = false, precision = 12, scale = 2)
+    private BigDecimal roundOff = BigDecimal.ZERO;
+
     @Column(name = "is_gst_required", nullable = false)
     private Boolean isGstRequired = Boolean.TRUE;
 

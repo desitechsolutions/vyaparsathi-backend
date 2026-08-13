@@ -45,12 +45,9 @@ public class Item extends ShopAwareEntity {
     @Column(name = "attribute_2")
     private String attribute2;
 
-    // --- Generic product fields (formerly pharmacy-specific, now generic retail) ---
-
     /**
      * Product specifications, ingredients, or key attributes.
-     * Examples: "100% Cotton", "Paracetamol 500mg", "SKD Kit - 24 pieces"
-     * Renamed from {@code composition} (Phase 1 pharmacy removal).
+     * Examples: "100% Cotton", "SKD Kit - 24 pieces".
      */
     @Column(name = "specifications", length = 500)
     private String specifications;

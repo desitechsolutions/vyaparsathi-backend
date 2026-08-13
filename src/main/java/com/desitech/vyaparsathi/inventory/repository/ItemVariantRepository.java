@@ -63,12 +63,12 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
     List<ItemVariant> findAllByShopId(@Param("shopId") Long shopId);
 
     /**
-     * Finds all variants of items sharing the same composition as the given item.
-     * Used to suggest therapeutic substitutes in pharmacy.
+     * Finds all variants of items sharing the same specifications as the given item.
+     * Used to suggest equivalent substitutes (same key attributes, different SKU).
      *
-     * @param composition the active pharmaceutical composition string
+     * @param specifications the product specifications / key-attributes string
      * @param excludeItemId the item ID to exclude (the reference item itself)
-     * @return list of variants from items with the same composition
+     * @return list of variants from items with the same specifications
      */
     @Query("SELECT iv FROM ItemVariant iv JOIN iv.item i WHERE i.specifications = :specifications AND i.id <> :excludeItemId")
     List<ItemVariant> findSubstitutesByComposition(
@@ -78,7 +78,7 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
 
     /**
      * Finds all variants with an expiry date set and expiry date before or on the given cutoff date.
-     * Used to generate expiry alerts for pharmacy shops.
+     * Used to generate expiry alerts for perishables (FMCG, food, cosmetics).
      *
      * @param cutoffDate the date up to which items are considered near-expiry or expired
      * @return list of item variants expiring at or before cutoffDate

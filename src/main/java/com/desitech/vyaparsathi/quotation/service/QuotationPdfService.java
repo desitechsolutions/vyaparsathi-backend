@@ -364,6 +364,11 @@ public class QuotationPdfService {
         if (nz(q.getInvoiceDiscount()).signum() > 0) totalRow(totals, "Discount", "- " + currency.format(q.getInvoiceDiscount()), body);
         if (nz(q.getShippingCharges()).signum() > 0) totalRow(totals, "Shipping", currency.format(q.getShippingCharges()), body);
         if (nz(q.getOtherCharges()).signum() > 0) totalRow(totals, "Other Charges", currency.format(q.getOtherCharges()), body);
+        if (nz(q.getRoundOff()).signum() != 0) {
+            BigDecimal ro = q.getRoundOff();
+            String prefix = ro.signum() > 0 ? "+ " : "- ";
+            totalRow(totals, "Round Off", prefix + currency.format(ro.abs()), body);
+        }
 
         PdfPCell gtl = new PdfPCell(new Phrase("GRAND TOTAL", grandTotalWhite));
         gtl.setBackgroundColor(brand);

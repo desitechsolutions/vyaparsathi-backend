@@ -48,12 +48,19 @@ public interface DeliveryRepository extends BaseRepository<Delivery, Long> {
     );
 
     /**
-     * All deliveries for a shop within a range — used by the metrics endpoint.
-     * Not paginated (metrics need the full set to compute on-time %).
+     * All deliveries whose activity intersects the given range — used by the
+     * metrics endpoint. Not paginated (metrics need the full set to compute
+     * on-time %).
+     *
+     * Includes deliveries created in the range OR whose COD was collected in
+     * the range (so a delivery created earlier but paid inside the window
+     * still contributes to the COD total). Per-metric range filtering happens
+     * in the service (e.g. COD sum only counts collections in-range).
      */
-    @EntityGraph(attributePaths = {"deliveryPerson"})
-    @Query("SELECT d FROM Delivery d " +
-            "WHERE d.createdAt >= :from AND d.createdAt <= :to")
+    @EntityGraph(attributePaths = {"deliveryPerson", "sale"})
+    @Query("SELECT DISTINCT d FROM Delivery d " +
+            "WHERE (d.createdAt >= :from AND d.createdAt <= :to) " +
+            "   OR (d.codCollectedAt IS NOT NULL AND d.codCollectedAt >= :from AND d.codCollectedAt <= :to)")
     List<Delivery> findForMetrics(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to

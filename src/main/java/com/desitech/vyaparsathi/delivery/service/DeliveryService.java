@@ -272,9 +272,48 @@ public class DeliveryService {
         if (Boolean.TRUE.equals(podFields.getCodCollected())) {
             delivery.setCodCollected(true);
             delivery.setCodCollectedAt(LocalDateTime.now());
+            // Auto-stamp codAmount if the user marked collected without setting one.
+            // Metrics + the auto-payment record both gate on codAmount > 0, so
+            // leaving it null silently zeros out the drawer reconciliation.
+            if (delivery.getCodAmount() == null) {
+                BigDecimal computed = computeExpectedCodAmount(delivery);
+                if (computed.signum() > 0) {
+                    delivery.setCodAmount(computed);
+                    logger.info("Auto-stamped codAmount={} on delivery {} (source: sale balance + customer-paid delivery charge)",
+                            computed, delivery.getId());
+                }
+            }
         }
         delivery.setUpdatedAt(LocalDateTime.now());
         return deliveryMapper.toDto(deliveryRepo.save(delivery));
+    }
+
+    /**
+     * Best-effort inference of what money should be collected from the customer
+     * at delivery time. Composed of:
+     *   • unpaid sale balance = sale.grandTotal - sum(existing SALE Payments),
+     *     clamped to 0. Represents credit sales / partial-prepay balance.
+     *   • plus the delivery charge itself when the customer pays for delivery
+     *     ({@code deliveryPaidBy = CUSTOMER}).
+     * Returns {@link BigDecimal#ZERO} when the delivery has no linked sale or
+     * the sale is fully prepaid and delivery is shop-paid.
+     */
+    private BigDecimal computeExpectedCodAmount(Delivery delivery) {
+        BigDecimal total = BigDecimal.ZERO;
+        if (delivery.getSale() != null && delivery.getSale().getId() != null) {
+            BigDecimal grand = delivery.getSale().getGrandTotal();
+            if (grand != null && grand.signum() > 0) {
+                BigDecimal paid = paymentRepository.sumPaymentsBySource(
+                        PaymentSourceType.SALE, delivery.getSale().getId());
+                BigDecimal unpaid = grand.subtract(paid == null ? BigDecimal.ZERO : paid);
+                if (unpaid.signum() > 0) total = total.add(unpaid);
+            }
+        }
+        if (delivery.getDeliveryPaidBy() == com.desitech.vyaparsathi.delivery.enums.DeliveryPaidBy.CUSTOMER
+                && delivery.getDeliveryCharge() != null && delivery.getDeliveryCharge() > 0) {
+            total = total.add(BigDecimal.valueOf(delivery.getDeliveryCharge()));
+        }
+        return total;
     }
 
     @Transactional
@@ -335,7 +374,7 @@ public class DeliveryService {
 
         List<Delivery> deliveries = deliveryRepo.findForMetrics(start, end);
 
-        long total = deliveries.size();
+        long total = 0;
         long delivered = 0, cancelled = 0, inProgress = 0;
         long onTime = 0, deliveredWithEta = 0;
         double totalLeadHours = 0.0;
@@ -345,16 +384,32 @@ public class DeliveryService {
 
         Map<Long, PersonAccum> perPerson = new HashMap<>();
 
+        // A delivery is "in the creation window" if it was created inside [start, end].
+        // A delivery is "in the COD window" if its codCollectedAt falls inside [start, end].
+        // Lifecycle metrics (delivered/cancelled/onTime/leadTime/perPerson) count only
+        // deliveries created in the window — the "cohort" view. COD metrics count only
+        // collections in the window — the "cash received" view. This split fixes the
+        // stale bug where COD collected on an older delivery showed as 0 because the
+        // row was excluded by the creation-based query.
         for (Delivery d : deliveries) {
+            LocalDateTime createdAt = d.getCreatedAt();
+            boolean createdInWindow = createdAt != null && !createdAt.isBefore(start) && !createdAt.isAfter(end);
+            LocalDateTime codAt = d.getCodCollectedAt();
+            boolean codInWindow = codAt != null && !codAt.isBefore(start) && !codAt.isAfter(end);
+
             DeliveryStatus s = d.getDeliveryStatus();
             boolean isDelivered = s == DeliveryStatus.DELIVERED;
             boolean isCancelled = s == DeliveryStatus.CANCELLED;
-            if (isDelivered) delivered++;
-            else if (isCancelled) cancelled++;
-            else inProgress++;
+
+            if (createdInWindow) {
+                total++;
+                if (isDelivered) delivered++;
+                else if (isCancelled) cancelled++;
+                else inProgress++;
+            }
 
             // On-time: DELIVERED and (deliveredAt as LocalDate) <= estimatedDeliveryDate
-            if (isDelivered && d.getEstimatedDeliveryDate() != null && d.getDeliveredAt() != null) {
+            if (createdInWindow && isDelivered && d.getEstimatedDeliveryDate() != null && d.getDeliveredAt() != null) {
                 deliveredWithEta++;
                 if (!d.getDeliveredAt().toLocalDate().isAfter(d.getEstimatedDeliveryDate())) {
                     onTime++;
@@ -363,19 +418,30 @@ public class DeliveryService {
             // Lead time: hours from createdAt → deliveredAt
             double leadHrs = 0.0;
             boolean hasLead = false;
-            if (isDelivered && d.getCreatedAt() != null && d.getDeliveredAt() != null) {
+            if (createdInWindow && isDelivered && d.getCreatedAt() != null && d.getDeliveredAt() != null) {
                 leadHrs = Duration.between(d.getCreatedAt(), d.getDeliveredAt()).toMinutes() / 60.0;
                 totalLeadHours += leadHrs;
                 deliveredWithLead++;
                 hasLead = true;
             }
-            // COD collected sums
-            if (d.isCodCollected() && d.getCodAmount() != null) {
-                codTotal = codTotal.add(d.getCodAmount());
-                codCount++;
+            // COD collected sums — count when the COLLECTION happened in-window,
+            // regardless of when the delivery was originally created. If a legacy
+            // row was marked collected without an explicit amount (pre-2026-08-13
+            // capturePod flow), compute the expected amount on-the-fly so the
+            // metric still reflects the money that changed hands.
+            if (codInWindow) {
+                BigDecimal amount = d.getCodAmount();
+                if (amount == null) {
+                    amount = computeExpectedCodAmount(d);
+                }
+                if (amount != null && amount.signum() > 0) {
+                    codTotal = codTotal.add(amount);
+                    codCount++;
+                }
             }
-            // Per-person roll-up
-            if (d.getDeliveryPerson() != null) {
+            // Per-person roll-up — cohort view, gated on createdInWindow so a person
+            // isn't credited for closing a delivery that belongs to another period.
+            if (createdInWindow && d.getDeliveryPerson() != null) {
                 Long pid = d.getDeliveryPerson().getId();
                 PersonAccum acc = perPerson.computeIfAbsent(pid,
                         k -> new PersonAccum(pid, d.getDeliveryPerson().getName()));

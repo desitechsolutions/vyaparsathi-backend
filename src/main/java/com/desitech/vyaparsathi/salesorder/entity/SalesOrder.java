@@ -69,6 +69,14 @@ public class SalesOrder extends ShopAwareEntity {
     @Column(name = "total_amount", nullable = false, precision = 15, scale = 2)
     private BigDecimal totalAmount = BigDecimal.ZERO;
 
+    /**
+     * Round-to-rupee delta so the printed and stored totals match what the
+     * editor previewed. Mirrors Quotation.roundOff and Sale.roundOff — see
+     * V74 migration.
+     */
+    @Column(name = "round_off", nullable = false, precision = 12, scale = 2)
+    private BigDecimal roundOff = BigDecimal.ZERO;
+
     @Column(name = "is_gst_required", nullable = false)
     private Boolean isGstRequired = Boolean.TRUE;
 

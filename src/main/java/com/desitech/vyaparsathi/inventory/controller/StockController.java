@@ -71,9 +71,9 @@ public class StockController {
     }
 
     @GetMapping("/batch-wise")
-    @Operation(summary = "Get batch-wise stock breakdown (pharmacy)",
+    @Operation(summary = "Get batch-wise stock breakdown",
                description = "Returns one entry per (item variant, batch, expiry date) combination so that " +
-                       "pharmacy shops can see each batch's remaining quantity and expiry date separately. " +
+                       "shops tracking perishables can see each batch's remaining quantity and expiry date separately. " +
                        "Only batches with a positive remaining quantity are included.")
     @ApiResponse(responseCode = "200", description = "Batch-wise stock retrieved successfully")
     public ResponseEntity<List<BatchStockDto>> getBatchWiseStock() {
@@ -136,9 +136,9 @@ public class StockController {
     }
 
     @GetMapping("/expiry-alerts")
-    @Operation(summary = "Get medicine expiry alerts",
-               description = "Returns medicines/items expiring within the specified number of days. " +
-                       "Used by pharmacy shops to identify near-expiry or expired stock. " +
+    @Operation(summary = "Get item expiry alerts",
+               description = "Returns items expiring within the specified number of days. " +
+                       "Used by shops tracking perishables (FMCG, food, cosmetics) to identify near-expiry or expired stock. " +
                        "Default window is 90 days.")
     @ApiResponse(responseCode = "200", description = "Expiry alerts retrieved successfully")
     public ResponseEntity<List<ExpiryAlertDto>> getExpiryAlerts(
@@ -222,9 +222,9 @@ public class StockController {
     // -------------------------------------------------------------------------
 
     @GetMapping("/import/template")
-    @Operation(summary = "Download stock import template (pharmacy)",
+    @Operation(summary = "Download stock import template",
                description = "Returns a blank Excel workbook with the correct column headers and a sample row " +
-                       "that pharmacy shops can fill in to bulk-import their existing inventory.")
+                       "for bulk-import of existing inventory.")
     @ApiResponse(responseCode = "200", description = "Template downloaded successfully")
     public ResponseEntity<byte[]> downloadImportTemplate() {
         try {
@@ -241,7 +241,7 @@ public class StockController {
     }
 
     @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Bulk import stock from Excel (pharmacy)",
+    @Operation(summary = "Bulk import stock from Excel",
                description = "Accepts an .xlsx file in the import template format. " +
                        "For each row the service finds or creates the Item and ItemVariant (matched by SKU), " +
                        "then records an ADD stock movement. " +

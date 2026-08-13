@@ -69,9 +69,6 @@ public class SaleService {
 
     private static final Logger logger = LoggerFactory.getLogger(SaleService.class);
 
-    /** Scale used when converting dispensing-unit quantities to stock-unit quantities (for loose medicine). */
-    private static final int STOCK_QUANTITY_SCALE = 6;
-
     @Autowired
     private SaleRepository saleRepository;
     @Autowired
@@ -419,22 +416,13 @@ public class SaleService {
         // line items after this loop completes.
         Map<SaleItem, BigDecimal> returnedThisPass = new LinkedHashMap<>();
 
-        // 1. Process Items and Inventory. Backward-compatible lookup:
-        //   • First match by SaleItem PK (the intended semantics — supports custom lines).
-        //   • Fall back to matching by ItemVariant.id, because the legacy FE reads
-        //     SaleItemDto.id (which is JSON-aliased to itemVariantId via
-        //     @JsonProperty("id")) and sends it back as saleItemId. Custom lines
-        //     with no variant will only ever match via PK.
+        // Match by SaleItem PK — FE now sends the real saleItemId (mapped from
+        // SaleItem.id, distinct from the itemVariantId JSON-aliased as `id`).
         for (SaleReturnDto.SaleReturnItemDto returnItem : returnDto.getReturnItems()) {
             Long lookupId = returnItem.getSaleItemId();
             SaleItem saleItem = sale.getSaleItems().stream()
                     .filter(si -> si.getId() != null && si.getId().equals(lookupId))
                     .findFirst()
-                    .or(() -> sale.getSaleItems().stream()
-                            .filter(si -> si.getItemVariant() != null
-                                    && si.getItemVariant().getId() != null
-                                    && si.getItemVariant().getId().equals(lookupId))
-                            .findFirst())
                     .orElseThrow(() -> new EntityNotFoundAppException("Sale Item", lookupId));
 
             BigDecimal currentReturned = saleItem.getReturnedQty() != null ? saleItem.getReturnedQty() : BigDecimal.ZERO;
@@ -1031,8 +1019,6 @@ public class SaleService {
         sale.setTotalAmount(totalTaxableValue.setScale(0, RoundingMode.HALF_UP));
         sale.setRoundOff(sale.getTotalAmount().subtract(totalTaxableValue)); // Difference for ledger balancing
         sale.getSaleItems().addAll(itemsToUpdate);
-
-        // (Pharmacy-specific fields removed — Phase 1 will drop columns from DB)
 
         Sale saved = saleRepository.save(sale);
 

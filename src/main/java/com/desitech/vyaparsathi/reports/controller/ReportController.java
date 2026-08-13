@@ -157,6 +157,52 @@ public class ReportController {
                 }
     }
 
+    @GetMapping("/z-report")
+    @Operation(summary = "End-of-day (Z) report",
+            description = "Cash-flow oriented shift close-out for the given date. " +
+                    "Includes payment-method breakdown from the Payment ledger so multi-tender sales " +
+                    "reconcile correctly against the drawer. Defaults to today.")
+    public ResponseEntity<com.desitech.vyaparsathi.reports.dto.ZReportDto> getZReport(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) String date
+    ) {
+        LocalDate d = (date == null || date.isBlank() || "undefined".equalsIgnoreCase(date))
+                ? null
+                : LocalDate.parse(date);
+        try {
+            var result = service.getZReport(d);
+            logger.info("Fetched Z-report for date={}, salesCount={}, cashTotal={}",
+                    result.getDate(), result.getSalesCount(), result.getCashSalesTotal());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching Z-report for date={}: {}", d, e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch Z-report", e);
+        }
+    }
+
+    @GetMapping("/salesperson-leaderboard")
+    @Operation(summary = "Salesperson leaderboard",
+            description = "Ranks users by attributed sales value in the window. Uses sale-level " +
+                    "salespersonId only; sales without an assigned salesperson are skipped.")
+    public ResponseEntity<List<com.desitech.vyaparsathi.reports.dto.SalespersonLeaderboardDto>> getSalespersonLeaderboard(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) String from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) String to
+    ) {
+        LocalDate fromDate = (from == null || from.isBlank() || "undefined".equalsIgnoreCase(from))
+                ? null
+                : LocalDate.parse(from);
+        LocalDate toDate = (to == null || to.isBlank() || "undefined".equalsIgnoreCase(to))
+                ? null
+                : LocalDate.parse(to);
+        try {
+            var result = service.getSalespersonLeaderboard(fromDate, toDate);
+            logger.info("Fetched salesperson leaderboard from {} to {} — {} ranked", fromDate, toDate, result.size());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching salesperson leaderboard from {} to {}: {}", fromDate, toDate, e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch salesperson leaderboard", e);
+        }
+    }
+
     @GetMapping("/customer-sales")
     @Operation(summary = "Get sales by customer", description = "Returns sales totals grouped by customer.")
     public ResponseEntity<List<CustomerSalesDto>> getCustomerSales(
@@ -249,14 +295,14 @@ public class ReportController {
     }
 
     // -------------------------------------------------------------------------
-    // PHARMACY-SPECIFIC REPORT ENDPOINTS
+    // BATCH / EXPIRY REPORT ENDPOINTS (FMCG, food perishables)
     // -------------------------------------------------------------------------
 
     @GetMapping("/expiry-report")
     @Operation(
-            summary = "Get medicine expiry report",
+            summary = "Get item expiry report",
             description = "Returns all item variants whose expiry date falls within the next N days. " +
-                    "Items that are already expired are also included. Used for pharmacy stock clearance."
+                    "Items that are already expired are also included. Used for perishable stock clearance."
     )
     public ResponseEntity<List<ExpiryReportItemDto>> getExpiryReport(
             @Parameter(description = "Number of days ahead to check for expiry (default 30)")
@@ -277,7 +323,7 @@ public class ReportController {
     @Operation(
             summary = "Get batch-wise purchase register",
             description = "Returns a batch-level purchase register linking each received batch to its supplier. " +
-                    "Required for drug recall traceability and pharmacy regulatory audits."
+                    "Required for supplier traceability and regulatory audits (recall trails)."
     )
     public ResponseEntity<List<PurchaseRegisterEntryDto>> getPurchaseRegister(
             @Parameter(description = "Start date in YYYY-MM-DD format", example = "2024-01-01")

@@ -140,35 +140,6 @@ public class ShopService {
                 createCategoryManually("TOOLS & FASTENERS", root, shop);
                 break;
 
-            case "PHARMACY":
-                Category medicines = createCategoryManually("MEDICINES", root, shop);
-                createCategoryManually("TABLETS & CAPSULES", medicines, shop);
-                createCategoryManually("SYRUPS & LIQUIDS", medicines, shop);
-                createCategoryManually("INJECTIONS & DROPS", medicines, shop);
-                createCategoryManually("OINTMENTS & CREAMS", medicines, shop);
-                createCategoryManually("ANTIBIOTICS", medicines, shop);
-                createCategoryManually("VITAMINS & SUPPLEMENTS", medicines, shop);
-                createCategoryManually("AYURVEDIC & HERBAL", medicines, shop);
-
-                Category surgicals = createCategoryManually("SURGICALS", root, shop);
-                createCategoryManually("BANDAGES & DRESSINGS", surgicals, shop);
-                createCategoryManually("SYRINGES & NEEDLES", surgicals, shop);
-                createCategoryManually("GLOVES & MASKS", surgicals, shop);
-                createCategoryManually("DIAGNOSTIC DEVICES", surgicals, shop);
-
-                Category personalCare = createCategoryManually("PERSONAL CARE", root, shop);
-                createCategoryManually("SKIN CARE", personalCare, shop);
-                createCategoryManually("BABY CARE", personalCare, shop);
-                createCategoryManually("HAIR CARE", personalCare, shop);
-                createCategoryManually("EYE & EAR CARE", personalCare, shop);
-
-                Category wellness = createCategoryManually("WELLNESS", root, shop);
-                createCategoryManually("HEALTH DRINKS", wellness, shop);
-                createCategoryManually("FITNESS & NUTRITION", wellness, shop);
-                createCategoryManually("DIABETIC CARE", wellness, shop);
-                createCategoryManually("CARDIAC & BP CARE", wellness, shop);
-                break;
-
             case "GROCERY":
                 createCategoryManually("DAIRY & BAKERY", root, shop);
                 createCategoryManually("STAPLES", root, shop);

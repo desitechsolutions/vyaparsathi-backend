@@ -32,10 +32,14 @@ public class DeliveryMetricsDto {
     /** Average hours from {@code createdAt} → {@code deliveredAt} for DELIVERED rows. */
     private double avgLeadTimeHours;
 
-    /** Sum of COD amounts marked collected in the range. */
+    /**
+     * Sum of COD amounts whose {@code codCollectedAt} falls in the range —
+     * i.e. cash actually received in the window. A delivery created before the
+     * window but paid inside it still contributes here (fixed 2026-08-13).
+     */
     private BigDecimal codCollectedTotal;
 
-    /** Number of DELIVERED rows in the range with codCollected=true. */
+    /** Number of deliveries whose {@code codCollectedAt} falls in the range. */
     private long codCollectedCount;
 
     private List<PerPersonMetrics> perPerson;

@@ -106,7 +106,7 @@ public interface StockMovementRepository extends BaseRepository<StockMovement, L
     /**
      * Returns per-batch net stock for a list of variant IDs.
      * Only batches with a positive remaining quantity are returned.
-     * Used by the pharmacy batch-wise stock view.
+     * Used by the batch-wise stock view (FMCG/food perishables).
      */
     @Query("SELECT sm.itemVariant.id AS variantId, " +
             "sm.batch AS batchNumber, " +

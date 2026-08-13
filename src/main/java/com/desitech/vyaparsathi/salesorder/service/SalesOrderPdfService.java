@@ -339,6 +339,11 @@ public class SalesOrderPdfService {
         if (nz(so.getInvoiceDiscount()).signum() > 0) totalRow(totals, "Discount", "- " + currency.format(so.getInvoiceDiscount()), body);
         if (nz(so.getShippingCharges()).signum() > 0) totalRow(totals, "Shipping", currency.format(so.getShippingCharges()), body);
         if (nz(so.getOtherCharges()).signum() > 0) totalRow(totals, "Other Charges", currency.format(so.getOtherCharges()), body);
+        if (nz(so.getRoundOff()).signum() != 0) {
+            BigDecimal ro = so.getRoundOff();
+            String prefix = ro.signum() > 0 ? "+ " : "- ";
+            totalRow(totals, "Round Off", prefix + currency.format(ro.abs()), body);
+        }
 
         PdfPCell gtl = new PdfPCell(new Phrase("ORDER TOTAL", grandTotalWhite));
         gtl.setBackgroundColor(brand);

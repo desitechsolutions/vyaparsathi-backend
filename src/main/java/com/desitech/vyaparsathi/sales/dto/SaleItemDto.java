@@ -14,15 +14,10 @@ public class SaleItemDto {
 
     /**
      * Primary key of the persisted {@code SaleItem} row. Populated by the mapper
-     * on reads; null on writes (server generates it). This is the correct id
-     * to echo back in operations that need to target a specific line — most
-     * notably {@code POST /api/sales/{id}/return}, which must resolve custom
-     * (variant-less) lines that {@link #itemVariantId} can't identify.
-     *
-     * Sits alongside the legacy {@code @JsonProperty("id")} alias below —
-     * old clients that echo {@code id} as a sale-item key keep working
-     * because the server tries {@code saleItemId} first, then falls back to
-     * matching by variant id. See {@code SaleService.processSaleReturn}.
+     * on reads; null on writes (server generates it). This is the id
+     * {@code POST /api/sales/{id}/return} keys on to target a specific line —
+     * required for custom (variant-less) lines that {@link #itemVariantId}
+     * can't identify.
      */
     private Long saleItemId;
 
@@ -51,13 +46,13 @@ public class SaleItemDto {
     private BigDecimal netQty;
 
     /**
-     * Batch/lot number of the specific item dispensed.
+     * Batch/lot number of the specific item sold.
      * Captured at point-of-sale for batch traceability and recall tracking.
      */
     private String batchNumber;
 
     /**
-     * Expiry date of the specific batch dispensed.
+     * Expiry date of the specific batch sold.
      * Stored per sale-item for invoice printing and traceability compliance.
      */
     private java.time.LocalDate expiryDate;

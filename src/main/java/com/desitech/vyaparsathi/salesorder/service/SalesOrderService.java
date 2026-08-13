@@ -485,12 +485,16 @@ public class SalesOrderService {
         so.setTotalCgst(cgst);
         so.setTotalSgst(sgst);
         so.setTotalIgst(igst);
-        BigDecimal grand = taxable.add(cgst).add(sgst).add(igst)
+        BigDecimal grandRaw = taxable.add(cgst).add(sgst).add(igst)
                 .subtract(nz(so.getInvoiceDiscount()))
                 .add(nz(so.getShippingCharges()))
                 .add(nz(so.getOtherCharges()))
                 .max(BigDecimal.ZERO);
-        so.setTotalAmount(grand.setScale(2, RoundingMode.HALF_UP));
+        // Round to whole rupee so the on-screen preview, saved total, and PDF
+        // all agree — and the resulting Sale after conversion matches exactly.
+        BigDecimal grandRounded = grandRaw.setScale(0, RoundingMode.HALF_UP);
+        so.setRoundOff(grandRounded.subtract(grandRaw).setScale(2, RoundingMode.HALF_UP));
+        so.setTotalAmount(grandRounded);
     }
 
     private static BigDecimal nz(BigDecimal v) { return v != null ? v : BigDecimal.ZERO; }
@@ -519,6 +523,7 @@ public class SalesOrderService {
         dto.setShippingCharges(so.getShippingCharges());
         dto.setOtherCharges(so.getOtherCharges());
         dto.setTotalAmount(so.getTotalAmount());
+        dto.setRoundOff(so.getRoundOff());
         dto.setIsGstRequired(so.getIsGstRequired());
         dto.setNotes(so.getNotes());
         dto.setTerms(so.getTerms());

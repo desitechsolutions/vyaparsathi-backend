@@ -31,6 +31,8 @@ public class QuotationDto {
     private BigDecimal shippingCharges = BigDecimal.ZERO;
     private BigDecimal otherCharges = BigDecimal.ZERO;
     private BigDecimal totalAmount;
+    /** Rounding adjustment applied to reach a whole-rupee total. See {@code Quotation.roundOff}. */
+    private BigDecimal roundOff = BigDecimal.ZERO;
 
     private Boolean isGstRequired = Boolean.TRUE;
 

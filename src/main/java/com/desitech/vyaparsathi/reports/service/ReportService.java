@@ -62,6 +62,12 @@ public class ReportService {
     @Autowired
     private ReceivingRepository receivingRepository;
 
+    @Autowired
+    private com.desitech.vyaparsathi.auth.repository.UserRepository userRepository;
+
+    @Autowired
+    private com.desitech.vyaparsathi.payment.repository.PaymentRepository paymentRepository;
+
     private void validateDateRange(LocalDate from, LocalDate to) {
         if (from != null && to != null && from.isAfter(to)) {
             throw new IllegalArgumentException("From date cannot be after to date");
@@ -420,6 +426,71 @@ public class ReportService {
         return new ArrayList<>(categoryMap.values());
     }
 
+    /**
+     * Salesperson leaderboard — rank users by attributed sales value in the
+     * date window. Uses {@code Sale.salespersonId} only (sale-level attribution).
+     * Per-line attribution ({@code SaleItem.salespersonId}) is ignored here —
+     * it's a future refinement for shift-split lines. CANCELLED sales are
+     * included with their negative-impact stripped by relying on the row's
+     * {@code grandTotal} still being the invoice total; if you want to exclude
+     * cancelled rows entirely, filter here.
+     */
+    public List<SalespersonLeaderboardDto> getSalespersonLeaderboard(LocalDate fromDate, LocalDate toDate) {
+        validateDateRange(fromDate, toDate);
+        List<Sale> sales = getSalesByDateRange(fromDate, toDate);
+
+        Map<Long, SalespersonLeaderboardDto> byPerson = new HashMap<>();
+        for (Sale sale : sales) {
+            Long spId = sale.getSalespersonId();
+            if (spId == null) continue; // unassigned sales don't rank anyone
+            BigDecimal amount = sale.getGrandTotal() != null ? sale.getGrandTotal() : ZERO;
+            SalespersonLeaderboardDto row = byPerson.computeIfAbsent(spId,
+                    id -> new SalespersonLeaderboardDto(0, id, null, ZERO, 0L, ZERO));
+            row.setTotalSales(row.getTotalSales().add(amount));
+            row.setSaleCount(row.getSaleCount() + 1);
+        }
+
+        // Resolve display names in one lookup.
+        if (!byPerson.isEmpty()) {
+            List<Long> ids = new ArrayList<>(byPerson.keySet());
+            userRepository.findAllById(ids).forEach(u -> {
+                SalespersonLeaderboardDto row = byPerson.get(u.getId());
+                if (row != null) {
+                    String display;
+                    String first = u.getFirstName();
+                    String last = u.getLastName();
+                    if (first != null && !first.isBlank()) {
+                        display = (last != null && !last.isBlank()) ? (first + " " + last) : first;
+                    } else if (u.getUsername() != null && !u.getUsername().isBlank()) {
+                        display = u.getUsername();
+                    } else {
+                        display = "User #" + u.getId();
+                    }
+                    row.setSalespersonName(display);
+                }
+            });
+        }
+        // Anyone still nameless (deleted user, missing row) gets a fallback.
+        byPerson.forEach((id, row) -> {
+            if (row.getSalespersonName() == null) row.setSalespersonName("User #" + id);
+        });
+
+        // Compute avg + sort + assign 1-indexed rank.
+        List<SalespersonLeaderboardDto> ranked = byPerson.values().stream()
+                .peek(row -> {
+                    BigDecimal avg = row.getSaleCount() == 0
+                            ? ZERO
+                            : row.getTotalSales().divide(BigDecimal.valueOf(row.getSaleCount()), 2, RoundingMode.HALF_UP);
+                    row.setAvgSaleValue(avg);
+                })
+                .sorted(Comparator.comparing(SalespersonLeaderboardDto::getTotalSales).reversed())
+                .collect(Collectors.toList());
+        for (int i = 0; i < ranked.size(); i++) {
+            ranked.get(i).setRank(i + 1);
+        }
+        return ranked;
+    }
+
     public List<CustomerSalesDto> getCustomerSales(LocalDate fromDate, LocalDate toDate) {
         validateDateRange(fromDate, toDate);
         List<Sale> sales = getSalesByDateRange(fromDate, toDate);
@@ -493,6 +564,85 @@ public class ReportService {
                 .sum();
 
         return new PaymentsSummaryDto(totalPayments, paymentCount);
+    }
+
+    /**
+     * End-of-day Z-report — cash-flow oriented shift close sheet.
+     * See {@link com.desitech.vyaparsathi.reports.dto.ZReportDto}.
+     *
+     * Uses payment records (not sale rows) for the method breakdown so amounts
+     * reflect what actually hit the drawer, not the invoice total. A ₹1000 sale
+     * paid ₹700 cash + ₹300 UPI shows up as (700, 300) here.
+     */
+    public com.desitech.vyaparsathi.reports.dto.ZReportDto getZReport(LocalDate date) {
+        LocalDate d = date != null ? date : LocalDate.now();
+        LocalDateTime start = d.atStartOfDay();
+        LocalDateTime end = d.atTime(23, 59, 59, 999_999_999);
+        List<Sale> sales = saleRepository.findByDateBetween(start, end);
+
+        long salesCount = 0;
+        long cancelledCount = 0;
+        long returnedCount = 0;
+        BigDecimal grossSales = ZERO;
+        BigDecimal totalDiscount = ZERO;
+        BigDecimal totalGst = ZERO;
+        BigDecimal returnedRefund = ZERO;
+
+        for (Sale s : sales) {
+            com.desitech.vyaparsathi.sales.enums.SaleStatus status = s.getStatus();
+            boolean isCancelled = status == com.desitech.vyaparsathi.sales.enums.SaleStatus.CANCELLED;
+            boolean isReturned = status == com.desitech.vyaparsathi.sales.enums.SaleStatus.RETURNED
+                    || status == com.desitech.vyaparsathi.sales.enums.SaleStatus.PARTIALLY_RETURNED;
+            if (isCancelled) { cancelledCount++; continue; }
+            if (isReturned) returnedCount++;
+            salesCount++;
+
+            BigDecimal grand = s.getGrandTotal() != null ? s.getGrandTotal() : ZERO;
+            grossSales = grossSales.add(grand);
+            BigDecimal invDisc = s.getInvoiceDiscount() != null ? s.getInvoiceDiscount() : ZERO;
+            BigDecimal lineDisc = ZERO;
+            for (SaleItem si : s.getSaleItems()) {
+                if (si.getDiscount() != null) lineDisc = lineDisc.add(si.getDiscount());
+                if (si.getReturnedQty() != null && si.getReturnedQty().signum() > 0 && si.getUnitPrice() != null) {
+                    returnedRefund = returnedRefund.add(si.getReturnedQty().multiply(si.getUnitPrice()));
+                }
+            }
+            totalDiscount = totalDiscount.add(invDisc).add(lineDisc);
+            totalGst = totalGst.add(
+                    s.getCgstAmount()).add(s.getSgstAmount()).add(s.getIgstAmount()).add(s.getUtgstAmount());
+        }
+
+        BigDecimal netSales = grossSales.subtract(returnedRefund).max(ZERO);
+
+        // Payment method breakdown — pull directly from the Payment table so the
+        // totals reflect drawer-level cash flow (multi-tender sales resolve
+        // correctly).
+        Long shopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        List<com.desitech.vyaparsathi.reports.dto.ZReportDto.PaymentMethodBreakdown> breakdown = new ArrayList<>();
+        BigDecimal cashTotal = ZERO;
+        BigDecimal digitalTotal = ZERO;
+        if (shopId != null) {
+            List<Object[]> rows = paymentRepository.sumSalePaymentsByMethodForShop(shopId, start, end);
+            for (Object[] row : rows) {
+                com.desitech.vyaparsathi.payment.enums.PaymentMethod method =
+                        (com.desitech.vyaparsathi.payment.enums.PaymentMethod) row[0];
+                BigDecimal sum = row[1] == null ? ZERO : (BigDecimal) row[1];
+                Long count = (Long) row[2];
+                breakdown.add(new com.desitech.vyaparsathi.reports.dto.ZReportDto.PaymentMethodBreakdown(
+                        method.name(), sum, count == null ? 0L : count));
+                if (method == com.desitech.vyaparsathi.payment.enums.PaymentMethod.CASH) {
+                    cashTotal = cashTotal.add(sum);
+                } else {
+                    digitalTotal = digitalTotal.add(sum);
+                }
+            }
+        }
+
+        return new com.desitech.vyaparsathi.reports.dto.ZReportDto(
+                d,
+                salesCount, cancelledCount, returnedCount,
+                grossSales, totalDiscount, totalGst, netSales,
+                breakdown, cashTotal, digitalTotal);
     }
 
     public byte[] generateAuditZip(LocalDate from, LocalDate to) throws IOException {
@@ -600,7 +750,7 @@ public class ReportService {
     }
 
     // -------------------------------------------------------------------------
-    // PHARMACY-SPECIFIC REPORTS
+    // BATCH / EXPIRY REPORTS (FMCG, food perishables)
     // -------------------------------------------------------------------------
 
     /**

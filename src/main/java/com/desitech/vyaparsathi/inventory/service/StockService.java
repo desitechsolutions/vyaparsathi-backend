@@ -53,8 +53,7 @@ public class StockService {
         BigDecimal costPerUnit = dto.getCostPerUnit() != null ? dto.getCostPerUnit() : BigDecimal.ZERO;
         BigDecimal quantity = dto.getQuantity();
 
-        // Update pharmacy-specific fields on the variant when a new batch is received.
-        // This keeps the ItemVariant's batch metadata in sync with the latest stock receipt.
+        // Sync the ItemVariant's batch metadata (batch/mfg/expiry) with the latest stock receipt.
         boolean variantUpdated = false;
         if (dto.getBatch() != null && !dto.getBatch().isBlank()) {
             itemVariant.setBatchNumber(dto.getBatch());
@@ -401,7 +400,7 @@ public class StockService {
     /**
      * Returns expiry alerts for all item variants whose expiry date falls within
      * the given number of days from today. Items already expired are also included.
-     * Primarily used by pharmacy shops.
+     * Used by shops that track perishables (FMCG, food, cosmetics).
      *
      * @param daysBeforeExpiry number of days ahead to check (e.g., 90 means warn 90 days before expiry)
      * @return list of expiry alert DTOs sorted by expiry date ascending

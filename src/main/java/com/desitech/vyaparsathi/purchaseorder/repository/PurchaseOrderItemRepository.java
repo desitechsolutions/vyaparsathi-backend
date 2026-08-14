@@ -27,16 +27,26 @@ public interface PurchaseOrderItemRepository extends BaseRepository<PurchaseOrde
     }
 
     /**
-     * Calculates the total quantity of items that are part of a pending purchase order
-     * (i.e., not yet 'RECEIVED' or 'CANCELLED') for a given list of item variant IDs.
+     * Truly on-order quantity — ordered minus already-received — for POs
+     * that are not yet closed (RECEIVED) or aborted (CANCELLED).
      *
-     * @param variantIds A list of item variant IDs to check.
-     * @return A list of OnOrderQuantity projections.
+     * <p>V81 bug fix: the previous version summed {@code poi.quantity} for
+     * all non-terminal POs, which double-counted the already-received
+     * portion of a PARTIALLY_RECEIVED PO (that quantity was in stock AND
+     * still counted as on-order). We now subtract {@code received_quantity},
+     * clamped at zero so a receiving overage doesn't turn on-order negative.
+     * A missing DB value (older rows before the migration ran) reads as 0
+     * via COALESCE so the calculation stays safe.
+     *
+     * <p>Legacy DRAFT rows are also excluded — a draft isn't a commitment.
      */
-    @Query("SELECT poi.itemVariant.id as variantId, SUM(poi.quantity) as totalOnOrder " +
+    @Query("SELECT poi.itemVariant.id as variantId, " +
+            "SUM(CASE WHEN poi.quantity - COALESCE(poi.receivedQuantity, 0) > 0 " +
+            "         THEN poi.quantity - COALESCE(poi.receivedQuantity, 0) " +
+            "         ELSE 0 END) as totalOnOrder " +
             "FROM PurchaseOrderItem poi " +
             "WHERE poi.itemVariant.id IN :variantIds " +
-            "AND poi.purchaseOrder.status NOT IN ('RECEIVED', 'CANCELLED') " +
+            "AND poi.purchaseOrder.status NOT IN ('RECEIVED', 'CANCELLED', 'DRAFT') " +
             "GROUP BY poi.itemVariant.id")
     List<OnOrderQuantity> findOnOrderQuantitiesByItemVariantIds(@Param("variantIds") List<Long> variantIds);
 

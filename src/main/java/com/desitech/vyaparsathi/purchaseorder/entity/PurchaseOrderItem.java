@@ -32,6 +32,16 @@ public class PurchaseOrderItem extends ShopAwareEntity {
     @Column(name = "unit_cost", nullable = false)
     private BigDecimal unitCost;
 
+    /**
+     * Cumulative received quantity for this PO line (V81). Powers the
+     * ordered-vs-received progress bar in the redesigned PO detail page
+     * and the corrected on-order calc in {@code
+     * PurchaseOrderItemRepository.findOnOrderQuantitiesByItemVariantIds}.
+     * Defaults to zero server-side; the receiving listener increments it.
+     */
+    @Column(name = "received_quantity", nullable = false, precision = 12, scale = 2)
+    private BigDecimal receivedQuantity = BigDecimal.ZERO;
+
     public PurchaseOrder getPurchaseOrder() { return purchaseOrder; }
     public void setPurchaseOrder(PurchaseOrder purchaseOrder) { this.purchaseOrder = purchaseOrder; }
 
@@ -43,4 +53,7 @@ public class PurchaseOrderItem extends ShopAwareEntity {
 
     public BigDecimal getUnitCost() { return unitCost; }
     public void setUnitCost(BigDecimal unitCost) { this.unitCost = unitCost; }
+
+    public BigDecimal getReceivedQuantity() { return receivedQuantity; }
+    public void setReceivedQuantity(BigDecimal receivedQuantity) { this.receivedQuantity = receivedQuantity; }
 }

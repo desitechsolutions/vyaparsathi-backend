@@ -24,6 +24,16 @@ public class PurchaseOrderDto {
     private List<PurchaseOrderItemDto> items;
     private SupplierDto supplier;
 
+    // ─── State-machine audit stamps (V81, read-only on the wire) ──────
+    @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
+    private LocalDateTime sentAt;
+    @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
+    private LocalDateTime receivedAt;
+    @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
+    private LocalDateTime cancelledAt;
+    private Long cancelledBy;
+    private String cancellationReason;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -53,4 +63,19 @@ public class PurchaseOrderDto {
 
     public SupplierDto getSupplier() { return supplier; }
     public void setSupplier(SupplierDto supplier) { this.supplier = supplier; }
+
+    public LocalDateTime getSentAt() { return sentAt; }
+    public void setSentAt(LocalDateTime sentAt) { this.sentAt = sentAt; }
+
+    public LocalDateTime getReceivedAt() { return receivedAt; }
+    public void setReceivedAt(LocalDateTime receivedAt) { this.receivedAt = receivedAt; }
+
+    public LocalDateTime getCancelledAt() { return cancelledAt; }
+    public void setCancelledAt(LocalDateTime cancelledAt) { this.cancelledAt = cancelledAt; }
+
+    public Long getCancelledBy() { return cancelledBy; }
+    public void setCancelledBy(Long cancelledBy) { this.cancelledBy = cancelledBy; }
+
+    public String getCancellationReason() { return cancellationReason; }
+    public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
 }

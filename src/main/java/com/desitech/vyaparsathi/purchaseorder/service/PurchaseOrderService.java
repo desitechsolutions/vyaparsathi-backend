@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -93,11 +94,9 @@ public class PurchaseOrderService {
     }
 
     public List<PurchaseOrderDto> findAllPurchaseOrders() {
-        List<PurchaseOrderDto> orderDtos = purchaseOrderRepository.findAll().stream()
+        return purchaseOrderRepository.findAll().stream()
                 .map(mapper::toDto)
                 .toList();
-        System.out.println(orderDtos);
-        return orderDtos;
     }
 
     public PurchaseOrderDto findPurchaseOrderById(Long id) {
@@ -172,26 +171,122 @@ public class PurchaseOrderService {
         return mapper.toDto(savedPO);
     }
 
+    /**
+     * Hard-delete a PO. Only permitted while still in DRAFT — anything past
+     * DRAFT is a real commitment (Kafka events fired, receiving workflow
+     * possibly begun, supplier possibly notified) and must be cancelled
+     * via {@link #cancelPurchaseOrder(Long, String, Long)} instead.
+     */
     @Transactional
     public void deletePurchaseOrder(Long id) {
-        if (!purchaseOrderRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Purchase Order not found with ID: " + id);
+        PurchaseOrder po = purchaseOrderRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
+        if (!po.getStatus().isEditable()) {
+            throw new IllegalStateException(
+                    "Only draft POs can be deleted. Cancel this PO instead (current status: " + po.getStatus() + ").");
         }
-        PurchaseOrder po = purchaseOrderRepository.findById(id).orElseThrow();
         purchaseOrderRepository.deleteById(id);
-
-        // Emit Kafka event after delete (eventType = "DELETED")
-        PurchaseOrderEventDto eventDto = PurchaseOrderEventDto.fromEntity(po);
-        purchaseOrderProducer.sendMessage(EventType.DELETED, eventDto);
+        purchaseOrderProducer.sendMessage(EventType.DELETED, PurchaseOrderEventDto.fromEntity(po));
     }
 
-    public List<PurchaseOrderDto> getPendingPurchaseOrders() {
+    /**
+     * "Open" POs = still expect activity. Replaces the ambiguous
+     * {@code getPendingPurchaseOrders()} which mixed SUBMITTED with the
+     * now-deprecated PENDING status.
+     */
+    public List<PurchaseOrderDto> findOpenOrders() {
         List<PurchaseOrderStatus> includedStatuses = Arrays.asList(
                 PurchaseOrderStatus.SUBMITTED,
-                PurchaseOrderStatus.PENDING
+                PurchaseOrderStatus.PARTIALLY_RECEIVED
         );
-        List<PurchaseOrder> pos = purchaseOrderRepository.findAllByStatusIn(includedStatuses);
-        return pos.stream().map(mapper::toDto).collect(Collectors.toList());
+        return purchaseOrderRepository.findAllByStatusIn(includedStatuses).stream()
+                .map(mapper::toDto)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * @deprecated V81 rename. Use {@link #findOpenOrders()}. Kept as a
+     * pass-through so the existing {@code GET /api/purchase-orders/pending}
+     * endpoint doesn't break any FE caller mid-migration.
+     */
+    @Deprecated
+    public List<PurchaseOrderDto> getPendingPurchaseOrders() {
+        return findOpenOrders();
+    }
+
+    // ─── V81 lifecycle actions ────────────────────────────────────────
+
+    /**
+     * Cancel a PO. Legal from every non-terminal status except DRAFT
+     * (drafts get deleted instead). Records who cancelled + why for audit,
+     * emits a CANCELLED Kafka event so downstream listeners (receiving,
+     * analytics) can react.
+     */
+    @Transactional
+    public PurchaseOrderDto cancelPurchaseOrder(Long id, String reason, Long cancelledByUserId) {
+        PurchaseOrder po = purchaseOrderRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
+        if (po.getStatus() == PurchaseOrderStatus.DRAFT) {
+            throw new IllegalStateException("Delete draft POs instead of cancelling.");
+        }
+        if (po.getStatus().isTerminal()) {
+            throw new IllegalStateException("PO is already " + po.getStatus() + " and cannot be cancelled.");
+        }
+        po.setStatus(PurchaseOrderStatus.CANCELLED);
+        po.setCancelledAt(LocalDateTime.now());
+        po.setCancelledBy(cancelledByUserId);
+        po.setCancellationReason(reason);
+        PurchaseOrder saved = purchaseOrderRepository.save(po);
+        purchaseOrderProducer.sendMessage(EventType.CANCELLED, PurchaseOrderEventDto.fromEntity(saved));
+        return mapper.toDto(saved);
+    }
+
+    /**
+     * Records that the PO has been fully received. Called by the receiving
+     * flow once cumulative received qty ≥ ordered qty on every line. Safe
+     * to call from any non-terminal status; already-RECEIVED calls are
+     * treated as idempotent no-ops.
+     */
+    @Transactional
+    public PurchaseOrderDto markAsReceived(Long id) {
+        PurchaseOrder po = purchaseOrderRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
+        if (po.getStatus() == PurchaseOrderStatus.CANCELLED) {
+            throw new IllegalStateException("Cancelled POs cannot be marked received.");
+        }
+        if (po.getStatus() == PurchaseOrderStatus.RECEIVED) {
+            return mapper.toDto(po); // idempotent
+        }
+        po.setStatus(PurchaseOrderStatus.RECEIVED);
+        po.setReceivedAt(LocalDateTime.now());
+        PurchaseOrder saved = purchaseOrderRepository.save(po);
+        purchaseOrderProducer.sendMessage(EventType.RECEIVED, PurchaseOrderEventDto.fromEntity(saved));
+        return mapper.toDto(saved);
+    }
+
+    /**
+     * Records that the PO has been sent to the supplier. Phase 1 stamps
+     * {@code sent_at} only; Phase 5 wires the actual email dispatch via
+     * the existing {@code EmailService}. Safe to call from SUBMITTED or
+     * later so a shop can re-send if the supplier lost the previous copy.
+     */
+    @Transactional
+    public PurchaseOrderDto sendToSupplier(Long id) {
+        PurchaseOrder po = purchaseOrderRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found with ID: " + id));
+        if (po.getStatus() == PurchaseOrderStatus.DRAFT) {
+            throw new IllegalStateException("Submit the PO before sending to a supplier.");
+        }
+        if (po.getStatus() == PurchaseOrderStatus.CANCELLED) {
+            throw new IllegalStateException("Cannot send a cancelled PO.");
+        }
+        po.setSentAt(LocalDateTime.now());
+        PurchaseOrder saved = purchaseOrderRepository.save(po);
+        // No new EventType.SENT yet — additive change deferred until the
+        // receiving listener signals it wants to observe sends. Reusing
+        // UPDATED so downstream doesn't see an unknown type.
+        purchaseOrderProducer.sendMessage(EventType.UPDATED, PurchaseOrderEventDto.fromEntity(saved));
+        return mapper.toDto(saved);
     }
 
     // ─── Receiving ────────────────────────────────────────────────────────────

@@ -48,6 +48,27 @@ public class PurchaseOrder extends ShopAwareEntity {
     @Enumerated(EnumType.STRING)
     private PaymentStatus paymentStatus = PaymentStatus.PENDING;
 
+    // ─── State-machine audit stamps (V81) ─────────────────────────────
+    // Populated by the corresponding service transitions:
+    //  * sentAt        — sendToSupplier() records when the PO was emailed.
+    //  * receivedAt    — markAsReceived() records final fulfilment.
+    //  * cancelledAt / cancelledBy / cancellationReason — cancelPurchaseOrder().
+
+    @Column(name = "sent_at")
+    private LocalDateTime sentAt;
+
+    @Column(name = "received_at")
+    private LocalDateTime receivedAt;
+
+    @Column(name = "cancelled_at")
+    private LocalDateTime cancelledAt;
+
+    @Column(name = "cancelled_by")
+    private Long cancelledBy;
+
+    @Column(name = "cancellation_reason", length = 500)
+    private String cancellationReason;
+
     @JsonManagedReference
     @OneToMany(mappedBy = "purchaseOrder", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<PurchaseOrderItem> items;
@@ -78,4 +99,19 @@ public class PurchaseOrder extends ShopAwareEntity {
 
     public List<PurchaseOrderItem> getItems() { return items; }
     public void setItems(List<PurchaseOrderItem> items) { this.items = items; }
+
+    public LocalDateTime getSentAt() { return sentAt; }
+    public void setSentAt(LocalDateTime sentAt) { this.sentAt = sentAt; }
+
+    public LocalDateTime getReceivedAt() { return receivedAt; }
+    public void setReceivedAt(LocalDateTime receivedAt) { this.receivedAt = receivedAt; }
+
+    public LocalDateTime getCancelledAt() { return cancelledAt; }
+    public void setCancelledAt(LocalDateTime cancelledAt) { this.cancelledAt = cancelledAt; }
+
+    public Long getCancelledBy() { return cancelledBy; }
+    public void setCancelledBy(Long cancelledBy) { this.cancelledBy = cancelledBy; }
+
+    public String getCancellationReason() { return cancellationReason; }
+    public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
 }

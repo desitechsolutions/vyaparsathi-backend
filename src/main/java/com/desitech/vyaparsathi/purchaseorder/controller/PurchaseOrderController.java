@@ -1,5 +1,7 @@
 package com.desitech.vyaparsathi.purchaseorder.controller;
 
+import com.desitech.vyaparsathi.auth.security.CustomUserDetails;
+import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderCancelDto;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderDto;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderItemDto;
 import com.desitech.vyaparsathi.purchaseorder.service.PurchaseOrderService;
@@ -7,6 +9,7 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
@@ -77,5 +80,53 @@ public class PurchaseOrderController {
     @GetMapping("/pending")
     public List<PurchaseOrderDto> getPendingPurchaseOrders() {
         return purchaseOrderService.getPendingPurchaseOrders();
+    }
+
+    /**
+     * Zoho-parity: an "open" alias for the pending endpoint. The old
+     * {@code /pending} path stays for backward-compat with any client
+     * still calling it.
+     */
+    @GetMapping("/open")
+    public List<PurchaseOrderDto> getOpenOrders() {
+        return purchaseOrderService.findOpenOrders();
+    }
+
+    /**
+     * Cancel a committed PO. Requires a written reason; the current user
+     * id is stamped on the row so the timeline shows who authorised it.
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<PurchaseOrderDto> cancel(
+            @PathVariable Long id,
+            @Valid @RequestBody PurchaseOrderCancelDto body,
+            @AuthenticationPrincipal CustomUserDetails principal) {
+        Long userId = principal != null ? principal.getId() : null;
+        return ResponseEntity.ok(
+                purchaseOrderService.cancelPurchaseOrder(id, body.getReason(), userId));
+    }
+
+    /**
+     * Send the PO to the supplier. Phase 1 records the timestamp; Phase 5
+     * dispatches the actual email via the existing EmailService.
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
+    @PostMapping("/{id}/send")
+    public ResponseEntity<PurchaseOrderDto> send(@PathVariable Long id) {
+        return ResponseEntity.ok(purchaseOrderService.sendToSupplier(id));
+    }
+
+    /**
+     * Mark the PO fully received. In normal flow this is invoked by the
+     * receiving listener once every line hits ordered = received. Manual
+     * endpoint exists so an admin can close a PO under an edge case
+     * (e.g., supplier can't deliver the last N units and both sides agree
+     * to close early).
+     */
+    @PreAuthorize("hasAnyRole('ADMIN','OWNER')")
+    @PostMapping("/{id}/mark-received")
+    public ResponseEntity<PurchaseOrderDto> markReceived(@PathVariable Long id) {
+        return ResponseEntity.ok(purchaseOrderService.markAsReceived(id));
     }
 }

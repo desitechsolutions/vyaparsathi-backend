@@ -11,6 +11,8 @@ public class PurchaseOrderItemDto {
     private BigDecimal unitCost;
     private String sku;
     private String name;
+    /** V81 — cumulative received qty; used by the FE receipt-progress bar. */
+    private BigDecimal receivedQuantity;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -29,4 +31,7 @@ public class PurchaseOrderItemDto {
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+
+    public BigDecimal getReceivedQuantity() { return receivedQuantity; }
+    public void setReceivedQuantity(BigDecimal receivedQuantity) { this.receivedQuantity = receivedQuantity; }
 }

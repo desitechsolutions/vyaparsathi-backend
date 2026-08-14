@@ -4,6 +4,7 @@ import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.SubscriptionException;
+import com.desitech.vyaparsathi.sales.repository.SaleRepository;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import com.desitech.vyaparsathi.subscriptions.dto.*;
@@ -25,6 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -38,6 +40,7 @@ public class SubscriptionService {
     private final ShopRepository shopRepository;
     private final UserRepository userRepository;
     private final PricingPlanService pricingPlanService;
+    private final SaleRepository saleRepository;
 
     private static final int TRIAL_DAYS = 14;
 
@@ -347,6 +350,11 @@ public class SubscriptionService {
                     .build();
         }
 
+        LocalDateTime startOfMonth = LocalDateTime.now()
+                .with(TemporalAdjusters.firstDayOfMonth())
+                .withHour(0).withMinute(0).withSecond(0).withNano(0);
+        long usedThisMonth = saleRepository.countMonthlySalesByShop(shopId, startOfMonth);
+
         return subscriptionRepository.findByShopId(shopId)
                 .map(sub -> {
                     LocalDateTime now = LocalDateTime.now();
@@ -388,6 +396,8 @@ public class SubscriptionService {
                     dto.setBillingCycle(sub.getBillingCycle());
                     dto.setCanProcessSale(canProcess);
                     dto.setCanStartTrial(canStartTrial);
+                    dto.setMaxSalesPerMonth(config != null ? config.getMaxSalesPerMonth() : null);
+                    dto.setSalesUsedThisMonth(usedThisMonth);
                     return dto;
                 })
                 .orElseGet(() -> {
@@ -405,6 +415,8 @@ public class SubscriptionService {
                     dto.setUsedTrial(false);
                     dto.setCanProcessSale(canProcess);
                     dto.setCanStartTrial(true);
+                    dto.setMaxSalesPerMonth(config != null ? config.getMaxSalesPerMonth() : null);
+                    dto.setSalesUsedThisMonth(usedThisMonth);
                     return dto;
                 });
     }

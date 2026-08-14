@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.inventory.service;
 
 import com.desitech.vyaparsathi.common.configs.TenantContext;
+import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.common.exception.DuplicateItemException;
 import com.desitech.vyaparsathi.inventory.dto.ItemDto;
 import com.desitech.vyaparsathi.inventory.dto.ItemVariantDto;
@@ -13,6 +14,8 @@ import com.desitech.vyaparsathi.inventory.repository.ItemRepository;
 import com.desitech.vyaparsathi.inventory.repository.ItemVariantRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,20 +38,33 @@ public class ItemService {
     @Autowired
     private ItemMapper mapper;
 
+    @Autowired
+    private StockService stockService;
+
+    @Autowired(required = false)
+    private com.desitech.vyaparsathi.supplier.repository.SupplierRepository supplierRepository;
+
     // Atomic counters for demo; in production, consider DB-sequence driven or time-based for distributed systems
     private static final AtomicLong hsnCounter = new AtomicLong(10000000);
     private static final AtomicLong skuCounter = new AtomicLong(50000000);
 
     public List<ItemDto> getAllItems() {
-        return itemRepository.findAllWithVariants().stream()
+        List<ItemDto> items = itemRepository.findAllWithVariants().stream()
                 .map(mapper::toDto)
                 .collect(Collectors.toList());
+        // Fills variant.currentStock across all items in a single query.
+        stockService.enrichCurrentStockOnItems(items);
+        return items;
     }
 
     public ItemDto getItemById(Long id) {
         Item item = itemRepository.findByIdWithVariants(id)
                 .orElseThrow(() -> new EntityNotFoundException("Item not found with id: " + id));
-        return mapper.toDto(item);
+        ItemDto dto = mapper.toDto(item);
+        if (dto.getVariants() != null) {
+            stockService.enrichCurrentStock(dto.getVariants());
+        }
+        return dto;
     }
 
     @Transactional
@@ -93,20 +109,15 @@ public class ItemService {
         Item existingItem = itemRepository.findByIdWithVariants(id)
                 .orElseThrow(() -> new EntityNotFoundException("Item not found with id: " + id));
 
-        // 2. Update Main Item Fields & Sync Legacy Attributes
+        // 2. Update Main Item Fields
         existingItem.setName(itemDto.getName());
         existingItem.setDescription(itemDto.getDescription());
         existingItem.setBrandName(itemDto.getBrandName());
-
-        // Sync logic: ensures both generic and specific columns stay identical
-        String attr1 = itemDto.getAttribute1() != null ? itemDto.getAttribute1() : itemDto.getFabric();
-        String attr2 = itemDto.getAttribute2() != null ? itemDto.getAttribute2() : itemDto.getSeason();
-        existingItem.setAttribute1(attr1);
-        existingItem.setFabric(attr1);
-        existingItem.setAttribute2(attr2);
-        existingItem.setSeason(attr2);
-
-        // Generic specifications field (renamed from composition)
+        // attribute_1 / attribute_2 are the sole source of truth since V76;
+        // the fabric / season columns are gone and their frontend readers
+        // moved to attribute_1 / attribute_2.
+        existingItem.setAttribute1(itemDto.getAttribute1());
+        existingItem.setAttribute2(itemDto.getAttribute2());
         existingItem.setSpecifications(itemDto.getSpecifications());
 
         // 3. Category Update
@@ -155,12 +166,66 @@ public class ItemService {
         Item savedItem = itemRepository.save(existingItem);
         return mapper.toDto(savedItem);
     }
+    /**
+     * Soft-delete: flags the item and all its variants inactive so they
+     * disappear from catalog listings but historical sales still resolve
+     * the FK. Blocks the delete if any variant has current stock — the
+     * user is asked to clear inventory first.
+     */
     @Transactional
     public void deleteItem(Long id) {
-        if (!itemRepository.existsById(id)) {
-            throw new EntityNotFoundException("Item not found with id: " + id);
+        Item item = itemRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Item not found with id: " + id));
+        assertNoStockForItem(item);
+        softDeleteItem(item);
+    }
+
+    public Page<ItemDto> searchItems(String q, Long categoryId, Pageable pageable) {
+        Page<ItemDto> page = itemRepository.searchAll(q, categoryId, pageable).map(mapper::toDto);
+        stockService.enrichCurrentStockOnItems(page.getContent());
+        return page;
+    }
+
+    /**
+     * Soft-delete in bulk with the same stock guard applied per item.
+     * A single item with stock fails the whole batch — safer than a
+     * partial delete that would leave the user guessing what happened.
+     */
+    @Transactional
+    public int deleteItemsBulk(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return 0;
+        List<Item> found = itemRepository.findAllById(ids);
+        if (found.isEmpty()) return 0;
+        for (Item item : found) {
+            assertNoStockForItem(item);
         }
-        itemRepository.deleteById(id);
+        found.forEach(this::softDeleteItem);
+        return found.size();
+    }
+
+    private void assertNoStockForItem(Item item) {
+        List<ItemVariant> variants = item.getVariants();
+        if (variants == null) return;
+        for (ItemVariant v : variants) {
+            if (Boolean.FALSE.equals(v.getActive())) continue;
+            java.math.BigDecimal stock = stockService.getCurrentStock(v.getId());
+            if (stock != null && stock.compareTo(java.math.BigDecimal.ZERO) > 0) {
+                throw new BusinessValidationException(
+                        "Cannot delete \"" + item.getName() + "\": variant " + v.getSku() +
+                        " still has " + stock + " " + v.getUnit() + " in stock. Clear inventory first."
+                );
+            }
+        }
+    }
+
+    private void softDeleteItem(Item item) {
+        item.setActive(Boolean.FALSE);
+        if (item.getVariants() != null) {
+            for (ItemVariant v : item.getVariants()) {
+                v.setActive(Boolean.FALSE);
+            }
+        }
+        itemRepository.save(item);
     }
 
     public List<ItemVariantDto> getAllItemVariants() {
@@ -198,7 +263,15 @@ public class ItemService {
     public void deleteItemVariant(Long id) {
         ItemVariant variant = itemVariantRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Item Variant not found with id: " + id));
-        itemVariantRepository.delete(variant);
+        java.math.BigDecimal stock = stockService.getCurrentStock(variant.getId());
+        if (stock != null && stock.compareTo(java.math.BigDecimal.ZERO) > 0) {
+            throw new BusinessValidationException(
+                    "Cannot delete variant " + variant.getSku() +
+                    ": still has " + stock + " " + variant.getUnit() + " in stock. Clear inventory first."
+            );
+        }
+        variant.setActive(Boolean.FALSE);
+        itemVariantRepository.save(variant);
     }
 
     // ---------- HSN & SKU Generation ------------
@@ -258,6 +331,11 @@ public class ItemService {
         variant.setUnit(dto.getUnit());
         variant.setPricePerUnit(dto.getPricePerUnit());
         variant.setGstRate(dto.getGstRate());
+        // Preserve TAXABLE default if the client omits gstCategory rather
+        // than nulling a NOT NULL column.
+        if (dto.getGstCategory() != null) {
+            variant.setGstCategory(dto.getGstCategory());
+        }
         variant.setLowStockThreshold(dto.getLowStockThreshold());
 
         // 3. Visual & Attributes
@@ -267,10 +345,46 @@ public class ItemService {
         variant.setDesign(dto.getDesign());
         variant.setFit(dto.getFit());
 
-        // 4. Generic batch/expiry/MRP fields
+        // 4. Generic batch/expiry/MRP/barcode fields
         variant.setBatchNumber(dto.getBatchNumber());
         variant.setManufacturingDate(dto.getManufacturingDate());
         variant.setExpiryDate(dto.getExpiryDate());
         variant.setMrp(dto.getMrp());
+        variant.setBarcode(dto.getBarcode());
+
+        // 5. Industry-specific fields (V76)
+        variant.setMetalType(dto.getMetalType());
+        variant.setMetalPurity(dto.getMetalPurity());
+        variant.setWeightGrams(dto.getWeightGrams());
+        variant.setNetWeightGrams(dto.getNetWeightGrams());
+        variant.setStoneWeightCarats(dto.getStoneWeightCarats());
+        variant.setHallmarkNo(dto.getHallmarkNo());
+        variant.setMakingChargesPerGram(dto.getMakingChargesPerGram());
+        variant.setMakingChargesPct(dto.getMakingChargesPct());
+        variant.setWarrantyMonths(dto.getWarrantyMonths());
+        variant.setSerialNumber(dto.getSerialNumber());
+        variant.setPartNumber(dto.getPartNumber());
+        variant.setVehicleCompatibility(dto.getVehicleCompatibility());
+
+        // 6. Reorder rules + supplier assignment (V79)
+        variant.setReorderPoint(dto.getReorderPoint());
+        variant.setReorderQty(dto.getReorderQty());
+        variant.setSafetyStock(dto.getSafetyStock());
+        variant.setMaxStock(dto.getMaxStock());
+        variant.setLeadTimeDays(dto.getLeadTimeDays());
+        variant.setPreferredSupplier(resolveSupplierRef(dto.getPreferredSupplierId()));
+        variant.setBackupSupplier(resolveSupplierRef(dto.getBackupSupplierId()));
+    }
+
+    /**
+     * Resolves a supplier ID to a managed reference. Unknown IDs return
+     * null (no exception) — a stale FE payload can't overwrite an existing
+     * good assignment; the field just goes untouched relative to what the
+     * caller sent (which the setter chain treats as "clear"). Callers that
+     * need stricter behavior should validate at the controller layer.
+     */
+    private com.desitech.vyaparsathi.supplier.entity.Supplier resolveSupplierRef(Long id) {
+        if (id == null) return null;
+        return supplierRepository == null ? null : supplierRepository.findById(id).orElse(null);
     }
 }

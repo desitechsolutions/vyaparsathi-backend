@@ -118,4 +118,29 @@ public interface StockMovementRepository extends BaseRepository<StockMovement, L
             "GROUP BY sm.itemVariant.id, sm.batch, sm.expiryDate " +
             "HAVING SUM(sm.quantity) > 0")
     List<BatchStockProjection> findBatchWiseStockByVariantIds(@Param("variantIds") List<Long> variantIds);
+
+    /**
+     * Total units sold (absolute value of DEDUCT movements) per variant since the
+     * given timestamp. Used by the low-stock alerts endpoint to compute sales
+     * velocity and days-of-supply — powers the "runs out in N days" column
+     * and the suggested reorder quantity.
+     *
+     * <p>DEDUCT rows are stored with a negative quantity (see
+     * {@code StockService.deductStock}), so we negate on the way out.
+     * ADJUST movements are intentionally excluded — a manual correction is not
+     * a real sale and should not skew the demand estimate.
+     */
+    interface SalesVelocityProjection {
+        Long getVariantId();
+        BigDecimal getUnitsSold();
+    }
+
+    @Query("SELECT sm.itemVariant.id AS variantId, " +
+            "COALESCE(SUM(CASE WHEN sm.movementType = 'DEDUCT' THEN -sm.quantity ELSE 0 END), 0) AS unitsSold " +
+            "FROM StockMovement sm WHERE sm.itemVariant.id IN :variantIds " +
+            "AND sm.timestamp >= :since " +
+            "GROUP BY sm.itemVariant.id")
+    List<SalesVelocityProjection> findSalesVelocityByVariantIds(
+            @Param("variantIds") List<Long> variantIds,
+            @Param("since") LocalDateTime since);
 }

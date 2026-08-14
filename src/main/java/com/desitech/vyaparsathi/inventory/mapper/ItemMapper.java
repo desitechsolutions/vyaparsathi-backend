@@ -6,6 +6,8 @@ import com.desitech.vyaparsathi.inventory.entity.Category;
 import com.desitech.vyaparsathi.inventory.entity.Item;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.repository.CategoryRepository;
+import com.desitech.vyaparsathi.supplier.entity.Supplier;
+import com.desitech.vyaparsathi.supplier.repository.SupplierRepository;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -13,15 +15,44 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.util.stream.Collectors;
 
+/**
+ * Hand-rolled DTO ↔ entity mapper for Item and ItemVariant.
+ *
+ * <p>Kept off MapStruct because the parent-item fields are flattened onto
+ * the variant DTO for the UI, and the multi-industry field set makes a
+ * generated mapper harder to audit than a plain one.
+ *
+ * <p><b>Migration V76 side-effects:</b>
+ * <ul>
+ *   <li>{@code gstCategory} is now mapped in both directions (previously
+ *       silently dropped).</li>
+ *   <li>{@code fabric} / {@code season} were dropped from the {@code item}
+ *       table. The DTO no longer carries those fields — {@code attribute_1}
+ *       / {@code attribute_2} are the sole source of truth.</li>
+ *   <li>12 new industry-specific columns on {@code item_variant} round-trip.</li>
+ * </ul>
+ *
+ * <p>{@code currentStock} on the variant DTO is populated to {@link BigDecimal#ZERO}
+ * here as a safe default. Live stock is enriched by
+ * {@code StockService.enrichCurrentStock(dto)} at the service layer; callers
+ * that need real numbers must run through that helper. The mapper stays
+ * repo-free so a batch of thousands of variants doesn't fan out into
+ * thousands of stock queries.
+ */
 @Component
 public class ItemMapper {
 
     @Autowired
     private CategoryRepository categoryRepository;
 
-    /**
-     * Converts an Item entity to an ItemDto.
-     */
+    // V79 — needed to resolve preferred/backup supplier IDs on write.
+    // Optional-autowired so unit tests that construct the mapper without
+    // Spring don't have to stub a supplier repo just to map a variant.
+    @Autowired(required = false)
+    private SupplierRepository supplierRepository;
+
+    // ─── Item ─────────────────────────────────────────────────────────
+
     public ItemDto toDto(Item item) {
         if (item == null) return null;
 
@@ -30,15 +61,8 @@ public class ItemMapper {
         dto.setName(item.getName());
         dto.setDescription(item.getDescription());
         dto.setBrandName(item.getBrandName());
-
-        // Syncing the legacy fields with generic attributes
-        // We ensure the DTO gets the value regardless of which column the DB used
-        dto.setFabric(item.getFabric() != null ? item.getFabric() : item.getAttribute1());
-        dto.setSeason(item.getSeason() != null ? item.getSeason() : item.getAttribute2());
         dto.setAttribute1(item.getAttribute1());
         dto.setAttribute2(item.getAttribute2());
-
-        // Generic specifications field (renamed from composition)
         dto.setSpecifications(item.getSpecifications());
 
         if (item.getCategory() != null) {
@@ -55,9 +79,6 @@ public class ItemMapper {
         return dto;
     }
 
-    /**
-     * Converts an ItemDto to an Item entity.
-     */
     public Item toEntity(ItemDto dto) {
         if (dto == null) return null;
 
@@ -66,18 +87,8 @@ public class ItemMapper {
         item.setName(dto.getName());
         item.setDescription(dto.getDescription());
         item.setBrandName(dto.getBrandName());
-
-        // If the shop is CLOTHING, 'fabric' and 'attribute1' are the same thing.
-        // We set BOTH to ensure the database stays consistent.
-        String val1 = dto.getAttribute1() != null ? dto.getAttribute1() : dto.getFabric();
-        String val2 = dto.getAttribute2() != null ? dto.getAttribute2() : dto.getSeason();
-
-        item.setAttribute1(val1);
-        item.setFabric(val1);
-        item.setAttribute2(val2);
-        item.setSeason(val2);
-
-        // Generic specifications field (renamed from composition)
+        item.setAttribute1(dto.getAttribute1());
+        item.setAttribute2(dto.getAttribute2());
         item.setSpecifications(dto.getSpecifications());
 
         if (dto.getCategoryId() != null) {
@@ -99,38 +110,72 @@ public class ItemMapper {
         return item;
     }
 
-    public ItemVariantDto toDto(ItemVariant itemVariant) {
-        if (itemVariant == null) return null;
+    // ─── ItemVariant ──────────────────────────────────────────────────
+
+    public ItemVariantDto toDto(ItemVariant variant) {
+        if (variant == null) return null;
 
         ItemVariantDto dto = new ItemVariantDto();
-        dto.setId(itemVariant.getId());
-        dto.setSku(itemVariant.getSku());
-        dto.setUnit(itemVariant.getUnit());
-        dto.setPricePerUnit(itemVariant.getPricePerUnit());
-        dto.setHsn(itemVariant.getHsn());
-        dto.setGstRate(itemVariant.getGstRate());
-        dto.setPhotoPath(itemVariant.getPhotoPath());
-        dto.setColor(itemVariant.getColor());
-        dto.setSize(itemVariant.getSize());
-        dto.setDesign(itemVariant.getDesign());
-        dto.setFit(itemVariant.getFit());
-        dto.setLowStockThreshold(itemVariant.getLowStockThreshold());
+        dto.setId(variant.getId());
+        dto.setSku(variant.getSku());
+        dto.setUnit(variant.getUnit());
+        dto.setPricePerUnit(variant.getPricePerUnit());
+        dto.setHsn(variant.getHsn());
+        dto.setGstRate(variant.getGstRate());
+        dto.setGstCategory(variant.getGstCategory());   // FIX: was silently dropped
+        dto.setPhotoPath(variant.getPhotoPath());
+        dto.setColor(variant.getColor());
+        dto.setSize(variant.getSize());
+        dto.setDesign(variant.getDesign());
+        dto.setFit(variant.getFit());
+        dto.setLowStockThreshold(variant.getLowStockThreshold());
 
-        // Generic batch/expiry/MRP fields
-        dto.setBatchNumber(itemVariant.getBatchNumber());
-        dto.setManufacturingDate(itemVariant.getManufacturingDate());
-        dto.setExpiryDate(itemVariant.getExpiryDate());
-        dto.setMrp(itemVariant.getMrp());
+        // Batch / expiry / MRP / barcode (V30 + V50)
+        dto.setBatchNumber(variant.getBatchNumber());
+        dto.setManufacturingDate(variant.getManufacturingDate());
+        dto.setExpiryDate(variant.getExpiryDate());
+        dto.setMrp(variant.getMrp());
+        dto.setBarcode(variant.getBarcode());
 
-        if (itemVariant.getItem() != null) {
-            Item parent = itemVariant.getItem();
+        // Industry-specific fields (V76)
+        dto.setMetalType(variant.getMetalType());
+        dto.setMetalPurity(variant.getMetalPurity());
+        dto.setWeightGrams(variant.getWeightGrams());
+        dto.setNetWeightGrams(variant.getNetWeightGrams());
+        dto.setStoneWeightCarats(variant.getStoneWeightCarats());
+        dto.setHallmarkNo(variant.getHallmarkNo());
+        dto.setMakingChargesPerGram(variant.getMakingChargesPerGram());
+        dto.setMakingChargesPct(variant.getMakingChargesPct());
+        dto.setWarrantyMonths(variant.getWarrantyMonths());
+        dto.setSerialNumber(variant.getSerialNumber());
+        dto.setPartNumber(variant.getPartNumber());
+        dto.setVehicleCompatibility(variant.getVehicleCompatibility());
+        dto.setCustomAttributes(variant.getCustomAttributes());
+
+        // Reorder rules (V79) — round-trip through the DTO so the item form
+        // can display and edit them.
+        dto.setReorderPoint(variant.getReorderPoint());
+        dto.setReorderQty(variant.getReorderQty());
+        dto.setSafetyStock(variant.getSafetyStock());
+        dto.setMaxStock(variant.getMaxStock());
+        dto.setLeadTimeDays(variant.getLeadTimeDays());
+        if (variant.getPreferredSupplier() != null) {
+            dto.setPreferredSupplierId(variant.getPreferredSupplier().getId());
+            dto.setPreferredSupplierName(variant.getPreferredSupplier().getName());
+        }
+        if (variant.getBackupSupplier() != null) {
+            dto.setBackupSupplierId(variant.getBackupSupplier().getId());
+            dto.setBackupSupplierName(variant.getBackupSupplier().getName());
+        }
+
+        if (variant.getItem() != null) {
+            Item parent = variant.getItem();
             dto.setItemId(parent.getId());
             dto.setItemName(parent.getName());
             dto.setBrand(parent.getBrandName());
             dto.setDescription(parent.getDescription());
-
-            dto.setAttribute1(parent.getAttribute1() != null ? parent.getAttribute1() : parent.getFabric());
-            dto.setAttribute2(parent.getAttribute2() != null ? parent.getAttribute2() : parent.getSeason());
+            dto.setAttribute1(parent.getAttribute1());
+            dto.setAttribute2(parent.getAttribute2());
             dto.setSpecifications(parent.getSpecifications());
 
             if (parent.getCategory() != null) {
@@ -139,6 +184,9 @@ public class ItemMapper {
             }
         }
 
+        // Live stock is enriched separately by StockService.enrichCurrentStock.
+        // Setting ZERO here rather than leaving null so downstream toString /
+        // JSON serialisation never blows up on a null field.
         dto.setCurrentStock(BigDecimal.ZERO);
         return dto;
     }
@@ -153,6 +201,11 @@ public class ItemMapper {
         variant.setPricePerUnit(dto.getPricePerUnit());
         variant.setHsn(dto.getHsn());
         variant.setGstRate(dto.getGstRate());
+        // Fallback to TAXABLE mirrors the entity default — never persist
+        // a null gstCategory since the column is NOT NULL.
+        variant.setGstCategory(dto.getGstCategory() != null
+                ? dto.getGstCategory()
+                : com.desitech.vyaparsathi.gst.enums.GSTCategory.TAXABLE);
         variant.setPhotoPath(dto.getPhotoPath());
         variant.setColor(dto.getColor());
         variant.setSize(dto.getSize());
@@ -160,11 +213,44 @@ public class ItemMapper {
         variant.setFit(dto.getFit());
         variant.setLowStockThreshold(dto.getLowStockThreshold());
 
-        // Generic batch/expiry/MRP fields
+        // Batch / expiry / MRP / barcode
         variant.setBatchNumber(dto.getBatchNumber());
         variant.setManufacturingDate(dto.getManufacturingDate());
         variant.setExpiryDate(dto.getExpiryDate());
         variant.setMrp(dto.getMrp());
+        variant.setBarcode(dto.getBarcode());
+
+        // Industry-specific fields (V76)
+        variant.setMetalType(dto.getMetalType());
+        variant.setMetalPurity(dto.getMetalPurity());
+        variant.setWeightGrams(dto.getWeightGrams());
+        variant.setNetWeightGrams(dto.getNetWeightGrams());
+        variant.setStoneWeightCarats(dto.getStoneWeightCarats());
+        variant.setHallmarkNo(dto.getHallmarkNo());
+        variant.setMakingChargesPerGram(dto.getMakingChargesPerGram());
+        variant.setMakingChargesPct(dto.getMakingChargesPct());
+        variant.setWarrantyMonths(dto.getWarrantyMonths());
+        variant.setSerialNumber(dto.getSerialNumber());
+        variant.setPartNumber(dto.getPartNumber());
+        variant.setVehicleCompatibility(dto.getVehicleCompatibility());
+        variant.setCustomAttributes(dto.getCustomAttributes());
+
+        // Reorder rules (V79). Supplier IDs are resolved through the
+        // repository; unknown IDs are silently ignored so a stale FE
+        // payload can't null out an existing valid assignment.
+        variant.setReorderPoint(dto.getReorderPoint());
+        variant.setReorderQty(dto.getReorderQty());
+        variant.setSafetyStock(dto.getSafetyStock());
+        variant.setMaxStock(dto.getMaxStock());
+        variant.setLeadTimeDays(dto.getLeadTimeDays());
+        variant.setPreferredSupplier(resolveSupplier(dto.getPreferredSupplierId()));
+        variant.setBackupSupplier(resolveSupplier(dto.getBackupSupplierId()));
+
         return variant;
+    }
+
+    private Supplier resolveSupplier(Long id) {
+        if (id == null || supplierRepository == null) return null;
+        return supplierRepository.findById(id).orElse(null);
     }
 }

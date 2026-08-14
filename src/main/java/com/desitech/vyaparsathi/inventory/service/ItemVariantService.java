@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.inventory.service;
 
+import com.desitech.vyaparsathi.inventory.dto.BulkVariantPatchDto;
 import com.desitech.vyaparsathi.inventory.dto.ItemVariantDto;
 import com.desitech.vyaparsathi.inventory.entity.Item;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
@@ -74,8 +75,58 @@ public class ItemVariantService {
         // Barcode (POS scanner)
         itemVariant.setBarcode(dto.getBarcode());
 
+        // Reorder rules (V79) — same setter chain the ItemService uses.
+        itemVariant.setReorderPoint(dto.getReorderPoint());
+        itemVariant.setReorderQty(dto.getReorderQty());
+        itemVariant.setSafetyStock(dto.getSafetyStock());
+        itemVariant.setMaxStock(dto.getMaxStock());
+        itemVariant.setLeadTimeDays(dto.getLeadTimeDays());
+        itemVariant.setPreferredSupplier(resolveSupplierRef(dto.getPreferredSupplierId()));
+        itemVariant.setBackupSupplier(resolveSupplierRef(dto.getBackupSupplierId()));
+
         ItemVariant savedVariant = itemVariantRepository.save(itemVariant);
         return mapper.toDto(savedVariant);
+    }
+
+    /**
+     * Applies a partial patch to every variant in {@code ids}. Only the
+     * fields present in {@code patch} are touched; nulls are treated as
+     * "clear this field" only when the caller explicitly opts in per key
+     * (see {@link BulkVariantPatchDto}). Returns the number of variants
+     * actually modified — silently skips IDs the caller doesn't own or
+     * that no longer exist.
+     *
+     * <p>Used by the LowStockAlerts "Bulk edit" action to push threshold,
+     * reorder-point, or preferred-supplier changes across the selection.
+     */
+    @Transactional
+    public int bulkPatch(BulkVariantPatchDto patch) {
+        if (patch == null || patch.getIds() == null || patch.getIds().isEmpty()) return 0;
+        List<ItemVariant> variants = itemVariantRepository.findAllById(patch.getIds());
+        if (variants.isEmpty()) return 0;
+
+        com.desitech.vyaparsathi.supplier.entity.Supplier preferred =
+                patch.getPreferredSupplierId() != null ? resolveSupplierRef(patch.getPreferredSupplierId()) : null;
+
+        for (ItemVariant v : variants) {
+            if (patch.getLowStockThreshold() != null) v.setLowStockThreshold(patch.getLowStockThreshold());
+            if (patch.getReorderPoint() != null)      v.setReorderPoint(patch.getReorderPoint());
+            if (patch.getReorderQty() != null)        v.setReorderQty(patch.getReorderQty());
+            if (patch.getSafetyStock() != null)       v.setSafetyStock(patch.getSafetyStock());
+            if (patch.getMaxStock() != null)          v.setMaxStock(patch.getMaxStock());
+            if (patch.getLeadTimeDays() != null)      v.setLeadTimeDays(patch.getLeadTimeDays());
+            if (patch.getPreferredSupplierId() != null) v.setPreferredSupplier(preferred);
+        }
+        itemVariantRepository.saveAll(variants);
+        return variants.size();
+    }
+
+    @Autowired(required = false)
+    private com.desitech.vyaparsathi.supplier.repository.SupplierRepository supplierRepository;
+
+    private com.desitech.vyaparsathi.supplier.entity.Supplier resolveSupplierRef(Long id) {
+        if (id == null || supplierRepository == null) return null;
+        return supplierRepository.findById(id).orElse(null);
     }
 
     /**
@@ -113,14 +164,20 @@ public class ItemVariantService {
 
     /**
      * Searches for variants and efficiently populates their current stock levels.
+     *
+     * <p>{@code attribute1} / {@code attribute2} replaced {@code fabric} /
+     * {@code season} in V76. The parameter names on this method were
+     * renamed to match the underlying columns; the controller layer maps
+     * legacy query-string keys ({@code ?fabric=} / {@code ?season=}) to
+     * these parameters so existing clients keep working.
      */
     public List<ItemVariantDto> searchItemVariants(
             String name, String categoryName, String color, String size, String design,
-            String sku, String fabric, String season, String fit, String specifications) {
+            String sku, String attribute1, String attribute2, String fit, String specifications) {
 
         // 1. Call the corrected repository method with all parameters
         List<ItemVariant> variants = itemVariantRepository.searchVariants(
-                name, categoryName, color, size, design, sku, fabric, season, fit, specifications);
+                name, categoryName, color, size, design, sku, attribute1, attribute2, fit, specifications);
 
         if (variants.isEmpty()) {
             return List.of();

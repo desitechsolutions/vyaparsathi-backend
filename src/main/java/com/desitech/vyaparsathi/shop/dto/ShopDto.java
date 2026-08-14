@@ -51,4 +51,7 @@ public class ShopDto {
     private String accessToken;
     private String refreshToken;
 
+    /** Notification preferences (V80). Both default to false server-side. */
+    private Boolean lowStockAlertsEnabled;
+    private Boolean lowStockSmsAlertsEnabled;
 }

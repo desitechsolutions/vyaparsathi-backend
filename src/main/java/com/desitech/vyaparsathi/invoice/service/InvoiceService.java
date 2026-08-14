@@ -496,6 +496,13 @@ public class InvoiceService {
     private void addItemTable(Document document, Sale sale, Fonts f, Color brandColor) throws DocumentException {
         boolean isComposition = !saleHasGst(sale);
         boolean showBatchExpiry = hasBatchOrExpiry(sale);
+        // Line-level discount is a real business fact — surface it on the invoice
+        // whenever any line has one applied, regardless of GST vs composition mode.
+        // Without this, a non-GST sale with a per-item discount would silently
+        // reduce the line total on the PDF with no visible discount breakdown.
+        boolean showDiscount = !isComposition
+                || sale.getSaleItems().stream()
+                        .anyMatch(si -> si.getDiscount() != null && si.getDiscount().signum() > 0);
 
         List<String> headers = new ArrayList<>();
         List<Float> widths = new ArrayList<>();
@@ -511,7 +518,11 @@ public class InvoiceService {
         headers.add("Rate");         widths.add(10f);
         if (!isComposition) {
             headers.add("GST %");    widths.add(7f);
+        }
+        if (showDiscount) {
             headers.add("Disc");     widths.add(8f);
+        }
+        if (!isComposition) {
             headers.add("Taxable");  widths.add(10f);
         }
         headers.add("Total");        widths.add(12f);
@@ -581,7 +592,14 @@ public class InvoiceService {
 
             if (!isComposition) {
                 table.addCell(bodyCell(item.getGstType().getRate() + "%", f.body, Element.ALIGN_CENTER, rowBg));
-                table.addCell(bodyCell(currency.format(discount), f.body, Element.ALIGN_RIGHT, rowBg));
+            }
+            if (showDiscount) {
+                // Show the discount amount when present, blank cell otherwise so
+                // the column reads clean across mixed-discount invoices.
+                String discText = discount.signum() > 0 ? currency.format(discount) : "-";
+                table.addCell(bodyCell(discText, f.body, Element.ALIGN_RIGHT, rowBg));
+            }
+            if (!isComposition) {
                 table.addCell(bodyCell(currency.format(taxable), f.body, Element.ALIGN_RIGHT, rowBg));
             }
 

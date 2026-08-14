@@ -2,12 +2,14 @@ package com.desitech.vyaparsathi.inventory.entity;
 
 import com.desitech.vyaparsathi.common.entities.BaseEntity;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
+import com.desitech.vyaparsathi.common.jpa.JsonMapConverter;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Map;
 
 @Entity
 @Table(name = "item_variant")
@@ -58,6 +60,53 @@ public class ItemVariant extends ShopAwareEntity {
     @Column(name = "low_stock_threshold")
     private BigDecimal lowStockThreshold; // Threshold for low stock alerts
 
+    // ─── Enterprise reorder rules (V79) ────────────────────────────────
+    // Nullable — a shop that has not configured any of these falls back to
+    // the older lowStockThreshold-only behavior. See StockService for the
+    // resolution order used when computing suggested quantities.
+
+    /** Stock level at which to trigger a reorder. Falls back to lowStockThreshold when null. */
+    @Column(name = "reorder_point", precision = 12, scale = 2)
+    private BigDecimal reorderPoint;
+
+    /** Fixed reorder quantity. When set, the suggestion engine returns this instead of a formula. */
+    @Column(name = "reorder_qty", precision = 12, scale = 2)
+    private BigDecimal reorderQty;
+
+    /** Buffer stock kept for demand uncertainty; added on top of lead-time cover. */
+    @Column(name = "safety_stock", precision = 12, scale = 2)
+    private BigDecimal safetyStock;
+
+    /** Maximum on-hand quantity. Advisory today; enforceable at PO creation later. */
+    @Column(name = "max_stock", precision = 12, scale = 2)
+    private BigDecimal maxStock;
+
+    /** Days between placing a PO and receiving the goods. Feeds velocity × lead_time. */
+    @Column(name = "lead_time_days")
+    private Integer leadTimeDays;
+
+    // ─── Explicit supplier assignment (V79) ────────────────────────────
+    // Replaces the "infer from most recent PO" fallback for the preferred
+    // supplier. LastSupplierInfo is still consulted when both fields are
+    // null so the LowStockAlerts screen keeps working without config.
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "preferred_supplier_id")
+    private com.desitech.vyaparsathi.supplier.entity.Supplier preferredSupplier;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "backup_supplier_id")
+    private com.desitech.vyaparsathi.supplier.entity.Supplier backupSupplier;
+
+    /**
+     * Last time this variant appeared in a low-stock email digest (V80).
+     * The scheduler uses this as a dedupe stamp so a shop owner does not
+     * get the same variant re-emailed every day for a week — the resend
+     * window (default 24 h) is defined in the scheduler.
+     */
+    @Column(name = "alert_last_notified_at")
+    private java.time.LocalDateTime alertLastNotifiedAt;
+
     // --- Generic retail fields (batch/expiry/MRP traceability) ---
 
     /**
@@ -66,6 +115,7 @@ public class ItemVariant extends ShopAwareEntity {
      */
     @Column(name = "batch_number")
     private String batchNumber;
+
 
     /**
      * Date of manufacture (printed on packaging). Optional.
@@ -93,6 +143,49 @@ public class ItemVariant extends ShopAwareEntity {
      */
     @Column(name = "barcode", length = 100)
     private String barcode;
+
+    // ─── Industry-specific columns (added by V76) ─────────────────────
+    // All nullable; only the industry that needs them populates them.
+    // Absent from the DB before V76.
+
+    // Jewellery
+    @Column(name = "metal_type", length = 40)
+    private String metalType;
+
+    @Column(name = "metal_purity", length = 20)
+    private String metalPurity;
+
+    @Column(name = "weight_grams", precision = 10, scale = 3)
+    private BigDecimal weightGrams;
+
+    @Column(name = "net_weight_grams", precision = 10, scale = 3)
+    private BigDecimal netWeightGrams;
+
+    @Column(name = "stone_weight_carats", precision = 10, scale = 3)
+    private BigDecimal stoneWeightCarats;
+
+    @Column(name = "hallmark_no", length = 60)
+    private String hallmarkNo;
+
+    @Column(name = "making_charges_per_gram", precision = 10, scale = 2)
+    private BigDecimal makingChargesPerGram;
+
+    @Column(name = "making_charges_pct", precision = 5, scale = 2)
+    private BigDecimal makingChargesPct;
+
+    // Electronics
+    @Column(name = "warranty_months")
+    private Integer warrantyMonths;
+
+    @Column(name = "serial_number", length = 80)
+    private String serialNumber;
+
+    // Automobile
+    @Column(name = "part_number", length = 80)
+    private String partNumber;
+
+    @Column(name = "vehicle_compatibility", length = 500)
+    private String vehicleCompatibility;
 
     public String getSku() { return sku; }
     public void setSku(String sku) { this.sku = sku; }
@@ -144,4 +237,100 @@ public class ItemVariant extends ShopAwareEntity {
 
     public String getBarcode() { return barcode; }
     public void setBarcode(String barcode) { this.barcode = barcode; }
+
+    // Industry-specific getters/setters (V76 additions)
+
+    public String getMetalType() { return metalType; }
+    public void setMetalType(String metalType) { this.metalType = metalType; }
+
+    public String getMetalPurity() { return metalPurity; }
+    public void setMetalPurity(String metalPurity) { this.metalPurity = metalPurity; }
+
+    public BigDecimal getWeightGrams() { return weightGrams; }
+    public void setWeightGrams(BigDecimal weightGrams) { this.weightGrams = weightGrams; }
+
+    public BigDecimal getNetWeightGrams() { return netWeightGrams; }
+    public void setNetWeightGrams(BigDecimal netWeightGrams) { this.netWeightGrams = netWeightGrams; }
+
+    public BigDecimal getStoneWeightCarats() { return stoneWeightCarats; }
+    public void setStoneWeightCarats(BigDecimal stoneWeightCarats) { this.stoneWeightCarats = stoneWeightCarats; }
+
+    public String getHallmarkNo() { return hallmarkNo; }
+    public void setHallmarkNo(String hallmarkNo) { this.hallmarkNo = hallmarkNo; }
+
+    public BigDecimal getMakingChargesPerGram() { return makingChargesPerGram; }
+    public void setMakingChargesPerGram(BigDecimal makingChargesPerGram) { this.makingChargesPerGram = makingChargesPerGram; }
+
+    public BigDecimal getMakingChargesPct() { return makingChargesPct; }
+    public void setMakingChargesPct(BigDecimal makingChargesPct) { this.makingChargesPct = makingChargesPct; }
+
+    public Integer getWarrantyMonths() { return warrantyMonths; }
+    public void setWarrantyMonths(Integer warrantyMonths) { this.warrantyMonths = warrantyMonths; }
+
+    public String getSerialNumber() { return serialNumber; }
+    public void setSerialNumber(String serialNumber) { this.serialNumber = serialNumber; }
+
+    public String getPartNumber() { return partNumber; }
+    public void setPartNumber(String partNumber) { this.partNumber = partNumber; }
+
+    public String getVehicleCompatibility() { return vehicleCompatibility; }
+    public void setVehicleCompatibility(String vehicleCompatibility) { this.vehicleCompatibility = vehicleCompatibility; }
+
+    // Enterprise reorder rules (V79) — explicit accessors for grep parity.
+    public BigDecimal getReorderPoint() { return reorderPoint; }
+    public void setReorderPoint(BigDecimal reorderPoint) { this.reorderPoint = reorderPoint; }
+
+    public BigDecimal getReorderQty() { return reorderQty; }
+    public void setReorderQty(BigDecimal reorderQty) { this.reorderQty = reorderQty; }
+
+    public BigDecimal getSafetyStock() { return safetyStock; }
+    public void setSafetyStock(BigDecimal safetyStock) { this.safetyStock = safetyStock; }
+
+    public BigDecimal getMaxStock() { return maxStock; }
+    public void setMaxStock(BigDecimal maxStock) { this.maxStock = maxStock; }
+
+    public Integer getLeadTimeDays() { return leadTimeDays; }
+    public void setLeadTimeDays(Integer leadTimeDays) { this.leadTimeDays = leadTimeDays; }
+
+    public com.desitech.vyaparsathi.supplier.entity.Supplier getPreferredSupplier() { return preferredSupplier; }
+    public void setPreferredSupplier(com.desitech.vyaparsathi.supplier.entity.Supplier preferredSupplier) { this.preferredSupplier = preferredSupplier; }
+
+    public com.desitech.vyaparsathi.supplier.entity.Supplier getBackupSupplier() { return backupSupplier; }
+    public void setBackupSupplier(com.desitech.vyaparsathi.supplier.entity.Supplier backupSupplier) { this.backupSupplier = backupSupplier; }
+
+    public java.time.LocalDateTime getAlertLastNotifiedAt() { return alertLastNotifiedAt; }
+    public void setAlertLastNotifiedAt(java.time.LocalDateTime alertLastNotifiedAt) { this.alertLastNotifiedAt = alertLastNotifiedAt; }
+
+    // gstCategory getter/setter (the one the mapper was missing — Lombok
+    // already generates these via @Getter/@Setter, but declaring explicit
+    // signatures here matches the pattern used by every other field on
+    // this entity so grep-based tooling can find them).
+    public com.desitech.vyaparsathi.gst.enums.GSTCategory getGstCategory() { return gstCategory; }
+    public void setGstCategory(com.desitech.vyaparsathi.gst.enums.GSTCategory gstCategory) { this.gstCategory = gstCategory; }
+
+    /**
+     * Soft-delete flag. Set to false via {@code ItemService.deleteItemVariant}
+     * instead of a physical delete, so historical {@code sale_item} rows
+     * continue to resolve their {@code item_variant_id} FK. Catalog queries
+     * filter {@code active = true}; sales-history joins do not.
+     */
+    @Column(nullable = false)
+    private Boolean active = Boolean.TRUE;
+
+    public Boolean getActive() { return active; }
+    public void setActive(Boolean active) { this.active = active; }
+    public boolean isActive() { return active == null || active; }
+
+    /**
+     * Per-shop custom attributes as a JSON map keyed by
+     * {@code ShopCustomAttributeDef.keyName}. The definitions live in
+     * a separate table so a shop owner can add fields without a
+     * schema migration; the values live here.
+     */
+    @Convert(converter = JsonMapConverter.class)
+    @Column(name = "custom_attributes", columnDefinition = "JSON")
+    private Map<String, Object> customAttributes;
+
+    public Map<String, Object> getCustomAttributes() { return customAttributes; }
+    public void setCustomAttributes(Map<String, Object> customAttributes) { this.customAttributes = customAttributes; }
 }

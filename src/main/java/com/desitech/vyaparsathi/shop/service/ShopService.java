@@ -12,6 +12,7 @@ import com.desitech.vyaparsathi.inventory.entity.Category;
 import com.desitech.vyaparsathi.inventory.repository.CategoryRepository;
 import com.desitech.vyaparsathi.shop.dto.ShopDto;
 import com.desitech.vyaparsathi.shop.entity.Shop;
+import com.desitech.vyaparsathi.shop.enums.IndustryType;
 import com.desitech.vyaparsathi.shop.mapper.ShopMapper;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -95,17 +96,17 @@ public class ShopService {
         return shopDto;
     }
 
-    private void seedDefaultCategories(Shop shop, String industryType) {
+    private void seedDefaultCategories(Shop shop, String industryTypeRaw) {
         if (shop.getId() == null) throw new IllegalStateException("Shop has no ID");
 
-        String type = (industryType == null) ? "GENERAL" : industryType.toUpperCase();
-        logger.info("Seeding categories for industry: {} in shop {}", type, shop.getId());
+        IndustryType industry = IndustryType.fromString(industryTypeRaw);
+        logger.info("Seeding categories for industry: {} in shop {}", industry, shop.getId());
 
         // Create the Root Industry Node (CRITICAL for UI detection)
-        Category root = createCategoryManually(type, null, shop);
+        Category root = createCategoryManually(industry.name(), null, shop);
 
-        switch (type) {
-            case "CLOTHING":
+        switch (industry) {
+            case CLOTHING:
                 Category men = createCategoryManually("MEN", root, shop);
                 Category women = createCategoryManually("WOMEN", root, shop);
                 Category kids = createCategoryManually("KIDS", root, shop);
@@ -125,7 +126,7 @@ public class ShopService {
                 createCategoryManually("FOOTWEAR", root, shop);
                 break;
 
-            case "ELECTRONICS":
+            case ELECTRONICS:
                 createCategoryManually("MOBILES & TABLETS", root, shop);
                 createCategoryManually("LAPTOPS & COMPUTERS", root, shop);
                 createCategoryManually("HOME APPLIANCES", root, shop);
@@ -133,52 +134,53 @@ public class ShopService {
                 createCategoryManually("WEARABLES", root, shop);
                 break;
 
-            case "HARDWARE":
+            case HARDWARE:
                 createCategoryManually("ELECTRICALS", root, shop);
                 createCategoryManually("PLUMBING", root, shop);
                 createCategoryManually("PAINTS", root, shop);
                 createCategoryManually("TOOLS & FASTENERS", root, shop);
                 break;
 
-            case "GROCERY":
+            case GROCERY:
                 createCategoryManually("DAIRY & BAKERY", root, shop);
                 createCategoryManually("STAPLES", root, shop);
                 createCategoryManually("SNACKS & BEVERAGES", root, shop);
                 createCategoryManually("HOUSEHOLD CARE", root, shop);
                 break;
 
-            case "AUTOMOBILE":
+            case AUTOMOBILE:
                 createCategoryManually("SPARE PARTS", root, shop);
                 createCategoryManually("LUBRICANTS", root, shop);
                 createCategoryManually("TYRES", root, shop);
                 createCategoryManually("ACCESSORIES", root, shop);
                 break;
 
-            case "STATIONERY":
+            case STATIONERY:
                 createCategoryManually("OFFICE SUPPLIES", root, shop);
                 createCategoryManually("SCHOOL SUPPLIES", root, shop);
                 createCategoryManually("ART & CRAFT", root, shop);
                 break;
 
-            case "FOOTWEAR":
+            case FOOTWEAR:
                 createCategoryManually("SPORTS FOOTWEAR", root, shop);
                 createCategoryManually("FORMAL FOOTWEAR", root, shop);
                 createCategoryManually("CASUAL FOOTWEAR", root, shop);
                 break;
 
-            case "FURNITURE":
+            case FURNITURE:
                 createCategoryManually("OFFICE FURNITURE", root, shop);
                 createCategoryManually("HOME FURNITURE", root, shop);
                 createCategoryManually("FURNISHINGS", root, shop);
                 break;
 
-            case "JEWELLERY":
+            case JEWELLERY:
                 createCategoryManually("GOLD", root, shop);
                 createCategoryManually("SILVER", root, shop);
                 createCategoryManually("FASHION JEWELLERY", root, shop);
                 break;
 
-            default: // GENERAL
+            case GENERAL:
+            default:
                 createCategoryManually("OTHERS", root, shop);
                 createCategoryManually("MISC", root, shop);
                 break;

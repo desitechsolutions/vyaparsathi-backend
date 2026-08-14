@@ -23,4 +23,8 @@ public class SubscriptionStatusDTO {
     private Double amount;
     private Boolean canProcessSale;
     private boolean canStartTrial;
+    // Monthly sales quota for the effective plan. `null` = unlimited.
+    private Integer maxSalesPerMonth;
+    // Sales completed this calendar month (excludes DRAFT rows).
+    private long salesUsedThisMonth;
 }

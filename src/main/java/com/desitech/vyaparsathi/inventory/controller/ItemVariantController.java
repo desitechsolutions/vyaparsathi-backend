@@ -4,9 +4,11 @@ import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.desitech.vyaparsathi.inventory.dto.BulkVariantPatchDto;
 import com.desitech.vyaparsathi.inventory.dto.ItemVariantDto;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.service.ItemVariantService;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -27,7 +29,7 @@ public class ItemVariantController {
     private ItemVariantService service;
 
     @PostMapping
-    public ResponseEntity<ItemVariantDto> create(@RequestBody ItemVariantDto dto) {
+    public ResponseEntity<ItemVariantDto> create(@jakarta.validation.Valid @RequestBody ItemVariantDto dto) {
         try {
             ItemVariantDto result = service.create(dto);
             logger.info("Created item variant with name={}", dto.getItemName());
@@ -39,7 +41,7 @@ public class ItemVariantController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<ItemVariantDto> update(@PathVariable Long id, @RequestBody ItemVariantDto dto) {
+    public ResponseEntity<ItemVariantDto> update(@PathVariable Long id, @jakarta.validation.Valid @RequestBody ItemVariantDto dto) {
         try {
             ItemVariantDto result = service.update(id, dto);
             logger.info("Updated item variant id={}", id);
@@ -82,6 +84,11 @@ public class ItemVariantController {
             @RequestParam(required = false) String size,
             @RequestParam(required = false) String style,
             @RequestParam(required = false) String sku,
+            @RequestParam(required = false) String attribute1,
+            @RequestParam(required = false) String attribute2,
+            // Legacy aliases — CLOTHING clients still send ?fabric / ?season.
+            // Kept optional so old dashboards do not break; new callers should
+            // send the canonical attribute1 / attribute2 query params.
             @RequestParam(required = false) String fabric,
             @RequestParam(required = false) String season,
             @RequestParam(required = false) String fit,
@@ -90,12 +97,38 @@ public class ItemVariantController {
     ) {
         try {
             String specs = specifications != null ? specifications : composition;
-            List<ItemVariantDto> dtos = service.searchItemVariants(name, category, color, size, style, sku, fabric, season, fit, specs);
-            logger.info("Searched item variants with filters: name={}, category={}, color={}, size={}, style={}, sku={}, specifications={}", name, category, color, size, style, sku, specs);
+            String attr1 = attribute1 != null ? attribute1 : fabric;
+            String attr2 = attribute2 != null ? attribute2 : season;
+            List<ItemVariantDto> dtos = service.searchItemVariants(name, category, color, size, style, sku, attr1, attr2, fit, specs);
+            logger.info("Searched item variants with filters: name={}, category={}, color={}, size={}, style={}, sku={}, attr1={}, attr2={}, specifications={}",
+                    name, category, color, size, style, sku, attr1, attr2, specs);
             return ResponseEntity.ok(dtos);
         } catch (Exception e) {
             logger.error("Error searching item variants: {}", e.getMessage(), e);
             throw new ApplicationException("Failed to search item variants", e);
+        }
+    }
+
+    /**
+     * Bulk-patch endpoint (V79). Applies a partial update (any subset of
+     * threshold / reorder-point / reorder-qty / safety-stock / max-stock /
+     * lead-time / preferred-supplier) to every variant listed in the body.
+     * Owner / Admin only — same guard as single-variant updates.
+     *
+     * <p>Used by the LowStockAlerts "Bulk edit" action so a shop owner can
+     * push a new threshold or supplier across a whole selection in one call.
+     */
+    @PostMapping("/bulk-patch")
+    @PreAuthorize("hasAnyRole('OWNER', 'ADMIN')")
+    public ResponseEntity<Map<String, Integer>> bulkPatch(
+            @jakarta.validation.Valid @RequestBody BulkVariantPatchDto patch) {
+        try {
+            int updated = service.bulkPatch(patch);
+            logger.info("Bulk-patched {} item variants", updated);
+            return ResponseEntity.ok(Map.of("updated", updated));
+        } catch (Exception e) {
+            logger.error("Bulk patch failed: {}", e.getMessage(), e);
+            throw new ApplicationException("Failed to bulk-patch variants", e);
         }
     }
 

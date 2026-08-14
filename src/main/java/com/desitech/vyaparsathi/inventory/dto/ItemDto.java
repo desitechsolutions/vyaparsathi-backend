@@ -1,24 +1,46 @@
 package com.desitech.vyaparsathi.inventory.dto;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
+
 import java.util.List;
 
 @Data
 public class ItemDto {
     private Long id;
+
+    @NotBlank(message = "Item name is required")
+    @Size(max = 200, message = "Item name must be 200 characters or fewer")
     private String name;
+
+    @Size(max = 1000, message = "Description must be 1000 characters or fewer")
     private String description;
+
+    @NotNull(message = "Category is required")
     private Long categoryId;
+
     private String categoryName;
     private String brandName;
-    private String fabric;
-    private String season;
+
+    /**
+     * Generic attribute slot #1 — industry-specific label
+     * (Fabric for CLOTHING, Material for HARDWARE, Metal for JEWELLERY,
+     * Packaging for GROCERY, etc.). Backed by the {@code attribute_1}
+     * column on {@code item}. The legacy {@code fabric} / {@code season}
+     * columns were dropped in migration V76.
+     */
     private String attribute1;
+
     private String attribute2;
 
     /** Product specifications, ingredients, or key attributes (renamed from composition). */
+    @Size(max = 500)
     private String specifications;
 
+    @Valid
     private List<ItemVariantDto> variants;
 
     public Long getId() { return id; }
@@ -38,12 +60,6 @@ public class ItemDto {
 
     public String getBrandName() { return brandName; }
     public void setBrandName(String brandName) { this.brandName = brandName; }
-
-    public String getFabric() { return fabric; }
-    public void setFabric(String fabric) { this.fabric = fabric; }
-
-    public String getSeason() { return season; }
-    public void setSeason(String season) { this.season = season; }
 
     public String getAttribute1() { return attribute1; }
     public void setAttribute1(String attribute1) { this.attribute1 = attribute1; }

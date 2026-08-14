@@ -9,6 +9,9 @@ import com.desitech.vyaparsathi.inventory.service.ItemService;
 import com.desitech.vyaparsathi.inventory.service.ItemVariantService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.util.StringUtils;
@@ -45,6 +48,24 @@ public class ItemController {
             logger.error("Error fetching all catalog items: {}", e.getMessage(), e);
             throw new ApplicationException("Failed to fetch catalog items", e);
         }
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<Page<ItemDto>> searchItems(
+            @RequestParam(required = false, defaultValue = "") String q,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false, defaultValue = "name") String sort) {
+        int clampedSize = Math.min(Math.max(size, 1), 200);
+        Page<ItemDto> result = itemService.searchItems(
+                q,
+                categoryId,
+                PageRequest.of(Math.max(page, 0), clampedSize, Sort.by(sort))
+        );
+        logger.info("Searched catalog items q='{}' category={} page={} size={} → {} results",
+                q, categoryId, page, clampedSize, result.getTotalElements());
+        return ResponseEntity.ok(result);
     }
 
     @GetMapping("/{id}")
@@ -180,6 +201,15 @@ public class ItemController {
             throw new ApplicationException("Failed to update catalog item", e);
         }
     }
+    @DeleteMapping("/bulk")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+    public ResponseEntity<Map<String, Integer>> deleteItemsBulk(@RequestBody Map<String, List<Long>> body) {
+        List<Long> ids = body.getOrDefault("ids", List.of());
+        int deleted = itemService.deleteItemsBulk(ids);
+        logger.info("Bulk deleted catalog items, requested={}, deleted={}", ids.size(), deleted);
+        return ResponseEntity.ok(Map.of("deleted", deleted));
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
     public ResponseEntity<Void> deleteItemVariant(@PathVariable Long id) {

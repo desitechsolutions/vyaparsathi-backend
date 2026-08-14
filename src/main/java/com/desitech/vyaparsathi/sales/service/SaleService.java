@@ -1038,6 +1038,7 @@ public class SaleService {
     }
     @Transactional
     @LogAudit(action = "COMPLETE_SALE", entity = "SALE")
+    @CheckSubscriptionLimit("SALES")
     public SaleDto completeDraft(SaleDto dto) {
         subscriptionService.validateSaleProcessingEntitlement(TenantContext.getCurrentShopId());
 
@@ -1386,6 +1387,7 @@ public class SaleService {
      */
     @Transactional
     @LogAudit(action = "CONVERT_PROFORMA_TO_INVOICE", entity = "SALE")
+    @CheckSubscriptionLimit("SALES")
     public SaleDto convertProformaToInvoice(Long proformaSaleId) {
         Sale proforma = saleRepository.findById(proformaSaleId)
                 .orElseThrow(() -> new EntityNotFoundAppException("Sale", proformaSaleId));

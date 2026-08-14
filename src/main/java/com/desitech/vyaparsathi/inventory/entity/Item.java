@@ -33,12 +33,10 @@ public class Item extends ShopAwareEntity {
     @Column(name = "brand_name")
     private String brandName;
 
-    @Column
-    private String fabric;
-
-    @Column
-    private String season;
-
+    // `attribute_1` / `attribute_2` are the canonical generic slots used
+    // across every industry (Fabric/Season for CLOTHING, Material/Grade
+    // for HARDWARE, Packaging/Dietary-Info for GROCERY, etc.). The old
+    // `fabric` / `season` columns were dropped in migration V76.
     @Column(name = "attribute_1")
     private String attribute1;
 
@@ -57,6 +55,16 @@ public class Item extends ShopAwareEntity {
     @JsonManagedReference
     private List<ItemVariant> variants;
 
+    /**
+     * Soft-delete flag. Set to false via {@code ItemService.deleteItem}
+     * instead of a physical delete, so historical sales still resolve
+     * their FK to this row. Catalog-facing repository queries
+     * (findAllWithVariants / searchAll / findByIdWithVariants) filter
+     * by {@code active = true} — historical joins do not.
+     */
+    @Column(nullable = false)
+    private Boolean active = Boolean.TRUE;
+
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
 
@@ -69,12 +77,6 @@ public class Item extends ShopAwareEntity {
     public String getBrandName() { return brandName; }
     public void setBrandName(String brandName) { this.brandName = brandName; }
 
-    public String getFabric() { return fabric; }
-    public void setFabric(String fabric) { this.fabric = fabric; }
-
-    public String getSeason() { return season; }
-    public void setSeason(String season) { this.season = season; }
-
     public String getAttribute1() { return attribute1; }
     public void setAttribute1(String attribute1) { this.attribute1 = attribute1; }
 
@@ -86,4 +88,8 @@ public class Item extends ShopAwareEntity {
 
     public List<ItemVariant> getVariants() { return variants; }
     public void setVariants(List<ItemVariant> variants) { this.variants = variants; }
+
+    public Boolean getActive() { return active; }
+    public void setActive(Boolean active) { this.active = active; }
+    public boolean isActive() { return active == null || active; }
 }

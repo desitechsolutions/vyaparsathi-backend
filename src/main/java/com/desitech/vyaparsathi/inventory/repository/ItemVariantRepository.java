@@ -23,17 +23,23 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
 
     /**
      * Searches for ItemVariants based on a combination of item and variant attributes.
-     * This query is designed to power the main item search/filter functionality.
+     * Powers the main item search/filter functionality.
+     *
+     * <p>{@code attribute1} / {@code attribute2} replaced the legacy
+     * {@code fabric} / {@code season} predicates in V76. The parameter names
+     * are kept for caller-source compatibility but the underlying JPQL now
+     * targets the canonical attribute columns.
      */
     @Query("SELECT iv FROM ItemVariant iv JOIN iv.item i LEFT JOIN i.category c WHERE " +
+            "iv.active = true AND i.active = true AND " +
             "(:name IS NULL OR i.name LIKE %:name%) AND " +
             "(:categoryName IS NULL OR c.name LIKE %:categoryName%) AND " +
             "(:color IS NULL OR iv.color LIKE %:color%) AND " +
             "(:size IS NULL OR iv.size LIKE %:size%) AND " +
             "(:design IS NULL OR iv.design LIKE %:design%) AND " +
             "(:sku IS NULL OR iv.sku LIKE %:sku%) AND " +
-            "(:fabric IS NULL OR i.fabric LIKE %:fabric%) AND " +
-            "(:season IS NULL OR i.season LIKE %:season%) AND " +
+            "(:attribute1 IS NULL OR i.attribute1 LIKE %:attribute1%) AND " +
+            "(:attribute2 IS NULL OR i.attribute2 LIKE %:attribute2%) AND " +
             "(:fit IS NULL OR iv.fit LIKE %:fit%) AND " +
             "(:specifications IS NULL OR i.specifications LIKE %:specifications%)")
     List<ItemVariant> searchVariants(
@@ -43,8 +49,8 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
             @Param("size") String size,
             @Param("design") String design,
             @Param("sku") String sku,
-            @Param("fabric") String fabric,
-            @Param("season") String season,
+            @Param("attribute1") String attribute1,
+            @Param("attribute2") String attribute2,
             @Param("fit") String fit,
             @Param("specifications") String specifications
     );
@@ -54,6 +60,17 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
      * This is used by the LowStockAlerts feature.
      */
     List<ItemVariant> findAllByLowStockThresholdIsNotNull();
+
+    /**
+     * V79 successor to {@link #findAllByLowStockThresholdIsNotNull()}: pulls
+     * every variant that has EITHER the legacy {@code lowStockThreshold} OR
+     * the new {@code reorderPoint} set. A shop using the enterprise reorder
+     * rules can leave {@code lowStockThreshold} null and only configure the
+     * new fields — this query keeps those variants in the alerts pool.
+     */
+    @Query("SELECT iv FROM ItemVariant iv WHERE iv.active = true AND " +
+            "(iv.lowStockThreshold IS NOT NULL OR iv.reorderPoint IS NOT NULL)")
+    List<ItemVariant> findAllForLowStockAlerting();
 
     /**
      * Finds all ItemVariants belonging to a specific shop.

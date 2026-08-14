@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.shop.entity;
 
 import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
+import com.desitech.vyaparsathi.shop.enums.IndustryType;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.Getter;
@@ -51,8 +52,9 @@ public class Shop {
     private String logoPath;
     private String signaturePath;
 
-    @Column(name = "industry_type")
-    private String industryType;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "industry_type", length = 30)
+    private IndustryType industryType;
 
     @Column(name = "is_composition_scheme")
     private Boolean isCompositionScheme = false;
@@ -86,6 +88,23 @@ public class Shop {
 
     @Column(name = "invoice_due_days")
     private Integer invoiceDueDays = 30;
+
+    /**
+     * Opt-in flag for the daily low-stock-alerts email digest (V80).
+     * The scheduler skips a shop whose flag is false or whose {@code email}
+     * is null — no accidental broadcast to shops that never asked for it.
+     */
+    @Column(name = "low_stock_alerts_enabled", nullable = false)
+    private Boolean lowStockAlertsEnabled = Boolean.FALSE;
+
+    /**
+     * Opt-in flag for SMS alerts. Provider integration is a follow-up —
+     * the flag ships now so the Shop Settings UI carries both toggles
+     * from day one and no schema change is needed once SMS dispatch is
+     * wired.
+     */
+    @Column(name = "low_stock_sms_alerts_enabled", nullable = false)
+    private Boolean lowStockSmsAlertsEnabled = Boolean.FALSE;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -123,8 +142,8 @@ public class Shop {
     public String getSignaturePath() { return signaturePath; }
     public void setSignaturePath(String signaturePath) { this.signaturePath = signaturePath; }
 
-    public String getIndustryType() { return industryType; }
-    public void setIndustryType(String industryType) { this.industryType = industryType; }
+    public IndustryType getIndustryType() { return industryType; }
+    public void setIndustryType(IndustryType industryType) { this.industryType = industryType; }
 
     public Boolean getIsCompositionScheme() { return isCompositionScheme; }
     public void setIsCompositionScheme(Boolean isCompositionScheme) { this.isCompositionScheme = isCompositionScheme; }
@@ -158,4 +177,18 @@ public class Shop {
 
     public Boolean getActive() { return active != null ? active : true; }
     public void setActive(Boolean active) { this.active = active; }
+
+    public Boolean getLowStockAlertsEnabled() {
+        return lowStockAlertsEnabled != null ? lowStockAlertsEnabled : Boolean.FALSE;
+    }
+    public void setLowStockAlertsEnabled(Boolean lowStockAlertsEnabled) {
+        this.lowStockAlertsEnabled = lowStockAlertsEnabled;
+    }
+
+    public Boolean getLowStockSmsAlertsEnabled() {
+        return lowStockSmsAlertsEnabled != null ? lowStockSmsAlertsEnabled : Boolean.FALSE;
+    }
+    public void setLowStockSmsAlertsEnabled(Boolean lowStockSmsAlertsEnabled) {
+        this.lowStockSmsAlertsEnabled = lowStockSmsAlertsEnabled;
+    }
 }

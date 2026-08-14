@@ -41,6 +41,13 @@ public class DeliveryDTO {
     private Boolean codCollected;
     private LocalDateTime codCollectedAt;
 
+    /**
+     * Populated only on PATCH /details when an ADMIN/OWNER overrides a codAmount
+     * after COD has already been collected. The backend writes this into the
+     * status-history audit trail. Never returned in responses.
+     */
+    private String codAmountChangeReason;
+
     // Attempts
     private Integer attemptCount;
     private LocalDateTime lastAttemptAt;

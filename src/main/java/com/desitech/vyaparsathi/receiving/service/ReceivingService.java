@@ -466,7 +466,13 @@ public class ReceivingService {
     }
 
     /**
-     * Updates PO status based on all receivings.
+     * Updates PO status based on all receivings AND materialises the cumulative
+     * received quantity onto each {@link PurchaseOrderItem} so the FE can render
+     * an accurate per-line progress bar (V81 addition; wired in Phase 2).
+     *
+     * <p>Prior to this write-back, the PO detail page fell back to zero for every
+     * line even after a full receipt — status flipped to RECEIVED but the "0/10"
+     * counters lied. Now the PO carries authoritative per-line receipts.
      */
     private void updatePOStatus(PurchaseOrder po) {
         if (CollectionUtils.isEmpty(po.getItems())) {
@@ -474,19 +480,26 @@ public class ReceivingService {
             return;
         }
 
-        // Optimized: Could batch sums if needed, but for now, per-item
-        boolean allPoItemsReceived = po.getItems().stream()
-                .allMatch(poItem -> {
-                    ReceivingQtySummary qtySummary = receivingRepository.getQtySummaryForPOItem(poItem.getId(), TenantUtils.getCurrentShopId());
-                    return poItem.getQuantity().intValue() <= (qtySummary.received() + qtySummary.damaged() + qtySummary.rejected());
-                });
+        boolean allPoItemsReceived = true;
+        for (PurchaseOrderItem poItem : po.getItems()) {
+            ReceivingQtySummary qtySummary = receivingRepository.getQtySummaryForPOItem(poItem.getId(), TenantUtils.getCurrentShopId());
+            // Summary fields are long — keep them long through the arithmetic
+            // and only narrow when we compare to poItem.getQuantity() (Integer).
+            long received = qtySummary.received() + qtySummary.damaged() + qtySummary.rejected();
+            // received/damaged/rejected all count as "arrived from the line" —
+            // matches the same math the completeness check below uses.
+            poItem.setReceivedQuantity(java.math.BigDecimal.valueOf(received));
+            if (poItem.getQuantity().longValue() > received) {
+                allPoItemsReceived = false;
+            }
+        }
 
         if (allPoItemsReceived) {
             po.setStatus(PurchaseOrderStatus.RECEIVED);
         } else {
             po.setStatus(PurchaseOrderStatus.PARTIALLY_RECEIVED);
         }
-        purchaseOrderRepository.save(po);
+        purchaseOrderRepository.save(po); // CascadeType.ALL on items — flushes receivedQuantity too.
         logger.info("Updated PO {} status to {}", po.getPoNumber(), po.getStatus());
     }
 

@@ -73,6 +73,9 @@ class PurchaseReturnServiceTest {
     private com.desitech.vyaparsathi.supplier.service.SupplierLedgerService supplierLedgerService;
 
     @Mock
+    private com.desitech.vyaparsathi.accounting.service.DebitNoteService debitNoteService;
+
+    @Mock
     private PurchaseReturnMapper purchaseReturnMapper;
 
     private Supplier supplier;
@@ -188,6 +191,11 @@ class PurchaseReturnServiceTest {
         when(purchaseReturnRepository.findById(5L)).thenReturn(Optional.of(purchaseReturn));
         when(purchaseReturnRepository.save(any(PurchaseReturn.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(stockService.getCurrentStock(any())).thenReturn(new BigDecimal("100"));
+
+        com.desitech.vyaparsathi.accounting.entity.DebitNote issuedDebitNote =
+                new com.desitech.vyaparsathi.accounting.entity.DebitNote();
+        issuedDebitNote.setDebitNoteNo("DN-20260807-001");
+        when(debitNoteService.createFromPurchaseReturn(any(PurchaseReturn.class))).thenReturn(issuedDebitNote);
 
         PurchaseReturnDto expectedDto = new PurchaseReturnDto();
         expectedDto.setStatus(PurchaseReturnStatus.APPROVED);

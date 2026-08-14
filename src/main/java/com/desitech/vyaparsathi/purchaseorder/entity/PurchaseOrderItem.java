@@ -42,6 +42,38 @@ public class PurchaseOrderItem extends ShopAwareEntity {
     @Column(name = "received_quantity", nullable = false, precision = 12, scale = 2)
     private BigDecimal receivedQuantity = BigDecimal.ZERO;
 
+    // ─── V83 line-level GST / discount / HSN ──────────────────────────
+    // Mirrors SaleItem so both transactional surfaces round-trip through
+    // the same accounting logic. `discount` is the flat amount subtracted
+    // before tax; `discountPct` is optional metadata for the UI (the
+    // authoritative value is always the flat amount).
+    @Column(name = "discount", nullable = false, precision = 12, scale = 2)
+    private BigDecimal discount = BigDecimal.ZERO;
+
+    @Column(name = "discount_pct", precision = 5, scale = 2)
+    private BigDecimal discountPct;
+
+    @Column(name = "taxable_value", nullable = false, precision = 12, scale = 2)
+    private BigDecimal taxableValue = BigDecimal.ZERO;
+
+    @Column(name = "gst_rate")
+    private Integer gstRate;
+
+    @Column(name = "cgst_amt", nullable = false, precision = 12, scale = 2)
+    private BigDecimal cgstAmt = BigDecimal.ZERO;
+
+    @Column(name = "sgst_amt", nullable = false, precision = 12, scale = 2)
+    private BigDecimal sgstAmt = BigDecimal.ZERO;
+
+    @Column(name = "igst_amt", nullable = false, precision = 12, scale = 2)
+    private BigDecimal igstAmt = BigDecimal.ZERO;
+
+    @Column(name = "hsn_code", length = 20)
+    private String hsnCode;
+
+    @Column(name = "line_total", nullable = false, precision = 12, scale = 2)
+    private BigDecimal lineTotal = BigDecimal.ZERO;
+
     public PurchaseOrder getPurchaseOrder() { return purchaseOrder; }
     public void setPurchaseOrder(PurchaseOrder purchaseOrder) { this.purchaseOrder = purchaseOrder; }
 
@@ -56,4 +88,31 @@ public class PurchaseOrderItem extends ShopAwareEntity {
 
     public BigDecimal getReceivedQuantity() { return receivedQuantity; }
     public void setReceivedQuantity(BigDecimal receivedQuantity) { this.receivedQuantity = receivedQuantity; }
+
+    public BigDecimal getDiscount() { return discount; }
+    public void setDiscount(BigDecimal discount) { this.discount = discount == null ? BigDecimal.ZERO : discount; }
+
+    public BigDecimal getDiscountPct() { return discountPct; }
+    public void setDiscountPct(BigDecimal discountPct) { this.discountPct = discountPct; }
+
+    public BigDecimal getTaxableValue() { return taxableValue; }
+    public void setTaxableValue(BigDecimal taxableValue) { this.taxableValue = taxableValue == null ? BigDecimal.ZERO : taxableValue; }
+
+    public Integer getGstRate() { return gstRate; }
+    public void setGstRate(Integer gstRate) { this.gstRate = gstRate; }
+
+    public BigDecimal getCgstAmt() { return cgstAmt; }
+    public void setCgstAmt(BigDecimal cgstAmt) { this.cgstAmt = cgstAmt == null ? BigDecimal.ZERO : cgstAmt; }
+
+    public BigDecimal getSgstAmt() { return sgstAmt; }
+    public void setSgstAmt(BigDecimal sgstAmt) { this.sgstAmt = sgstAmt == null ? BigDecimal.ZERO : sgstAmt; }
+
+    public BigDecimal getIgstAmt() { return igstAmt; }
+    public void setIgstAmt(BigDecimal igstAmt) { this.igstAmt = igstAmt == null ? BigDecimal.ZERO : igstAmt; }
+
+    public String getHsnCode() { return hsnCode; }
+    public void setHsnCode(String hsnCode) { this.hsnCode = hsnCode; }
+
+    public BigDecimal getLineTotal() { return lineTotal; }
+    public void setLineTotal(BigDecimal lineTotal) { this.lineTotal = lineTotal == null ? BigDecimal.ZERO : lineTotal; }
 }

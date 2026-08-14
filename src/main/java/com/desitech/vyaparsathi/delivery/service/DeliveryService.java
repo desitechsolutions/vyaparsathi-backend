@@ -148,7 +148,28 @@ public class DeliveryService {
         if (updated.getTrackingNumber() != null) existing.setTrackingNumber(updated.getTrackingNumber());
         if (updated.getEwayBillNo() != null) existing.setEwayBillNo(updated.getEwayBillNo());
         if (updated.getCourierPartner() != null) existing.setCourierPartner(updated.getCourierPartner());
-        if (updated.getCodAmount() != null) existing.setCodAmount(updated.getCodAmount());
+
+        // COD amount override audit: if COD has already been collected and the
+        // amount is being changed, write an audit-trail row so the override is
+        // traceable (who changed it, from/to values, and the mandatory reason).
+        if (updated.getCodAmount() != null) {
+            BigDecimal oldAmount = existing.getCodAmount();
+            boolean isOverride = existing.isCodCollected()
+                    && oldAmount != null
+                    && oldAmount.compareTo(updated.getCodAmount()) != 0;
+            existing.setCodAmount(updated.getCodAmount());
+            if (isOverride) {
+                String reason = (updated.getCodAmountChangeReason() != null
+                        && !updated.getCodAmountChangeReason().isBlank())
+                        ? updated.getCodAmountChangeReason() : "No reason provided";
+                String note = String.format("COD amount overridden: ₹%s → ₹%s. Reason: %s",
+                        oldAmount, updated.getCodAmount(), reason);
+                recordHistory(existing, existing.getDeliveryStatus(),
+                        DeliveryHistoryEventType.COD_OVERRIDE, note, currentUsername());
+                logger.info("COD amount override on delivery {} by {}: {} → {}. Reason: {}",
+                        id, currentUsername(), oldAmount, updated.getCodAmount(), reason);
+            }
+        }
 
         existing.setUpdatedAt(LocalDateTime.now());
         return deliveryMapper.toDto(deliveryRepo.save(existing));
@@ -269,7 +290,14 @@ public class DeliveryService {
         if (podFields.getPodPhotoUrl() != null) delivery.setPodPhotoUrl(podFields.getPodPhotoUrl());
         if (podFields.getPodOtp() != null) delivery.setPodOtp(podFields.getPodOtp());
         delivery.setPodCollectedAt(LocalDateTime.now());
+        // Track whether codCollected is transitioning false → true so we can
+        // fire tryRecordCodPayment() below. We only want to run this once on the
+        // first "Mark collected" click, not on every subsequent POD save.
+        boolean codJustCollected = false;
         if (Boolean.TRUE.equals(podFields.getCodCollected())) {
+            if (!delivery.isCodCollected()) {
+                codJustCollected = true;
+            }
             delivery.setCodCollected(true);
             delivery.setCodCollectedAt(LocalDateTime.now());
             // Auto-stamp codAmount if the user marked collected without setting one.
@@ -285,7 +313,16 @@ public class DeliveryService {
             }
         }
         delivery.setUpdatedAt(LocalDateTime.now());
-        return deliveryMapper.toDto(deliveryRepo.save(delivery));
+        Delivery saved = deliveryRepo.save(delivery);
+        // If COD was just marked collected on an already-DELIVERED delivery,
+        // trigger payment recording now. updateStatus() only fires tryRecordCodPayment()
+        // on the DELIVERED transition — so a post-delivery COD capture (the common
+        // admin flow: deliver first, update amount, mark collected) would otherwise
+        // never create the payment record and the metrics dashboard would show ₹0.
+        if (codJustCollected && saved.getDeliveryStatus() == DeliveryStatus.DELIVERED) {
+            tryRecordCodPayment(saved);
+        }
+        return deliveryMapper.toDto(saved);
     }
 
     /**
@@ -425,15 +462,14 @@ public class DeliveryService {
                 hasLead = true;
             }
             // COD collected sums — count when the COLLECTION happened in-window,
-            // regardless of when the delivery was originally created. If a legacy
-            // row was marked collected without an explicit amount (pre-2026-08-13
-            // capturePod flow), compute the expected amount on-the-fly so the
-            // metric still reflects the money that changed hands.
+            // regardless of when the delivery was originally created.
+            // NOTE: We only count deliveries with an explicit codAmount — using
+            // computeExpectedCodAmount() as a fallback was unreliable because it
+            // computes the full sale balance + delivery charge, which is wrong for
+            // credit sales or cases where only the delivery charge was COD.
+            // All new collections have codAmount auto-stamped via capturePod().
             if (codInWindow) {
                 BigDecimal amount = d.getCodAmount();
-                if (amount == null) {
-                    amount = computeExpectedCodAmount(d);
-                }
                 if (amount != null && amount.signum() > 0) {
                     codTotal = codTotal.add(amount);
                     codCount++;

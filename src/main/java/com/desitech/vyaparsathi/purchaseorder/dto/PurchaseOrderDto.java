@@ -34,6 +34,17 @@ public class PurchaseOrderDto {
     private Long cancelledBy;
     private String cancellationReason;
 
+    // ─── V83 header totals ────────────────────────────────────────────
+    // totalAmount stays authoritative. These are the derived summands the
+    // FE renders in the Zoho-style breakdown card. freightCharges is the
+    // only field the client sets directly; the rest are server-computed
+    // by PurchaseOrderService whenever lines change.
+    private BigDecimal subtotal;
+    private BigDecimal totalDiscount;
+    private BigDecimal totalTax;
+    private BigDecimal freightCharges;
+    private BigDecimal roundOff;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -78,4 +89,19 @@ public class PurchaseOrderDto {
 
     public String getCancellationReason() { return cancellationReason; }
     public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
+
+    public BigDecimal getSubtotal() { return subtotal; }
+    public void setSubtotal(BigDecimal subtotal) { this.subtotal = subtotal; }
+
+    public BigDecimal getTotalDiscount() { return totalDiscount; }
+    public void setTotalDiscount(BigDecimal totalDiscount) { this.totalDiscount = totalDiscount; }
+
+    public BigDecimal getTotalTax() { return totalTax; }
+    public void setTotalTax(BigDecimal totalTax) { this.totalTax = totalTax; }
+
+    public BigDecimal getFreightCharges() { return freightCharges; }
+    public void setFreightCharges(BigDecimal freightCharges) { this.freightCharges = freightCharges; }
+
+    public BigDecimal getRoundOff() { return roundOff; }
+    public void setRoundOff(BigDecimal roundOff) { this.roundOff = roundOff; }
 }

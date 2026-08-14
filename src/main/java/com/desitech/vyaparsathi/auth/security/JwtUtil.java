@@ -5,6 +5,7 @@ import com.desitech.vyaparsathi.accounting.dto.DebitNoteTokenData;
 import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.delivery.dto.DeliveryChallanTokenData;
 import com.desitech.vyaparsathi.invoice.dto.InvoiceTokenData;
+import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderTokenData;
 import com.desitech.vyaparsathi.quotation.dto.QuotationTokenData;
 import com.desitech.vyaparsathi.receipt.dto.ReceiptTokenData;
 import com.desitech.vyaparsathi.refund.dto.RefundTokenData;
@@ -282,6 +283,44 @@ public class JwtUtil {
             return new QuotationTokenData(id, no);
         } catch (JwtException | IllegalArgumentException e) {
             logger.warning("Invalid quotation JWT: " + e.getMessage());
+            throw e;
+        }
+    }
+
+    // ─── PURCHASE ORDER TOKEN ─────────────────────────────────────────────
+    // Signed-URL access for the PO PDF endpoint. Mirrors the quotation-token
+    // pattern exactly — subject/scope kept distinct so tokens can't be reused
+    // across document types.
+    public String generatePurchaseOrderToken(Long purchaseOrderId, String poNumber) {
+        return Jwts.builder()
+                .setSubject("purchase-order-access")
+                .claim("purchaseOrderId", purchaseOrderId)
+                .claim("poNumber", poNumber)
+                .claim("scope", "purchase-order:read")
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + invoiceExpirationMs))
+                .signWith(secretKey, SignatureAlgorithm.HS512)
+                .setIssuer("vyaparsathi-purchase-order-service")
+                .compact();
+    }
+
+    public PurchaseOrderTokenData validatePurchaseOrderToken(String token) {
+        try {
+            Claims claims = parseClaims(token);
+            if (!"purchase-order-access".equals(claims.getSubject())) {
+                throw new JwtException("Invalid subject for purchase-order token");
+            }
+            if (!"purchase-order:read".equals(claims.get("scope", String.class))) {
+                throw new JwtException("Invalid scope for purchase-order token");
+            }
+            Long id = claims.get("purchaseOrderId", Long.class);
+            String no = claims.get("poNumber", String.class);
+            if (id == null && (no == null || no.isBlank())) {
+                throw new JwtException("Missing purchaseOrderId or poNumber in token");
+            }
+            return new PurchaseOrderTokenData(id, no);
+        } catch (JwtException | IllegalArgumentException e) {
+            logger.warning("Invalid purchase-order JWT: " + e.getMessage());
             throw e;
         }
     }

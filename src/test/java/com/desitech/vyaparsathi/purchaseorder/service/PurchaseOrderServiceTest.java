@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.purchaseorder.service;
 
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.ResourceNotFoundException;
+import com.desitech.vyaparsathi.gst.service.GstJurisdictionService;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.repository.ItemVariantRepository;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderDto;
@@ -15,6 +16,8 @@ import com.desitech.vyaparsathi.purchaseorder.events.dto.PurchaseOrderEventDto;
 import com.desitech.vyaparsathi.purchaseorder.mapper.PurchaseOrderMapper;
 import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderItemRepository;
 import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderRepository;
+import com.desitech.vyaparsathi.shop.entity.Shop;
+import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import com.desitech.vyaparsathi.supplier.entity.Supplier;
 import com.desitech.vyaparsathi.supplier.repository.SupplierRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -32,9 +35,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import org.mockito.stubbing.Answer;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -62,6 +68,12 @@ class PurchaseOrderServiceTest {
     private PurchaseOrderMapper mapper;
     @Mock
     private PurchaseOrderProducer purchaseOrderProducer;
+    @Mock
+    private ShopRepository shopRepository;
+    @Mock
+    private GstJurisdictionService gstJurisdictionService;
+    @Mock
+    private PurchaseOrderNumberService purchaseOrderNumberService;
 
     private Supplier supplier;
     private ItemVariant variant;
@@ -91,6 +103,20 @@ class PurchaseOrderServiceTest {
             dto.setReceivedAt(po.getReceivedAt());
             return dto;
         });
+
+        // V83 defaults: no shop resolved, no supplier code resolved → intra-state.
+        // Individual tests override for inter-state (IGST) scenarios.
+        when(shopRepository.findById(1L)).thenReturn(Optional.empty());
+        when(gstJurisdictionService.resolveStateCode(any(Shop.class))).thenReturn(Optional.empty());
+        when(gstJurisdictionService.resolveStateCode((Shop) null)).thenReturn(Optional.empty());
+        when(gstJurisdictionService.resolveStateCode(any(Supplier.class))).thenReturn(Optional.empty());
+        when(gstJurisdictionService.resolveStateCode((Supplier) null)).thenReturn(Optional.empty());
+        when(gstJurisdictionService.isIntraState(any(), any())).thenReturn(true);
+
+        // Default: return a synthetic number for auto-gen paths. Individual
+        // tests can override or send an explicit poNumber to skip generation.
+        when(purchaseOrderNumberService.nextPurchaseOrderNumber(any(), any()))
+                .thenReturn("PO/AUTO/00001");
     }
 
     @AfterEach
@@ -125,10 +151,16 @@ class PurchaseOrderServiceTest {
 
         purchaseOrderService.createPurchaseOrder(dto);
 
+        // V83: create saves twice — first to get the header ID for line FKs,
+        // then again after recomputeTotals reconciles subtotal/tax/rounding.
         ArgumentCaptor<PurchaseOrder> captor = ArgumentCaptor.forClass(PurchaseOrder.class);
-        verify(purchaseOrderRepository).save(captor.capture());
-        assertThat(captor.getValue().getStatus()).isEqualTo(PurchaseOrderStatus.DRAFT);
-        assertThat(captor.getValue().getTotalAmount()).isEqualByComparingTo("500");
+        verify(purchaseOrderRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        PurchaseOrder finalPo = captor.getAllValues().get(captor.getAllValues().size() - 1);
+        assertThat(finalPo.getStatus()).isEqualTo(PurchaseOrderStatus.DRAFT);
+        // No GST on the variant → subtotal = 5 × 100 = 500, tax = 0, rounded = 500.
+        assertThat(finalPo.getTotalAmount()).isEqualByComparingTo("500");
+        assertThat(finalPo.getSubtotal()).isEqualByComparingTo("500");
+        assertThat(finalPo.getTotalTax()).isEqualByComparingTo("0");
         verify(purchaseOrderProducer).sendMessage(eq(EventType.CREATED), any(PurchaseOrderEventDto.class));
     }
 
@@ -143,6 +175,68 @@ class PurchaseOrderServiceTest {
         assertThatThrownBy(() -> purchaseOrderService.createPurchaseOrder(dto))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("already exists");
+    }
+
+    @Test
+    @DisplayName("createPurchaseOrder auto-generates PO number when caller omits it (V84)")
+    void createPurchaseOrder_autoGeneratesPoNumber() {
+        PurchaseOrderDto dto = new PurchaseOrderDto();
+        // Explicitly no poNumber — mimics the FE editor flow after V84.
+        dto.setPoNumber(null);
+        dto.setSupplierId(1L);
+        dto.setOrderDate(LocalDateTime.now());
+        PurchaseOrderItemDto line = new PurchaseOrderItemDto();
+        line.setItemVariantId(10L);
+        line.setQuantity(1);
+        line.setUnitCost(new BigDecimal("50"));
+        dto.setItems(List.of(line));
+
+        when(purchaseOrderRepository.existsByPoNumber(any())).thenReturn(false);
+        when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier));
+        when(itemVariantRepository.findById(10L)).thenReturn(Optional.of(variant));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> {
+            PurchaseOrder p = i.getArgument(0);
+            if (p.getId() == null) p.setId(500L);
+            return p;
+        });
+        when(purchaseOrderNumberService.nextPurchaseOrderNumber(any(), any()))
+                .thenReturn("PO/26-27/00042");
+
+        purchaseOrderService.createPurchaseOrder(dto);
+
+        PurchaseOrder saved = captureFinalSave();
+        assertThat(saved.getPoNumber()).isEqualTo("PO/26-27/00042");
+    }
+
+    @Test
+    @DisplayName("createPurchaseOrder treats blank PO number as auto-generate request")
+    void createPurchaseOrder_blankPoNumberAutoGenerates() {
+        PurchaseOrderDto dto = new PurchaseOrderDto();
+        dto.setPoNumber("   ");  // Blank / whitespace only
+        dto.setSupplierId(1L);
+        dto.setOrderDate(LocalDateTime.now());
+        PurchaseOrderItemDto line = new PurchaseOrderItemDto();
+        line.setItemVariantId(10L);
+        line.setQuantity(1);
+        line.setUnitCost(new BigDecimal("50"));
+        dto.setItems(List.of(line));
+
+        when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier));
+        when(itemVariantRepository.findById(10L)).thenReturn(Optional.of(variant));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> {
+            PurchaseOrder p = i.getArgument(0);
+            if (p.getId() == null) p.setId(501L);
+            return p;
+        });
+        when(purchaseOrderNumberService.nextPurchaseOrderNumber(any(), any()))
+                .thenReturn("PO/26-27/00043");
+
+        purchaseOrderService.createPurchaseOrder(dto);
+
+        PurchaseOrder saved = captureFinalSave();
+        assertThat(saved.getPoNumber()).isEqualTo("PO/26-27/00043");
+        // existsByPoNumber must NOT be consulted for auto-gen (sequence guarantees uniqueness).
+        verify(purchaseOrderRepository, org.mockito.Mockito.never()).existsByPoNumber(any());
     }
 
     // ─── updatePurchaseOrder ──────────────────────────────────────────
@@ -441,6 +535,329 @@ class PurchaseOrderServiceTest {
         purchaseOrderService.markAsReceiving(1L);
 
         verify(purchaseOrderRepository, never()).save(any());
+    }
+
+    // ─── V84 duplicatePurchaseOrder ───────────────────────────────────
+
+    @Test
+    @DisplayName("duplicatePurchaseOrder clones supplier + line items into a fresh DRAFT")
+    void duplicatePurchaseOrder_success() {
+        // Existing PO in a terminal state — a common trigger for duplicating.
+        PurchaseOrder src = draftPo(50L);
+        src.setStatus(PurchaseOrderStatus.RECEIVED);
+        src.setPoNumber("PO/26-27/00007");
+        src.setNotes("Original notes");
+        src.setFreightCharges(new BigDecimal("75"));
+        src.setReceivedAt(LocalDateTime.now().minusDays(3));
+        src.setSentAt(LocalDateTime.now().minusDays(10));
+        // Give the source line a full V83 shape so we can verify carry-over.
+        PurchaseOrderItem srcLine = src.getItems().get(0);
+        srcLine.setDiscount(new BigDecimal("20"));
+        srcLine.setGstRate(18);
+        srcLine.setHsnCode("6103");
+        srcLine.setReceivedQuantity(new BigDecimal("5"));
+
+        when(purchaseOrderRepository.findById(50L)).thenReturn(Optional.of(src));
+        when(purchaseOrderNumberService.nextPurchaseOrderNumber(any(), any()))
+                .thenReturn("PO/26-27/00099");
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> {
+            PurchaseOrder p = i.getArgument(0);
+            if (p.getId() == null) p.setId(999L);
+            return p;
+        });
+
+        purchaseOrderService.duplicatePurchaseOrder(50L);
+
+        PurchaseOrder copy = captureFinalSave();
+        assertThat(copy.getId()).isNotEqualTo(src.getId());
+        assertThat(copy.getPoNumber()).isEqualTo("PO/26-27/00099");
+        assertThat(copy.getStatus()).isEqualTo(PurchaseOrderStatus.DRAFT);
+        assertThat(copy.getSupplier()).isEqualTo(src.getSupplier());
+        assertThat(copy.getNotes()).isEqualTo("Original notes");
+        assertThat(copy.getFreightCharges()).isEqualByComparingTo("75");
+        // Lifecycle stamps must NOT carry over.
+        assertThat(copy.getSentAt()).isNull();
+        assertThat(copy.getReceivedAt()).isNull();
+        assertThat(copy.getCancelledAt()).isNull();
+        assertThat(copy.getExpectedDeliveryDate()).isNull();
+
+        PurchaseOrderItem copyLine = copy.getItems().get(0);
+        assertThat(copyLine.getItemVariant()).isEqualTo(srcLine.getItemVariant());
+        assertThat(copyLine.getQuantity()).isEqualTo(srcLine.getQuantity());
+        assertThat(copyLine.getUnitCost()).isEqualByComparingTo(srcLine.getUnitCost());
+        assertThat(copyLine.getDiscount()).isEqualByComparingTo("20");
+        assertThat(copyLine.getGstRate()).isEqualTo(18);
+        assertThat(copyLine.getHsnCode()).isEqualTo("6103");
+        // receivedQuantity starts fresh on a copy.
+        assertThat(copyLine.getReceivedQuantity()).isEqualByComparingTo("0");
+        verify(purchaseOrderProducer).sendMessage(eq(EventType.CREATED), any(PurchaseOrderEventDto.class));
+    }
+
+    @Test
+    @DisplayName("duplicatePurchaseOrder rejects unknown id")
+    void duplicatePurchaseOrder_notFound() {
+        when(purchaseOrderRepository.findById(9999L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> purchaseOrderService.duplicatePurchaseOrder(9999L))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    // ─── V83 recompute (line-level GST + header totals) ───────────────
+
+    @Test
+    @DisplayName("recompute — intra-state supplier splits GST 50/50 into CGST + SGST")
+    void recompute_intraState_cgstSgstSplit() {
+        variant.setGstRate(18); // 18% → 9% CGST + 9% SGST
+
+        PurchaseOrderDto dto = new PurchaseOrderDto();
+        dto.setPoNumber("PO-INTRA-1");
+        dto.setSupplierId(1L);
+        dto.setOrderDate(LocalDateTime.now());
+        PurchaseOrderItemDto line = new PurchaseOrderItemDto();
+        line.setItemVariantId(10L);
+        line.setQuantity(2);
+        line.setUnitCost(new BigDecimal("100"));
+        dto.setItems(List.of(line));
+
+        when(purchaseOrderRepository.existsByPoNumber(anyString())).thenReturn(false);
+        when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier));
+        when(itemVariantRepository.findById(10L)).thenReturn(Optional.of(variant));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> {
+            PurchaseOrder p = i.getArgument(0);
+            p.setId(200L);
+            return p;
+        });
+
+        purchaseOrderService.createPurchaseOrder(dto);
+
+        ArgumentCaptor<PurchaseOrder> captor = ArgumentCaptor.forClass(PurchaseOrder.class);
+        verify(purchaseOrderRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        PurchaseOrder saved = captor.getAllValues().get(captor.getAllValues().size() - 1);
+        assertThat(saved.getSubtotal()).isEqualByComparingTo("200");   // 2 × 100
+        assertThat(saved.getTotalTax()).isEqualByComparingTo("36");    // 200 × 18%
+        assertThat(saved.getTotalAmount()).isEqualByComparingTo("236"); // 200 + 36
+
+        PurchaseOrderItem savedLine = saved.getItems().get(0);
+        assertThat(savedLine.getTaxableValue()).isEqualByComparingTo("200");
+        assertThat(savedLine.getCgstAmt()).isEqualByComparingTo("18");
+        assertThat(savedLine.getSgstAmt()).isEqualByComparingTo("18");
+        assertThat(savedLine.getIgstAmt()).isEqualByComparingTo("0");
+        assertThat(savedLine.getLineTotal()).isEqualByComparingTo("236");
+    }
+
+    @Test
+    @DisplayName("recompute — inter-state supplier routes 100% of GST into IGST")
+    void recompute_interState_igst() {
+        variant.setGstRate(18);
+        // Different state codes → inter-state
+        when(gstJurisdictionService.isIntraState(any(), any())).thenReturn(false);
+        when(gstJurisdictionService.resolveStateCode(any(Shop.class))).thenReturn(Optional.of("29"));
+        when(gstJurisdictionService.resolveStateCode(any(Supplier.class))).thenReturn(Optional.of("07"));
+
+        PurchaseOrderDto dto = poDtoWithSingleLine("PO-INTER-1", 2, "100", null);
+        stubRepositoriesForCreate();
+
+        purchaseOrderService.createPurchaseOrder(dto);
+
+        PurchaseOrder saved = captureFinalSave();
+        assertThat(saved.getTotalTax()).isEqualByComparingTo("36");
+        assertThat(saved.getTotalAmount()).isEqualByComparingTo("236");
+
+        PurchaseOrderItem line = saved.getItems().get(0);
+        assertThat(line.getCgstAmt()).isEqualByComparingTo("0");
+        assertThat(line.getSgstAmt()).isEqualByComparingTo("0");
+        assertThat(line.getIgstAmt()).isEqualByComparingTo("36");
+    }
+
+    @Test
+    @DisplayName("recompute — line discount reduces taxable_value before GST is applied")
+    void recompute_lineDiscount() {
+        variant.setGstRate(18);
+        PurchaseOrderDto dto = poDtoWithSingleLine("PO-DISC-1", 2, "100", new BigDecimal("50"));
+        stubRepositoriesForCreate();
+
+        purchaseOrderService.createPurchaseOrder(dto);
+
+        PurchaseOrder saved = captureFinalSave();
+        PurchaseOrderItem line = saved.getItems().get(0);
+        // 2×100 = 200 − 50 discount = 150 taxable. GST 18% = 27.
+        assertThat(line.getTaxableValue()).isEqualByComparingTo("150");
+        assertThat(saved.getTotalDiscount()).isEqualByComparingTo("50");
+        assertThat(line.getCgstAmt()).isEqualByComparingTo("13.5"); // 27/2
+        assertThat(line.getSgstAmt()).isEqualByComparingTo("13.5");
+        assertThat(saved.getTotalTax()).isEqualByComparingTo("27");
+        assertThat(saved.getTotalAmount()).isEqualByComparingTo("177"); // 150 + 27
+    }
+
+    @Test
+    @DisplayName("recompute — GST rate + HSN fall back to parent variant when line omits them")
+    void recompute_variantFallback() {
+        variant.setGstRate(12);
+        variant.setHsn("6103");
+        PurchaseOrderDto dto = poDtoWithSingleLine("PO-FB-1", 1, "1000", null);
+        // Line has neither gstRate nor hsnCode — service must pull from variant.
+        stubRepositoriesForCreate();
+
+        purchaseOrderService.createPurchaseOrder(dto);
+
+        PurchaseOrder saved = captureFinalSave();
+        PurchaseOrderItem line = saved.getItems().get(0);
+        assertThat(line.getGstRate()).isEqualTo(12);
+        assertThat(line.getHsnCode()).isEqualTo("6103");
+        assertThat(saved.getTotalTax()).isEqualByComparingTo("120"); // 1000 × 12%
+    }
+
+    @Test
+    @DisplayName("recompute — explicit line-level HSN overrides variant HSN")
+    void recompute_explicitHsnWins() {
+        variant.setGstRate(5);
+        variant.setHsn("VARIANT-HSN");
+        PurchaseOrderDto dto = new PurchaseOrderDto();
+        dto.setPoNumber("PO-HSN-1");
+        dto.setSupplierId(1L);
+        dto.setOrderDate(LocalDateTime.now());
+        PurchaseOrderItemDto lineDto = new PurchaseOrderItemDto();
+        lineDto.setItemVariantId(10L);
+        lineDto.setQuantity(1);
+        lineDto.setUnitCost(new BigDecimal("500"));
+        lineDto.setHsnCode("OVERRIDDEN-HSN");
+        lineDto.setGstRate(18);
+        dto.setItems(List.of(lineDto));
+        stubRepositoriesForCreate();
+
+        purchaseOrderService.createPurchaseOrder(dto);
+
+        PurchaseOrderItem line = captureFinalSave().getItems().get(0);
+        assertThat(line.getHsnCode()).isEqualTo("OVERRIDDEN-HSN");
+        assertThat(line.getGstRate()).isEqualTo(18);
+    }
+
+    @Test
+    @DisplayName("recompute — zero-rate line records no tax and full amount as line_total")
+    void recompute_zeroRate() {
+        variant.setGstRate(0);
+        PurchaseOrderDto dto = poDtoWithSingleLine("PO-ZR-1", 3, "50", null);
+        stubRepositoriesForCreate();
+
+        purchaseOrderService.createPurchaseOrder(dto);
+
+        PurchaseOrder saved = captureFinalSave();
+        PurchaseOrderItem line = saved.getItems().get(0);
+        assertThat(line.getCgstAmt()).isEqualByComparingTo("0");
+        assertThat(line.getSgstAmt()).isEqualByComparingTo("0");
+        assertThat(line.getIgstAmt()).isEqualByComparingTo("0");
+        assertThat(line.getLineTotal()).isEqualByComparingTo("150"); // 3 × 50
+        assertThat(saved.getTotalTax()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    @DisplayName("recompute — freight is added on top of subtotal + tax before rounding")
+    void recompute_freight() {
+        variant.setGstRate(18);
+        PurchaseOrderDto dto = poDtoWithSingleLine("PO-FRT-1", 1, "100", null);
+        dto.setFreightCharges(new BigDecimal("50"));
+        stubRepositoriesForCreate();
+
+        purchaseOrderService.createPurchaseOrder(dto);
+
+        PurchaseOrder saved = captureFinalSave();
+        assertThat(saved.getSubtotal()).isEqualByComparingTo("100");
+        assertThat(saved.getTotalTax()).isEqualByComparingTo("18");
+        assertThat(saved.getFreightCharges()).isEqualByComparingTo("50");
+        // 100 + 18 + 50 = 168 (already whole, so round_off = 0)
+        assertThat(saved.getTotalAmount()).isEqualByComparingTo("168");
+        assertThat(saved.getRoundOff()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    @DisplayName("recompute — non-integer grand total is rounded HALF_UP and delta lands in round_off")
+    void recompute_roundOff() {
+        variant.setGstRate(18);
+        // 1 × 99.5 = 99.5 taxable. Intra-state GST 18% = 17.91 → half = 8.96 (HALF_UP
+        // of 8.955), so CGST + SGST = 17.92 (0.01 drift is intentional and mirrors
+        // SaleService's split behaviour). Grand = 99.5 + 17.92 = 117.42 → 117 rounded.
+        // round_off = 117 − 117.42 = −0.42.
+        PurchaseOrderDto dto = poDtoWithSingleLine("PO-RO-1", 1, "99.5", null);
+        stubRepositoriesForCreate();
+
+        purchaseOrderService.createPurchaseOrder(dto);
+
+        PurchaseOrder saved = captureFinalSave();
+        assertThat(saved.getTotalAmount()).isEqualByComparingTo("117");
+        assertThat(saved.getRoundOff()).isEqualByComparingTo("-0.42");
+    }
+
+    @Test
+    @DisplayName("recompute — header totals reconcile Σlines within rounding tolerance")
+    void recompute_multilineReconciliation() {
+        variant.setGstRate(18);
+        // Second variant with GST 5 for tax rate mix.
+        ItemVariant variant2 = new ItemVariant();
+        variant2.setId(11L);
+        variant2.setSku("SKU-101");
+        variant2.setGstRate(5);
+
+        PurchaseOrderDto dto = new PurchaseOrderDto();
+        dto.setPoNumber("PO-MULTI-1");
+        dto.setSupplierId(1L);
+        dto.setOrderDate(LocalDateTime.now());
+        PurchaseOrderItemDto a = new PurchaseOrderItemDto();
+        a.setItemVariantId(10L); a.setQuantity(2); a.setUnitCost(new BigDecimal("100"));
+        PurchaseOrderItemDto b = new PurchaseOrderItemDto();
+        b.setItemVariantId(11L); b.setQuantity(4); b.setUnitCost(new BigDecimal("50"));
+        dto.setItems(List.of(a, b));
+
+        when(purchaseOrderRepository.existsByPoNumber(anyString())).thenReturn(false);
+        when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier));
+        when(itemVariantRepository.findById(10L)).thenReturn(Optional.of(variant));
+        when(itemVariantRepository.findById(11L)).thenReturn(Optional.of(variant2));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> {
+            PurchaseOrder p = i.getArgument(0);
+            p.setId(300L);
+            return p;
+        });
+
+        purchaseOrderService.createPurchaseOrder(dto);
+
+        PurchaseOrder saved = captureFinalSave();
+        // Line A: 2×100 = 200 taxable, GST 18% = 36
+        // Line B: 4×50 = 200 taxable, GST 5% = 10
+        // subtotal = 400, tax = 46, grand = 446
+        assertThat(saved.getSubtotal()).isEqualByComparingTo("400");
+        assertThat(saved.getTotalTax()).isEqualByComparingTo("46");
+        assertThat(saved.getTotalAmount()).isEqualByComparingTo("446");
+    }
+
+    // ─── Test-only helpers ────────────────────────────────────────────
+
+    private PurchaseOrderDto poDtoWithSingleLine(String poNumber, int qty, String unitCost, BigDecimal discount) {
+        PurchaseOrderDto dto = new PurchaseOrderDto();
+        dto.setPoNumber(poNumber);
+        dto.setSupplierId(1L);
+        dto.setOrderDate(LocalDateTime.now());
+        PurchaseOrderItemDto line = new PurchaseOrderItemDto();
+        line.setItemVariantId(10L);
+        line.setQuantity(qty);
+        line.setUnitCost(new BigDecimal(unitCost));
+        line.setDiscount(discount);
+        dto.setItems(List.of(line));
+        return dto;
+    }
+
+    private void stubRepositoriesForCreate() {
+        when(purchaseOrderRepository.existsByPoNumber(anyString())).thenReturn(false);
+        when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier));
+        when(itemVariantRepository.findById(10L)).thenReturn(Optional.of(variant));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer((Answer<PurchaseOrder>) i -> {
+            PurchaseOrder p = i.getArgument(0);
+            if (p.getId() == null) p.setId(999L);
+            return p;
+        });
+    }
+
+    private PurchaseOrder captureFinalSave() {
+        ArgumentCaptor<PurchaseOrder> captor = ArgumentCaptor.forClass(PurchaseOrder.class);
+        verify(purchaseOrderRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        return captor.getAllValues().get(captor.getAllValues().size() - 1);
     }
 
     // ─── helpers ──────────────────────────────────────────────────────

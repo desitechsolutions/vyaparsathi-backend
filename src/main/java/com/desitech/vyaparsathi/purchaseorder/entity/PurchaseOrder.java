@@ -34,8 +34,12 @@ public class PurchaseOrder extends ShopAwareEntity {
     @Column(name = "expected_delivery_date")
     private LocalDateTime expectedDeliveryDate;
 
+    // Default to ZERO so the first Hibernate insert is legal — recompute
+    // fills the real total in the same transaction. Previously null on
+    // insert, causing MySQL 'Column total_amount cannot be null' on the
+    // duplicate flow which saves the header before recomputeTotals runs.
     @Column(name = "total_amount", nullable = false)
-    private BigDecimal totalAmount;
+    private BigDecimal totalAmount = BigDecimal.ZERO;
 
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
@@ -68,6 +72,26 @@ public class PurchaseOrder extends ShopAwareEntity {
 
     @Column(name = "cancellation_reason", length = 500)
     private String cancellationReason;
+
+    // ─── V83 header totals ────────────────────────────────────────────
+    // totalAmount stays authoritative (existing column). These are the
+    // derived summands so the FE can render a Zoho-style breakdown
+    // without recomputing on the client. Recompute happens in
+    // PurchaseOrderService whenever lines change.
+    @Column(name = "subtotal", nullable = false, precision = 12, scale = 2)
+    private BigDecimal subtotal = BigDecimal.ZERO;
+
+    @Column(name = "total_discount", nullable = false, precision = 12, scale = 2)
+    private BigDecimal totalDiscount = BigDecimal.ZERO;
+
+    @Column(name = "total_tax", nullable = false, precision = 12, scale = 2)
+    private BigDecimal totalTax = BigDecimal.ZERO;
+
+    @Column(name = "freight_charges", nullable = false, precision = 12, scale = 2)
+    private BigDecimal freightCharges = BigDecimal.ZERO;
+
+    @Column(name = "round_off", nullable = false, precision = 6, scale = 2)
+    private BigDecimal roundOff = BigDecimal.ZERO;
 
     @JsonManagedReference
     @OneToMany(mappedBy = "purchaseOrder", cascade = CascadeType.ALL, orphanRemoval = true)
@@ -114,4 +138,19 @@ public class PurchaseOrder extends ShopAwareEntity {
 
     public String getCancellationReason() { return cancellationReason; }
     public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
+
+    public BigDecimal getSubtotal() { return subtotal; }
+    public void setSubtotal(BigDecimal subtotal) { this.subtotal = subtotal == null ? BigDecimal.ZERO : subtotal; }
+
+    public BigDecimal getTotalDiscount() { return totalDiscount; }
+    public void setTotalDiscount(BigDecimal totalDiscount) { this.totalDiscount = totalDiscount == null ? BigDecimal.ZERO : totalDiscount; }
+
+    public BigDecimal getTotalTax() { return totalTax; }
+    public void setTotalTax(BigDecimal totalTax) { this.totalTax = totalTax == null ? BigDecimal.ZERO : totalTax; }
+
+    public BigDecimal getFreightCharges() { return freightCharges; }
+    public void setFreightCharges(BigDecimal freightCharges) { this.freightCharges = freightCharges == null ? BigDecimal.ZERO : freightCharges; }
+
+    public BigDecimal getRoundOff() { return roundOff; }
+    public void setRoundOff(BigDecimal roundOff) { this.roundOff = roundOff == null ? BigDecimal.ZERO : roundOff; }
 }

@@ -37,6 +37,43 @@ public class Supplier extends ShopAwareEntity {
     @Column(name = "state_code", length = 2)
     private String stateCode;
 
+    // ─── V99 — statutory counterparty identity ────────────────────────
+    @Column(name = "legal_name")
+    private String legalName;
+
+    @Column(name = "trade_name")
+    private String tradeName;
+
+    @Column(name = "pan", length = 10)
+    private String pan;
+
+    @Column(name = "state")
+    private String state;
+
+    @Column(name = "city", length = 120)
+    private String city;
+
+    @Column(name = "pincode", length = 10)
+    private String pincode;
+
+    @Column(name = "country", length = 80)
+    private String country = "IN";
+
+    public String getLegalName() { return legalName != null ? legalName : name; }
+    public void setLegalName(String legalName) { this.legalName = legalName; }
+    public String getTradeName() { return tradeName != null ? tradeName : name; }
+    public void setTradeName(String tradeName) { this.tradeName = tradeName; }
+    public String getPan() { return pan; }
+    public void setPan(String pan) { this.pan = pan; }
+    public String getState() { return state; }
+    public void setState(String state) { this.state = state; }
+    public String getCity() { return city; }
+    public void setCity(String city) { this.city = city; }
+    public String getPincode() { return pincode; }
+    public void setPincode(String pincode) { this.pincode = pincode; }
+    public String getCountry() { return country != null ? country : "IN"; }
+    public void setCountry(String country) { this.country = country; }
+
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
 

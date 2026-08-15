@@ -6,7 +6,9 @@ import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.delivery.dto.DeliveryChallanTokenData;
 import com.desitech.vyaparsathi.invoice.dto.InvoiceTokenData;
 import com.desitech.vyaparsathi.purchaseorder.dto.PurchaseOrderTokenData;
+import com.desitech.vyaparsathi.purchasereturn.dto.PurchaseReturnTokenData;
 import com.desitech.vyaparsathi.quotation.dto.QuotationTokenData;
+import com.desitech.vyaparsathi.receiving.dto.ReceivingTokenData;
 import com.desitech.vyaparsathi.receipt.dto.ReceiptTokenData;
 import com.desitech.vyaparsathi.refund.dto.RefundTokenData;
 import com.desitech.vyaparsathi.salesorder.dto.SalesOrderTokenData;
@@ -321,6 +323,80 @@ public class JwtUtil {
             return new PurchaseOrderTokenData(id, no);
         } catch (JwtException | IllegalArgumentException e) {
             logger.warning("Invalid purchase-order JWT: " + e.getMessage());
+            throw e;
+        }
+    }
+
+    // ─── RECEIVING (GRN) TOKEN ────────────────────────────────────────────
+    // Signed-URL access for the GRN PDF endpoint. Mirrors the PO token above —
+    // subject/scope kept distinct so tokens can't be reused across document
+    // types.
+    public String generateReceivingToken(Long receivingId, String grNumber) {
+        return Jwts.builder()
+                .setSubject("receiving-access")
+                .claim("receivingId", receivingId)
+                .claim("grNumber", grNumber)
+                .claim("scope", "receiving:read")
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + invoiceExpirationMs))
+                .signWith(secretKey, SignatureAlgorithm.HS512)
+                .setIssuer("vyaparsathi-receiving-service")
+                .compact();
+    }
+
+    public ReceivingTokenData validateReceivingToken(String token) {
+        try {
+            Claims claims = parseClaims(token);
+            if (!"receiving-access".equals(claims.getSubject())) {
+                throw new JwtException("Invalid subject for receiving token");
+            }
+            if (!"receiving:read".equals(claims.get("scope", String.class))) {
+                throw new JwtException("Invalid scope for receiving token");
+            }
+            Long id = claims.get("receivingId", Long.class);
+            String no = claims.get("grNumber", String.class);
+            if (id == null && (no == null || no.isBlank())) {
+                throw new JwtException("Missing receivingId or grNumber in token");
+            }
+            return new ReceivingTokenData(id, no);
+        } catch (JwtException | IllegalArgumentException e) {
+            logger.warning("Invalid receiving JWT: " + e.getMessage());
+            throw e;
+        }
+    }
+
+    // ─── PURCHASE RETURN TOKEN ────────────────────────────────────────────
+    // Signed-URL access for the RTV / Purchase Return PDF endpoint.
+    public String generatePurchaseReturnToken(Long purchaseReturnId, String returnNo) {
+        return Jwts.builder()
+                .setSubject("purchase-return-access")
+                .claim("purchaseReturnId", purchaseReturnId)
+                .claim("returnNo", returnNo)
+                .claim("scope", "purchase-return:read")
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + invoiceExpirationMs))
+                .signWith(secretKey, SignatureAlgorithm.HS512)
+                .setIssuer("vyaparsathi-purchase-return-service")
+                .compact();
+    }
+
+    public PurchaseReturnTokenData validatePurchaseReturnToken(String token) {
+        try {
+            Claims claims = parseClaims(token);
+            if (!"purchase-return-access".equals(claims.getSubject())) {
+                throw new JwtException("Invalid subject for purchase-return token");
+            }
+            if (!"purchase-return:read".equals(claims.get("scope", String.class))) {
+                throw new JwtException("Invalid scope for purchase-return token");
+            }
+            Long id = claims.get("purchaseReturnId", Long.class);
+            String no = claims.get("returnNo", String.class);
+            if (id == null && (no == null || no.isBlank())) {
+                throw new JwtException("Missing purchaseReturnId or returnNo in token");
+            }
+            return new PurchaseReturnTokenData(id, no);
+        } catch (JwtException | IllegalArgumentException e) {
+            logger.warning("Invalid purchase-return JWT: " + e.getMessage());
             throw e;
         }
     }

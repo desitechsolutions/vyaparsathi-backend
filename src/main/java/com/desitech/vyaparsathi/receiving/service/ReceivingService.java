@@ -12,6 +12,7 @@ import com.desitech.vyaparsathi.purchaseorder.entity.PurchaseOrderItem;
 import com.desitech.vyaparsathi.purchaseorder.enums.EventType;
 import com.desitech.vyaparsathi.purchaseorder.enums.PurchaseOrderStatus;
 import com.desitech.vyaparsathi.purchaseorder.events.PurchaseOrderEvent;
+import com.desitech.vyaparsathi.purchaseorder.events.PurchaseOrderProducer;
 import com.desitech.vyaparsathi.purchaseorder.events.dto.PurchaseOrderEventDto;
 import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderItemRepository;
 import com.desitech.vyaparsathi.purchaseorder.repository.PurchaseOrderRepository;
@@ -20,10 +21,15 @@ import com.desitech.vyaparsathi.receiving.entity.Receiving;
 import com.desitech.vyaparsathi.receiving.entity.ReceivingItem;
 import com.desitech.vyaparsathi.receiving.entity.ReceivingTicket;
 import com.desitech.vyaparsathi.receiving.entity.ReceivingTicketAttachment;
+import com.desitech.vyaparsathi.auth.entity.User;
+import com.desitech.vyaparsathi.auth.repository.UserRepository;
 import com.desitech.vyaparsathi.receiving.enums.ReceivingItemStatus;
 import com.desitech.vyaparsathi.receiving.enums.ReceivingStatus;
+import com.desitech.vyaparsathi.receiving.enums.ReceivingTicketStatus;
 import com.desitech.vyaparsathi.receiving.mapper.ReceivingMapper;
+import com.desitech.vyaparsathi.receiving.entity.ReceivingStatusHistory;
 import com.desitech.vyaparsathi.receiving.repository.ReceivingRepository;
+import com.desitech.vyaparsathi.receiving.repository.ReceivingStatusHistoryRepository;
 import com.desitech.vyaparsathi.receiving.repository.ReceivingTicketRepository;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
@@ -53,10 +59,30 @@ public class ReceivingService {
     private final ShopRepository shopRepository;
     private final StockMovementRepository stockMovementRepository;
     private final ReceivingTicketRepository receivingTicketRepository;
+    private final ReceivingStatusHistoryRepository statusHistoryRepository;
     private final ReceivingMapper receivingMapper;
+    private final GrnNumberService grnNumberService;
+    private final UserRepository userRepository;
+    private final PurchaseOrderProducer purchaseOrderProducer;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ReceivingNotificationService notificationService;
+
+    /** Auto-ticket threshold — shortage as % of ordered qty. Configurable per shop later. */
+    @Value("${app.receiving.auto-ticket.shortage-pct:20}")
+    private BigDecimal autoTicketShortagePct;
 
     @Value("${app.default.shop.id:1}")  // Configurable default shop ID
     private Long defaultShopId;
+
+    /**
+     * Minimum days of shelf life a batch must have to be accepted. Callers
+     * can override via {@code app.receiving.min-shelf-life-days} in application.yml.
+     * Default 7 days keeps supermarket-style receipts safe while allowing
+     * near-expiry acceptance with an explicit override reason on the line.
+     */
+    @Value("${app.receiving.min-shelf-life-days:7}")
+    private int minShelfLifeDays;
 
     // Constructor injection for better testability
     public ReceivingService(ReceivingRepository receivingRepository,
@@ -65,14 +91,41 @@ public class ReceivingService {
                             ShopRepository shopRepository,
                             StockMovementRepository stockMovementRepository,
                             ReceivingTicketRepository receivingTicketRepository,
-                            ReceivingMapper receivingMapper) {
+                            ReceivingStatusHistoryRepository statusHistoryRepository,
+                            ReceivingMapper receivingMapper,
+                            GrnNumberService grnNumberService,
+                            UserRepository userRepository,
+                            PurchaseOrderProducer purchaseOrderProducer) {
         this.receivingRepository = receivingRepository;
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.purchaseOrderItemRepository = purchaseOrderItemRepository;
         this.shopRepository = shopRepository;
         this.stockMovementRepository = stockMovementRepository;
         this.receivingTicketRepository = receivingTicketRepository;
+        this.statusHistoryRepository = statusHistoryRepository;
         this.receivingMapper = receivingMapper;
+        this.grnNumberService = grnNumberService;
+        this.userRepository = userRepository;
+        this.purchaseOrderProducer = purchaseOrderProducer;
+    }
+
+    /**
+     * Records a single status transition on the audit log. Runs in the caller's
+     * transaction so a rollback voids the history entry too. Silent no-op when
+     * from == to; enterprise dashboards only care about actual transitions.
+     */
+    private void recordStatusChange(Receiving r, ReceivingStatus fromStatus, ReceivingStatus toStatus,
+                                    String changedBy, String note) {
+        if (fromStatus == toStatus) return;
+        ReceivingStatusHistory h = new ReceivingStatusHistory();
+        h.setReceivingId(r.getId());
+        h.setShop(r.getShop());
+        h.setFromStatus(fromStatus != null ? fromStatus.name() : null);
+        h.setToStatus(toStatus.name());
+        h.setChangedBy(changedBy != null ? changedBy : "system");
+        h.setChangedAt(LocalDateTime.now());
+        h.setNote(note);
+        statusHistoryRepository.save(h);
     }
 
     /**
@@ -166,24 +219,34 @@ public class ReceivingService {
                         }
                     }
 
+                    // DRAFT edits are pure metadata — stock movements + PO progress
+                    // are deferred until confirmReceiving flips DRAFT → PENDING.
+                    boolean isDraft = ReceivingStatus.DRAFT.equals(existingReceiving.getStatus());
                     Receiving savedReceiving = receivingRepository.save(existingReceiving);
 
-                    adjustStockDeltas(savedReceiving, oldReceivedQtys, oldVariants, oldCosts);
-                    updateReceivingStatus(savedReceiving);
-                    updatePOStatus(savedReceiving.getPurchaseOrder());
+                    if (!isDraft) {
+                        adjustStockDeltas(savedReceiving, oldReceivedQtys, oldVariants, oldCosts);
+                        updateReceivingStatus(savedReceiving);
+                        updatePOStatus(savedReceiving.getPurchaseOrder());
+                    }
 
-                    logger.info("Updated receiving ID {} for PO ID {}", id, savedReceiving.getPurchaseOrder().getId());
+                    logger.info("Updated receiving ID {} (draft={}) for PO ID {}",
+                            id, isDraft, savedReceiving.getPurchaseOrder().getId());
                     return receivingMapper.toDto(savedReceiving);
                 });
     }
 
     /**
-     * Validates ReceivingDto for create/update, including non-negative quantities.
+     * Validates ReceivingDto for create/update, including non-negative quantities
+     * and (V90 addition) expiry-window enforcement for perishables. Serial-number
+     * / batch fields are lenient — validation is triggered when the line supplies
+     * an expiry date at all.
      */
     private void validateDtoForCreateOrUpdate(ReceivingDto dto, boolean isUpdate) {
         if (CollectionUtils.isEmpty(dto.getReceivingItems())) {
             throw new BusinessValidationException("Receiving items cannot be empty");
         }
+        LocalDate expiryFloor = LocalDate.now().plusDays(minShelfLifeDays);
         for (ReceivingItemDto itemDto : dto.getReceivingItems()) {
             int recv   = Optional.ofNullable(itemDto.getReceivedQty()).orElse(0);
             int dmg    = Optional.ofNullable(itemDto.getDamagedQty()).orElse(0);
@@ -191,6 +254,18 @@ public class ReceivingService {
             int putaway = Optional.ofNullable(itemDto.getPutawayQty()).orElse(0);
             if (recv < 0 || dmg < 0 || rej < 0 || putaway < 0) {
                 throw new BusinessValidationException("Quantities cannot be negative");
+            }
+            // Perishable guard: block items dated inside the shelf-life floor
+            // unless the line explicitly flags an override rationale (reuses
+            // the overage-reason field — near-expiry is a policy exception).
+            if (itemDto.getExpiryDate() != null
+                    && recv > 0
+                    && itemDto.getExpiryDate().isBefore(expiryFloor)
+                    && (itemDto.getOverageReason() == null || itemDto.getOverageReason().isBlank())) {
+                throw new BusinessValidationException(
+                        "Item expires on " + itemDto.getExpiryDate()
+                        + " which is inside the " + minShelfLifeDays
+                        + "-day shelf-life floor. Provide an override reason to accept.");
             }
         }
     }
@@ -300,9 +375,17 @@ public class ReceivingService {
      * Helper to update the overall Receiving status based on its items.
      */
     private void updateReceivingStatus(Receiving receiving) {
-        boolean allReceived = receiving.getItems().stream()
+        List<ReceivingItem> items = receiving.getItems();
+        // No items to classify: an empty GRN can't be "all-received" (that
+        // would trip Stream.allMatch's vacuous-true default). Keep it PENDING
+        // so the confirm-then-fill path stays in a sane state.
+        if (CollectionUtils.isEmpty(items)) {
+            receiving.setStatus(ReceivingStatus.PENDING);
+            return;
+        }
+        boolean allReceived = items.stream()
                 .allMatch(item -> item.getStatus() == ReceivingItemStatus.RECEIVED);
-        boolean anyReceived = receiving.getItems().stream()
+        boolean anyReceived = items.stream()
                 .anyMatch(item -> item.getStatus() == ReceivingItemStatus.RECEIVED || item.getStatus() == ReceivingItemStatus.PARTIALLY_RECEIVED);
 
         if (allReceived) {
@@ -347,7 +430,11 @@ public class ReceivingService {
         Shop defaultShop = getDefaultShop();
 
         Receiving receiving = new Receiving();
-        receiving.setGrNumber("GR-" + java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss")));
+        // V87: sequential, human-readable GRN number (GRN/YY-YY/NNNNN) via the
+        // per-shop sequence. Retires the timestamp-based scheme that was
+        // collision-prone and unfriendly to print.
+        receiving.setGrNumber(grnNumberService.nextGrnNumber(
+                defaultShop.getId(), java.time.LocalDate.now()));
         receiving.setPurchaseOrder(po);
         receiving.setStatus(ReceivingStatus.PENDING);
         receiving.setNotes(Optional.ofNullable(notes).orElse("Auto-created receiving record."));
@@ -494,13 +581,23 @@ public class ReceivingService {
             }
         }
 
-        if (allPoItemsReceived) {
-            po.setStatus(PurchaseOrderStatus.RECEIVED);
-        } else {
-            po.setStatus(PurchaseOrderStatus.PARTIALLY_RECEIVED);
+        // Capture prior status BEFORE mutation so we only emit RECEIVED on the
+        // transition edge — matches how PurchaseOrderService fires APPROVED /
+        // REJECTED / REVISED exactly once per state change.
+        PurchaseOrderStatus prevStatus = po.getStatus();
+        PurchaseOrderStatus nextStatus = allPoItemsReceived
+                ? PurchaseOrderStatus.RECEIVED
+                : PurchaseOrderStatus.PARTIALLY_RECEIVED;
+        po.setStatus(nextStatus);
+        PurchaseOrder saved = purchaseOrderRepository.save(po); // CascadeType.ALL on items — flushes receivedQuantity too.
+        logger.info("Updated PO {} status to {}", saved.getPoNumber(), saved.getStatus());
+
+        if (nextStatus == PurchaseOrderStatus.RECEIVED && prevStatus != PurchaseOrderStatus.RECEIVED) {
+            // Fire once when the PO first fully lands. Analytics, inventory
+            // reconciliation, and supplier-performance listeners subscribe to
+            // this — previously the flag flipped silently and nothing knew.
+            purchaseOrderProducer.sendMessage(EventType.RECEIVED, PurchaseOrderEventDto.fromEntity(saved));
         }
-        purchaseOrderRepository.save(po); // CascadeType.ALL on items — flushes receivedQuantity too.
-        logger.info("Updated PO {} status to {}", po.getPoNumber(), po.getStatus());
     }
 
     @Transactional
@@ -543,7 +640,7 @@ public class ReceivingService {
         receivingTicket.setReceiving(receiving);
         receivingTicket.setReason(receivingTicketDTO.getReason());
         receivingTicket.setDescription(receivingTicketDTO.getDescription());
-        receivingTicket.setStatus("Open"); // Use enum
+        receivingTicket.setStatusEnum(ReceivingTicketStatus.OPEN);
         receivingTicket.setRaisedAt(LocalDateTime.now());
         receivingTicket.setRaisedBy(receivingTicketDTO.getRaisedBy());
 
@@ -562,10 +659,21 @@ public class ReceivingService {
     public Optional<ReceivingTicket> updateReceivingTicket(Long id, ReceivingTicketDTO dto) {
         return receivingTicketRepository.findById(id)
                 .map(ticket -> {
-                    ticket.setReason(dto.getReason());
-                    ticket.setDescription(dto.getDescription());
-                    ticket.setRaisedBy(dto.getRaisedBy());
-                    // Status update logic if needed
+                    if (dto.getReason() != null) ticket.setReason(dto.getReason());
+                    if (dto.getDescription() != null) ticket.setDescription(dto.getDescription());
+                    if (dto.getRaisedBy() != null) ticket.setRaisedBy(dto.getRaisedBy());
+                    // Status transitions honored here so the "Mark in progress" / "Close"
+                    // buttons on the tickets list actually persist. Terminal transitions
+                    // (RESOLVED) still route through resolveReceivingTicket so the resolver
+                    // audit stamp is captured — reject that shortcut here.
+                    if (dto.getStatus() != null && !dto.getStatus().isBlank()) {
+                        ReceivingTicketStatus next = ReceivingTicketStatus.fromString(dto.getStatus());
+                        if (next == ReceivingTicketStatus.RESOLVED) {
+                            throw new BusinessValidationException(
+                                    "Use /tickets/{id}/resolve to resolve a ticket — stamps the resolver.");
+                        }
+                        ticket.setStatusEnum(next);
+                    }
                     return receivingTicketRepository.save(ticket);
                 });
     }
@@ -651,10 +759,19 @@ public class ReceivingService {
         if (createReceivingDto.getReceivedDate() != null) {
             receiving.setReceivedAt(createReceivingDto.getReceivedDate());
         }
+        // The GrnCreatePage wizard invokes this create-only endpoint before
+        // pushing quantities via updateReceiving. Persist as DRAFT so the
+        // subsequent update stays metadata-only and stock commit is gated on
+        // the explicit confirmReceiving click.
+        receiving.setStatus(ReceivingStatus.DRAFT);
         Receiving savedReceiving = receivingRepository.save(receiving);
-        logger.info("Successfully created PENDING receiving record ID {} for PO ID {}",
+        logger.info("Successfully created DRAFT receiving record ID {} for PO ID {}",
                 savedReceiving.getId(), po.getId());
 
+        if (notificationService != null) {
+            try { notificationService.onGrnCreated(savedReceiving); }
+            catch (Exception e) { logger.warn("GRN_CREATED notification failed: {}", e.getMessage()); }
+        }
         return receivingMapper.toDto(savedReceiving);
     }
 
@@ -703,6 +820,323 @@ public class ReceivingService {
     }
 
     public List<ReceivingTicket> getAllReceivingTickets() {
+        // findAll() is auto-scoped by ShopFilterAspect (ticket extends
+        // ShopAwareEntity), so this returns only the current tenant's tickets
+        // as long as a request-level TenantContext is set — which is guaranteed
+        // by the controller's @PreAuthorize.
         return receivingTicketRepository.findAll();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Phase 6.1 — state-machine entry points for the redesigned Receiving UI
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Transitions a DRAFT GRN to PENDING (or its downstream completed states).
+     * The current create-flow commits stock on save, so DRAFT is opt-in from
+     * the redesigned wizard: callers save a DRAFT via {@link #createInitialReceivingRecord}
+     * (without receivingItems), fill quantities via {@link #updateReceiving},
+     * then invoke this to commit. It is idempotent for non-DRAFT statuses so a
+     * retried FE click doesn't double-commit stock.
+     */
+    @Transactional
+    public ReceivingDto confirmReceiving(Long id, String note) {
+        Receiving receiving = receivingRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Receiving not found with ID: " + id));
+
+        if (!ReceivingStatus.DRAFT.equals(receiving.getStatus())) {
+            logger.info("confirmReceiving is a no-op for GRN {} in status {} — already committed",
+                    receiving.getGrNumber(), receiving.getStatus());
+            return receivingMapper.toDto(receiving);
+        }
+
+        if (note != null && !note.isBlank()) {
+            String existing = Optional.ofNullable(receiving.getNotes()).orElse("");
+            receiving.setNotes(existing.isBlank() ? note : (existing + "\n" + note));
+        }
+
+        // Flip status first so item-status recomputation classifies each line
+        // by its committed state (PENDING / PARTIALLY_RECEIVED / COMPLETED).
+        receiving.setStatus(ReceivingStatus.PENDING);
+        updateReceivingStatus(receiving);
+        Receiving saved = receivingRepository.save(receiving);
+
+        // V93: if landed cost is opted-in, distribute freight into per-line
+        // valuation before stock is committed so movements carry the right
+        // cost. No-op when the flag is off or actual freight is zero/null.
+        applyReceivingLandedCost(saved);
+
+        // Draft rows carry zero committed stock — treat "old" as empty so this
+        // pass emits ADD movements for every accepted quantity, exactly once.
+        adjustStockDeltas(saved, Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap());
+        updatePOStatus(saved.getPurchaseOrder());
+        recordStatusChange(saved, ReceivingStatus.DRAFT, saved.getStatus(), saved.getReceivedBy(), note);
+        detectCostVariance(saved);
+        maybeAutoRaiseTicket(saved);
+
+        logger.info("Confirmed GRN {} (id={}) — status now {}",
+                saved.getGrNumber(), saved.getId(), saved.getStatus());
+        return receivingMapper.toDto(saved);
+    }
+
+    /**
+     * V93 receiving-side landed cost — distribute {@code freightActual} across
+     * accepted-qty × unit-cost line values into {@code landedUnitCost}. Runs
+     * only when the receiving-side flag is on so historical rows stay untouched.
+     */
+    private void applyReceivingLandedCost(Receiving r) {
+        if (!r.isLandedCostEnabled() || r.getItems() == null || r.getItems().isEmpty()) {
+            if (r.getItems() != null) r.getItems().forEach(i -> i.setLandedUnitCost(null));
+            return;
+        }
+        BigDecimal freight = Optional.ofNullable(r.getFreightActual()).orElse(BigDecimal.ZERO);
+        BigDecimal totalValue = BigDecimal.ZERO;
+        for (ReceivingItem it : r.getItems()) {
+            int qty = it.getAcceptedQty();
+            BigDecimal cost = it.getUnitCost() != null
+                    ? it.getUnitCost()
+                    : Optional.ofNullable(it.getPurchaseOrderItem() != null ? it.getPurchaseOrderItem().getUnitCost() : null)
+                            .orElse(BigDecimal.ZERO);
+            totalValue = totalValue.add(cost.multiply(BigDecimal.valueOf(qty)));
+        }
+        if (totalValue.signum() == 0 || freight.signum() == 0) {
+            r.getItems().forEach(it -> it.setLandedUnitCost(it.getUnitCost()));
+            return;
+        }
+        for (ReceivingItem it : r.getItems()) {
+            int qty = it.getAcceptedQty();
+            if (qty == 0) { it.setLandedUnitCost(it.getUnitCost()); continue; }
+            BigDecimal cost = it.getUnitCost() != null ? it.getUnitCost() : BigDecimal.ZERO;
+            BigDecimal lineValue = cost.multiply(BigDecimal.valueOf(qty));
+            BigDecimal share = lineValue.divide(totalValue, 6, java.math.RoundingMode.HALF_UP).multiply(freight);
+            BigDecimal perUnit = share.divide(BigDecimal.valueOf(qty), 4, java.math.RoundingMode.HALF_UP);
+            it.setLandedUnitCost(cost.add(perUnit).setScale(4, java.math.RoundingMode.HALF_UP));
+        }
+    }
+
+    /**
+     * Flags the GRN when any line's cost drifts more than 5% from the PO price.
+     * The FE surfaces this as a chip on the detail page; downstream the flag is
+     * a signal to route to 3-way match review before AP payment.
+     */
+    private void detectCostVariance(Receiving r) {
+        if (r.getItems() == null) return;
+        for (ReceivingItem it : r.getItems()) {
+            if (it.getUnitCost() == null || it.getPurchaseOrderItem() == null) continue;
+            BigDecimal poCost = it.getPurchaseOrderItem().getUnitCost();
+            if (poCost == null || poCost.signum() == 0) continue;
+            BigDecimal delta = it.getUnitCost().subtract(poCost).abs()
+                    .divide(poCost, 4, java.math.RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("100"));
+            if (delta.compareTo(new BigDecimal("5")) > 0) {
+                r.setCostVarianceFlag(true);
+                logger.warn("Cost variance on GRN {}: line cost {} vs PO {} ({}%)",
+                        r.getGrNumber(), it.getUnitCost(), poCost, delta);
+                return;
+            }
+        }
+    }
+
+    /**
+     * Auto-raise a dispute ticket when a line's shortage exceeds the shop's
+     * configured threshold. Runs once per confirmed GRN (idempotency guarded
+     * by the {@code auto_ticket_raised} flag).
+     */
+    private void maybeAutoRaiseTicket(Receiving r) {
+        if (r.isAutoTicketRaised()) return;
+        if (r.getItems() == null || r.getItems().isEmpty()) return;
+        BigDecimal thresholdPct = autoTicketShortagePct != null ? autoTicketShortagePct : new BigDecimal("20");
+        StringBuilder desc = new StringBuilder();
+        for (ReceivingItem it : r.getItems()) {
+            int ordered = it.getExpectedQty() != null ? it.getExpectedQty() : 0;
+            if (ordered <= 0) continue;
+            int accepted = it.getAcceptedQty();
+            int shortage = ordered - accepted;
+            if (shortage <= 0) continue;
+            BigDecimal pct = BigDecimal.valueOf(shortage)
+                    .divide(BigDecimal.valueOf(ordered), 4, java.math.RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("100"));
+            if (pct.compareTo(thresholdPct) > 0) {
+                if (desc.length() > 0) desc.append("; ");
+                desc.append("Line ").append(it.getId())
+                    .append(" short ").append(shortage).append("/").append(ordered)
+                    .append(" (").append(pct.setScale(1, java.math.RoundingMode.HALF_UP)).append("%)");
+            }
+        }
+        if (desc.length() == 0) return;
+
+        try {
+            ReceivingTicketDTO auto = new ReceivingTicketDTO();
+            auto.setReceivingId(r.getId());
+            auto.setReason("AUTO_SHORTAGE");
+            auto.setDescription("Auto-raised: " + desc);
+            auto.setRaisedBy("system");
+            createReceivingTicket(auto);
+            r.setAutoTicketRaised(true);
+            receivingRepository.save(r);
+        } catch (Exception e) {
+            logger.warn("Auto-ticket creation failed for GRN {}: {}", r.getGrNumber(), e.getMessage());
+        }
+    }
+
+    /**
+     * Voids a GRN and reverses any stock committed by it. Cancellation reason
+     * is mandatory — used in the supplier communication + audit log. Draft
+     * GRNs are simply deleted (no stock to reverse), so this endpoint is only
+     * relevant once the GRN is committed.
+     */
+    @Transactional
+    public ReceivingDto cancelReceiving(Long id, String reason, Long userId) {
+        if (reason == null || reason.isBlank()) {
+            throw new BusinessValidationException("Cancellation reason is required.");
+        }
+        Receiving receiving = receivingRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Receiving not found with ID: " + id));
+
+        if (receiving.getStatus() == ReceivingStatus.CANCELLED) {
+            throw new BusinessValidationException("GRN " + receiving.getGrNumber() + " is already cancelled.");
+        }
+        if (receiving.getStatus() == ReceivingStatus.DRAFT) {
+            throw new BusinessValidationException("Delete draft GRNs instead of cancelling — no stock movements to reverse.");
+        }
+
+        // Capture current accepted quantities as the "old" state, then wipe
+        // items to "new" state = zeros. adjustStockDeltas already emits DEDUCT
+        // movements for that delta pattern.
+        Map<Long, Integer> oldReceivedQtys = receiving.getItems().stream()
+                .collect(Collectors.toMap(ReceivingItem::getId, item -> Optional.ofNullable(item.getReceivedQty()).orElse(0)));
+        Map<Long, ItemVariant> oldVariants = receiving.getItems().stream()
+                .collect(Collectors.toMap(ReceivingItem::getId, item -> item.getPurchaseOrderItem().getItemVariant()));
+        Map<Long, BigDecimal> oldCosts = receiving.getItems().stream()
+                .collect(Collectors.toMap(ReceivingItem::getId, item -> item.getPurchaseOrderItem().getUnitCost()));
+
+        ReceivingStatus fromStatus = receiving.getStatus();
+        receiving.setStatus(ReceivingStatus.CANCELLED);
+        receiving.setCancellationReason(reason);
+        receiving.setCancelledAt(LocalDateTime.now());
+        receiving.setCancelledByUserId(userId);
+
+        // Zero out the accepted qty by flipping received/damaged/rejected to 0.
+        // Keeps the record inspectable — you still see what was originally
+        // logged, but the effective accepted qty is 0 for stock and PO math.
+        for (ReceivingItem it : receiving.getItems()) {
+            it.setReceivedQty(0);
+            it.setDamagedQty(0);
+            it.setRejectedQty(0);
+            it.setStatus(ReceivingItemStatus.PENDING);
+        }
+
+        Receiving saved = receivingRepository.save(receiving);
+        adjustStockDeltas(saved, oldReceivedQtys, oldVariants, oldCosts);
+        updatePOStatus(saved.getPurchaseOrder());
+        recordStatusChange(saved, fromStatus, ReceivingStatus.CANCELLED,
+                userId != null ? String.valueOf(userId) : saved.getReceivedBy(), reason);
+
+        logger.info("Cancelled GRN {} (id={}) — reason: {}", saved.getGrNumber(), saved.getId(), reason);
+        return receivingMapper.toDto(saved);
+    }
+
+    /** Read-side helper for the FE timeline widget. */
+    @Transactional(readOnly = true)
+    public List<ReceivingStatusHistory> getStatusHistory(Long receivingId) {
+        // Existence check up front so a 404 is returned rather than an empty list.
+        receivingRepository.findById(receivingId)
+                .orElseThrow(() -> new ResourceNotFoundException("Receiving not found with ID: " + receivingId));
+        return statusHistoryRepository.findByReceivingIdOrderByChangedAtAsc(receivingId);
+    }
+
+    /**
+     * Stamps approval metadata on a committed GRN. Only committed statuses
+     * (PENDING / PARTIALLY_RECEIVED / COMPLETED) can be approved — DRAFT rows
+     * must be confirmed first so stock movements exist for audit.
+     */
+    @Transactional
+    public ReceivingDto approveReceiving(Long id, String note, Long approverUserId) {
+        Receiving receiving = receivingRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Receiving not found with ID: " + id));
+
+        if (!receiving.getStatus().isCommitted()) {
+            throw new BusinessValidationException(
+                    "GRN must be confirmed before approval (current status: " + receiving.getStatus() + ")");
+        }
+        if (receiving.getApprovedByUser() != null) {
+            throw new BusinessValidationException("GRN " + receiving.getGrNumber() + " is already approved");
+        }
+        // Guard: don't sign off on an empty GRN. An auto-created PENDING has
+        // all lines at zero qty until an operator records the physical arrival —
+        // approving before that is a rubber-stamp on nothing.
+        int totalAccepted = receiving.getItems() == null ? 0
+                : receiving.getItems().stream().mapToInt(ReceivingItem::getAcceptedQty).sum();
+        if (totalAccepted <= 0) {
+            throw new BusinessValidationException(
+                    "GRN " + receiving.getGrNumber() + " has no received quantities — record the goods received before approving.");
+        }
+
+        if (approverUserId != null) {
+            User approver = userRepository.findById(approverUserId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Approver user not found: " + approverUserId));
+            receiving.setApprovedByUser(approver);
+        }
+        receiving.setApprovedAt(LocalDateTime.now());
+        receiving.setApprovalNote(note);
+
+        Receiving saved = receivingRepository.save(receiving);
+        // Approval stamps a history entry even though status doesn't shift —
+        // pass same-status so recordStatusChange creates a synthetic "APPROVED"
+        // marker for the timeline. Bypasses the from==to guard by using a
+        // sentinel value in the note.
+        ReceivingStatusHistory h = new ReceivingStatusHistory();
+        h.setReceivingId(saved.getId());
+        h.setShop(saved.getShop());
+        h.setFromStatus(saved.getStatus().name());
+        h.setToStatus("APPROVED");
+        h.setChangedBy(approverUserId != null ? String.valueOf(approverUserId) : "system");
+        h.setChangedAt(LocalDateTime.now());
+        h.setNote(note);
+        statusHistoryRepository.save(h);
+        logger.info("Approved GRN {} (id={}) by userId={}",
+                saved.getGrNumber(), saved.getId(), approverUserId);
+        return receivingMapper.toDto(saved);
+    }
+
+    /**
+     * Opens a top-level dispute on a GRN — thin wrapper over
+     * {@link #createReceivingTicket} that stamps the caller as raiser and
+     * defaults the reason to "DISPUTE". Kept separate so the FE can call a
+     * clear /dispute endpoint without hand-rolling a ticket DTO.
+     */
+    @Transactional
+    public ReceivingTicket disputeReceiving(Long receivingId, String note, String raisedByUsername) {
+        // Existence check up front — createReceivingTicket dereferences via getReceivingById.
+        receivingRepository.findById(receivingId)
+                .orElseThrow(() -> new ResourceNotFoundException("Receiving not found with ID: " + receivingId));
+
+        ReceivingTicketDTO dto = new ReceivingTicketDTO();
+        dto.setReceivingId(receivingId);
+        dto.setReason("DISPUTE");
+        dto.setDescription(note);
+        dto.setRaisedBy(raisedByUsername);
+        return createReceivingTicket(dto);
+    }
+
+    /**
+     * Moves a dispute ticket to RESOLVED with resolver + timestamp + note.
+     * Idempotent for already-terminal tickets so a retried FE click is safe.
+     */
+    @Transactional
+    public ReceivingTicket resolveReceivingTicket(Long ticketId, String note, Long resolverUserId) {
+        ReceivingTicket ticket = receivingTicketRepository.findById(ticketId)
+                .orElseThrow(() -> new ResourceNotFoundException("Receiving Ticket not found with ID: " + ticketId));
+
+        if (ticket.getStatusEnum().isTerminal()) {
+            logger.info("resolveReceivingTicket no-op — ticket {} already {}", ticketId, ticket.getStatus());
+            return ticket;
+        }
+
+        ticket.setStatusEnum(ReceivingTicketStatus.RESOLVED);
+        ticket.setResolvedBy(resolverUserId);
+        ticket.setResolvedAt(LocalDateTime.now());
+        ticket.setResolutionNote(note);
+        return receivingTicketRepository.save(ticket);
     }
 }

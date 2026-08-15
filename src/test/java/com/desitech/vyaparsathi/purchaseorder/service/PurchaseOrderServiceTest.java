@@ -254,7 +254,23 @@ class PurchaseOrderServiceTest {
 
         assertThatThrownBy(() -> purchaseOrderService.updatePurchaseOrder(1L, dto))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Draft");
+                .hasMessageContaining("editable");
+    }
+
+    @Test
+    @DisplayName("updatePurchaseOrder rejects REJECTED status — must go through /revise first")
+    void updatePurchaseOrder_rejectedRequiresRevise() {
+        PurchaseOrder po = draftPo(1L);
+        po.setStatus(PurchaseOrderStatus.REJECTED);
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+
+        PurchaseOrderDto dto = new PurchaseOrderDto();
+        dto.setSupplierId(1L);
+        dto.setItems(List.of());
+
+        assertThatThrownBy(() -> purchaseOrderService.updatePurchaseOrder(1L, dto))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("/revise");
     }
 
     // ─── submitPurchaseOrder ──────────────────────────────────────────
@@ -535,6 +551,204 @@ class PurchaseOrderServiceTest {
         purchaseOrderService.markAsReceiving(1L);
 
         verify(purchaseOrderRepository, never()).save(any());
+    }
+
+    // ─── V85 approval workflow ────────────────────────────────────────
+
+    @Test
+    @DisplayName("submitPurchaseOrder → SUBMITTED when shop has no approval policy")
+    void submitPurchaseOrder_noPolicy_directSubmit() {
+        PurchaseOrder po = draftPo(1L);
+        // Shop has policy disabled — usual path.
+        com.desitech.vyaparsathi.shop.entity.Shop shop = new com.desitech.vyaparsathi.shop.entity.Shop();
+        shop.setId(1L);
+        shop.setPoApprovalRequired(false);
+        po.setShop(shop);
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+        purchaseOrderService.submitPurchaseOrder(1L, 42L);
+
+        assertThat(po.getStatus()).isEqualTo(PurchaseOrderStatus.SUBMITTED);
+        assertThat(po.getSubmittedBy()).isEqualTo(42L);
+        verify(purchaseOrderProducer).sendMessage(eq(EventType.SUBMITTED), any(PurchaseOrderEventDto.class));
+    }
+
+    @Test
+    @DisplayName("submitPurchaseOrder → PENDING_APPROVAL when shop policy + threshold trip")
+    void submitPurchaseOrder_thresholdTrip_pendingApproval() {
+        PurchaseOrder po = draftPo(1L);
+        po.setTotalAmount(new BigDecimal("1000"));
+        com.desitech.vyaparsathi.shop.entity.Shop shop = new com.desitech.vyaparsathi.shop.entity.Shop();
+        shop.setId(1L);
+        shop.setPoApprovalRequired(true);
+        shop.setPoApprovalThresholdAmount(new BigDecimal("500"));
+        po.setShop(shop);
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+        purchaseOrderService.submitPurchaseOrder(1L, 42L);
+
+        assertThat(po.getStatus()).isEqualTo(PurchaseOrderStatus.PENDING_APPROVAL);
+        assertThat(po.getSubmittedBy()).isEqualTo(42L);
+        verify(purchaseOrderProducer).sendMessage(eq(EventType.APPROVAL_REQUESTED), any(PurchaseOrderEventDto.class));
+        verify(purchaseOrderProducer, org.mockito.Mockito.never()).sendMessage(eq(EventType.SUBMITTED), any());
+    }
+
+    @Test
+    @DisplayName("submitPurchaseOrder threshold check is inclusive of the exact amount")
+    void submitPurchaseOrder_exactThreshold_pendingApproval() {
+        PurchaseOrder po = draftPo(1L);
+        po.setTotalAmount(new BigDecimal("500"));
+        com.desitech.vyaparsathi.shop.entity.Shop shop = new com.desitech.vyaparsathi.shop.entity.Shop();
+        shop.setId(1L);
+        shop.setPoApprovalRequired(true);
+        shop.setPoApprovalThresholdAmount(new BigDecimal("500"));
+        po.setShop(shop);
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+        purchaseOrderService.submitPurchaseOrder(1L, 42L);
+
+        assertThat(po.getStatus()).isEqualTo(PurchaseOrderStatus.PENDING_APPROVAL);
+    }
+
+    @Test
+    @DisplayName("submitPurchaseOrder → SUBMITTED when total is below threshold")
+    void submitPurchaseOrder_belowThreshold_directSubmit() {
+        PurchaseOrder po = draftPo(1L);
+        po.setTotalAmount(new BigDecimal("100"));
+        com.desitech.vyaparsathi.shop.entity.Shop shop = new com.desitech.vyaparsathi.shop.entity.Shop();
+        shop.setId(1L);
+        shop.setPoApprovalRequired(true);
+        shop.setPoApprovalThresholdAmount(new BigDecimal("500"));
+        po.setShop(shop);
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+        purchaseOrderService.submitPurchaseOrder(1L, 42L);
+
+        assertThat(po.getStatus()).isEqualTo(PurchaseOrderStatus.SUBMITTED);
+        verify(purchaseOrderProducer).sendMessage(eq(EventType.SUBMITTED), any(PurchaseOrderEventDto.class));
+    }
+
+    @Test
+    @DisplayName("approvePurchaseOrder → SUBMITTED, stamps approver, fires APPROVED + SUBMITTED")
+    void approvePurchaseOrder_success() {
+        PurchaseOrder po = draftPo(1L);
+        po.setStatus(PurchaseOrderStatus.PENDING_APPROVAL);
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+        purchaseOrderService.approvePurchaseOrder(1L, 99L);
+
+        assertThat(po.getStatus()).isEqualTo(PurchaseOrderStatus.SUBMITTED);
+        assertThat(po.getApprovedBy()).isEqualTo(99L);
+        assertThat(po.getApprovedAt()).isNotNull();
+        verify(purchaseOrderProducer).sendMessage(eq(EventType.APPROVED), any(PurchaseOrderEventDto.class));
+        verify(purchaseOrderProducer).sendMessage(eq(EventType.SUBMITTED), any(PurchaseOrderEventDto.class));
+    }
+
+    @Test
+    @DisplayName("approvePurchaseOrder rejects non-PENDING_APPROVAL status")
+    void approvePurchaseOrder_wrongStatus() {
+        PurchaseOrder po = draftPo(1L);
+        po.setStatus(PurchaseOrderStatus.DRAFT);
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+
+        assertThatThrownBy(() -> purchaseOrderService.approvePurchaseOrder(1L, 99L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("PENDING_APPROVAL");
+    }
+
+    @Test
+    @DisplayName("rejectPurchaseOrder → REJECTED (not DRAFT), stamps rejecter + reason, fires REJECTED")
+    void rejectPurchaseOrder_success() {
+        PurchaseOrder po = draftPo(1L);
+        po.setStatus(PurchaseOrderStatus.PENDING_APPROVAL);
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+        purchaseOrderService.rejectPurchaseOrder(1L, "Amount too high", 99L);
+
+        // Refactor: REJECTED (not DRAFT) so the approver's comment stays as a
+        // banner until the requester explicitly clicks Revise.
+        assertThat(po.getStatus()).isEqualTo(PurchaseOrderStatus.REJECTED);
+        assertThat(po.getRejectionReason()).isEqualTo("Amount too high");
+        assertThat(po.getRejectedBy()).isEqualTo(99L);
+        assertThat(po.getRejectedAt()).isNotNull();
+        verify(purchaseOrderProducer).sendMessage(eq(EventType.REJECTED), any(PurchaseOrderEventDto.class));
+    }
+
+    @Test
+    @DisplayName("reviseRejectedPurchaseOrder → DRAFT, keeps rejection reason as reference")
+    void reviseRejectedPurchaseOrder_success() {
+        PurchaseOrder po = draftPo(1L);
+        po.setStatus(PurchaseOrderStatus.REJECTED);
+        po.setRejectionReason("Amount too high");
+        po.setRejectedBy(99L);
+        po.setRejectedAt(LocalDateTime.now().minusHours(2));
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+        purchaseOrderService.reviseRejectedPurchaseOrder(1L, 42L);
+
+        assertThat(po.getStatus()).isEqualTo(PurchaseOrderStatus.DRAFT);
+        // Rejection metadata is deliberately preserved — the FE renders it
+        // as a reference banner during revision.
+        assertThat(po.getRejectionReason()).isEqualTo("Amount too high");
+        assertThat(po.getRejectedBy()).isEqualTo(99L);
+        assertThat(po.getRejectedAt()).isNotNull();
+        // Fires the dedicated REVISED event so audit / notification subscribers
+        // can distinguish "requester revised after rejection" from a plain edit.
+        verify(purchaseOrderProducer).sendMessage(eq(EventType.REVISED), any(PurchaseOrderEventDto.class));
+        verify(purchaseOrderProducer, org.mockito.Mockito.never()).sendMessage(eq(EventType.UPDATED), any());
+    }
+
+    @Test
+    @DisplayName("reviseRejectedPurchaseOrder rejects non-REJECTED status")
+    void reviseRejectedPurchaseOrder_wrongStatus() {
+        PurchaseOrder po = draftPo(1L);
+        po.setStatus(PurchaseOrderStatus.DRAFT);
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+
+        assertThatThrownBy(() -> purchaseOrderService.reviseRejectedPurchaseOrder(1L, 42L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("REJECTED");
+    }
+
+    @Test
+    @DisplayName("submit clears stale rejection metadata when resubmitting a revised PO")
+    void submitPurchaseOrder_resubmitClearsRejectionMetadata() {
+        PurchaseOrder po = draftPo(1L);
+        po.setRejectionReason("Prior reason");
+        po.setRejectedBy(99L);
+        po.setRejectedAt(LocalDateTime.now().minusHours(2));
+        com.desitech.vyaparsathi.shop.entity.Shop shop = new com.desitech.vyaparsathi.shop.entity.Shop();
+        shop.setId(1L);
+        shop.setPoApprovalRequired(false);
+        po.setShop(shop);
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+        when(purchaseOrderRepository.save(any(PurchaseOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+        purchaseOrderService.submitPurchaseOrder(1L, 42L);
+
+        assertThat(po.getStatus()).isEqualTo(PurchaseOrderStatus.SUBMITTED);
+        assertThat(po.getRejectionReason()).isNull();
+        assertThat(po.getRejectedBy()).isNull();
+        assertThat(po.getRejectedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("rejectPurchaseOrder rejects non-PENDING_APPROVAL status")
+    void rejectPurchaseOrder_wrongStatus() {
+        PurchaseOrder po = draftPo(1L);
+        po.setStatus(PurchaseOrderStatus.SUBMITTED);
+        when(purchaseOrderRepository.findById(1L)).thenReturn(Optional.of(po));
+
+        assertThatThrownBy(() -> purchaseOrderService.rejectPurchaseOrder(1L, "nope", 99L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("PENDING_APPROVAL");
     }
 
     // ─── V84 duplicatePurchaseOrder ───────────────────────────────────

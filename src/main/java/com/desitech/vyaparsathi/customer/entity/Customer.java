@@ -43,6 +43,13 @@ public class Customer extends ShopAwareEntity {
     @Column(name = "credit_balance", nullable = false)
     private BigDecimal creditBalance = BigDecimal.ZERO;
 
+    /** V99 — legal name (defaults to trade `name` when unset). */
+    @Column(name = "legal_name")
+    private String legalName;
+
+    public String getLegalName() { return legalName != null ? legalName : name; }
+    public void setLegalName(String legalName) { this.legalName = legalName; }
+
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
 

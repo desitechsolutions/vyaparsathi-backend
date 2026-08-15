@@ -130,4 +130,39 @@ public class StockTransferController {
             throw new ApplicationException("Failed to cancel transfer: " + e.getMessage(), e);
         }
     }
+
+    // ── V94 approval + in-transit flow ──────────────────────────────────
+
+    @PostMapping("/{id}/request-approval")
+    @PreAuthorize("hasAnyRole('OWNER','ADMIN')")
+    public ResponseEntity<StockTransferDto> requestApproval(
+            @PathVariable Long id,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
+        String note = body != null ? body.get("note") : null;
+        return ResponseEntity.ok(service.requestApproval(id, note));
+    }
+
+    @PostMapping("/{id}/approve")
+    @PreAuthorize("hasAnyRole('OWNER','ADMIN')")
+    public ResponseEntity<StockTransferDto> approve(
+            @PathVariable Long id,
+            @RequestBody(required = false) java.util.Map<String, String> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        Long userId = principal != null ? principal.getId() : null;
+        String note = body != null ? body.get("note") : null;
+        return ResponseEntity.ok(service.approve(id, userId, note));
+    }
+
+    @PostMapping("/{id}/dispatch")
+    @PreAuthorize("hasAnyRole('OWNER','ADMIN')")
+    public ResponseEntity<StockTransferDto> dispatch(@PathVariable Long id) {
+        return ResponseEntity.ok(service.dispatch(id));
+    }
+
+    @PostMapping("/{id}/receive")
+    @PreAuthorize("hasAnyRole('OWNER','ADMIN')")
+    public ResponseEntity<StockTransferDto> receive(@PathVariable Long id) {
+        return ResponseEntity.ok(service.confirmArrival(id));
+    }
 }

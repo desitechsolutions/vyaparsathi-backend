@@ -60,6 +60,18 @@ public class InvoiceService {
     @Autowired
     private com.desitech.vyaparsathi.gst.service.GstJurisdictionService gstJurisdictionService;
 
+    @Autowired
+    private EnterpriseInvoicePdfService enterpriseInvoicePdfService;
+
+    /**
+     * Feature flag for the Phase-A enterprise PDF renderer. Defaults to true
+     * so every invoice ships with the CBIC-compliant enterprise layout;
+     * set {@code invoice.enterprise-pdf.enabled=false} for a per-shop
+     * fallback to the legacy renderer while migrating.
+     */
+    @Value("${invoice.enterprise-pdf.enabled:true}")
+    private boolean enterprisePdfEnabled;
+
     @Value("${shop.banking.details:Bank Name: XYZ Bank\nAccount: 123456789\nIFSC: XYZB0001234}")
     private String defaultBankingDetails;
 
@@ -82,6 +94,17 @@ public class InvoiceService {
     }
 
     public byte[] generatePdf(Sale sale) {
+        // Phase-A enterprise PDF renderer — CBIC-compliant layout shared with
+        // GRN / PR / DN / CN / PO / Delivery Challan. Falls back to the legacy
+        // renderer if the flag is off (for regression-testing during rollout).
+        if (enterprisePdfEnabled) {
+            return enterpriseInvoicePdfService.generate(sale);
+        }
+        return generateLegacyPdf(sale);
+    }
+
+    /** Legacy Phase-0 invoice renderer — kept for feature-flag rollback. */
+    public byte[] generateLegacyPdf(Sale sale) {
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             Document document = new Document(PageSize.A4, 36, 36, 75, 45);
             PdfWriter writer = PdfWriter.getInstance(document, baos);

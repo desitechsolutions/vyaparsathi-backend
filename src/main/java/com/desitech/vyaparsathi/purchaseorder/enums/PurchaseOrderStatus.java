@@ -30,6 +30,18 @@ package com.desitech.vyaparsathi.purchaseorder.enums;
  */
 public enum PurchaseOrderStatus {
     DRAFT,
+    /** V85 (Phase 3) — shop policy requires approval before the PO can be
+     * committed to the supplier. Reached from DRAFT via submit-with-policy.
+     * From here: approve → SUBMITTED, reject → REJECTED. */
+    PENDING_APPROVAL,
+    /**
+     * V85 refactor — the approver rejected the PO. Read-only in this state so
+     * the approver's comment sticks with the document; the requester clicks
+     * "Revise PO" which transitions REJECTED → DRAFT (keeping rejection_reason
+     * as a reference banner) so they can edit and resubmit for approval.
+     * Not terminal, not editable directly.
+     */
+    REJECTED,
     SUBMITTED,
     PARTIALLY_RECEIVED,
     RECEIVED,
@@ -45,7 +57,8 @@ public enum PurchaseOrderStatus {
 
     /**
      * True when the PO can still be modified in-place.
-     * Only DRAFT accepts edits; everything else requires cancel + reissue.
+     * DRAFT accepts edits; PENDING_APPROVAL is locked (edits would let the
+     * requester silently increase the amount past the approver's inspection).
      */
     public boolean isEditable() {
         return this == DRAFT;
@@ -59,5 +72,10 @@ public enum PurchaseOrderStatus {
     /** True when receiving activity is still expected against this PO. */
     public boolean isOpenForReceipt() {
         return this == SUBMITTED || this == PARTIALLY_RECEIVED;
+    }
+
+    /** True when the PO is waiting for an approver. */
+    public boolean isPendingApproval() {
+        return this == PENDING_APPROVAL;
     }
 }

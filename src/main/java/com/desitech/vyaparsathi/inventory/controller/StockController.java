@@ -263,4 +263,198 @@ public class StockController {
         }
     }
 
+    // ── V94 enterprise endpoints ────────────────────────────────────────
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.inventory.service.InventoryReportService inventoryReportService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.inventory.service.InventoryReservationService reservationService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.inventory.service.StockAdjustmentApprovalService adjustmentApprovalService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.inventory.service.CycleCountService cycleCountService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.inventory.service.BatchRecallService batchRecallService;
+
+    // Reports pack.
+    @GetMapping("/reports/valuation")
+    public ResponseEntity<java.util.Map<String, Object>> valuation() {
+        return ResponseEntity.ok(inventoryReportService.valuation());
+    }
+
+    @GetMapping("/reports/valuation.xlsx")
+    public ResponseEntity<byte[]> valuationXlsx() {
+        byte[] body = inventoryReportService.valuationXlsx();
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.setContentType(org.springframework.http.MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"stock-valuation.xlsx\"");
+        return new ResponseEntity<>(body, headers, org.springframework.http.HttpStatus.OK);
+    }
+
+    @GetMapping("/reports/dead-stock")
+    public ResponseEntity<java.util.List<java.util.Map<String, Object>>> deadStock(
+            @RequestParam(defaultValue = "90") int days) {
+        return ResponseEntity.ok(inventoryReportService.deadStock(days));
+    }
+
+    @GetMapping("/reports/shrinkage")
+    public ResponseEntity<java.util.List<java.util.Map<String, Object>>> shrinkage(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        java.time.LocalDate f = from != null ? java.time.LocalDate.parse(from) : null;
+        java.time.LocalDate t = to != null ? java.time.LocalDate.parse(to) : null;
+        return ResponseEntity.ok(inventoryReportService.shrinkage(f, t));
+    }
+
+    @GetMapping("/reports/ageing")
+    public ResponseEntity<java.util.List<java.util.Map<String, Object>>> ageing() {
+        return ResponseEntity.ok(inventoryReportService.ageing());
+    }
+
+    @GetMapping("/reports/turnover")
+    public ResponseEntity<java.util.List<java.util.Map<String, Object>>> turnover(
+            @RequestParam(defaultValue = "30") int days) {
+        return ResponseEntity.ok(inventoryReportService.turnover(days));
+    }
+
+    // Reservations.
+    @PostMapping("/reservations")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.InventoryReservation> reserve(
+            @RequestBody java.util.Map<String, Object> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        Long variantId = Long.valueOf(body.get("itemVariantId").toString());
+        java.math.BigDecimal qty = new java.math.BigDecimal(body.get("quantity").toString());
+        String reason = body.get("reason") != null ? body.get("reason").toString() : null;
+        String refType = body.get("referenceType") != null ? body.get("referenceType").toString() : null;
+        Long refId = body.get("referenceId") != null ? Long.valueOf(body.get("referenceId").toString()) : null;
+        java.time.LocalDateTime expiresAt = body.get("expiresAt") != null
+                ? java.time.LocalDateTime.parse(body.get("expiresAt").toString()) : null;
+        String user = principal != null ? principal.getUsername() : "system";
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED)
+                .body(reservationService.reserve(variantId, qty, reason, refType, refId, user, expiresAt));
+    }
+
+    @PostMapping("/reservations/{id}/consume")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.InventoryReservation> consume(@PathVariable Long id) {
+        return ResponseEntity.ok(reservationService.consume(id));
+    }
+
+    @PostMapping("/reservations/{id}/release")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.InventoryReservation> release(@PathVariable Long id) {
+        return ResponseEntity.ok(reservationService.release(id));
+    }
+
+    // Adjustment approvals.
+    @GetMapping("/adjustment-approvals")
+    public ResponseEntity<java.util.List<com.desitech.vyaparsathi.inventory.entity.StockAdjustmentApproval>> pendingAdjustments() {
+        return ResponseEntity.ok(adjustmentApprovalService.pending());
+    }
+
+    @PreAuthorize("hasAnyRole('OWNER','ADMIN')")
+    @PostMapping("/adjustment-approvals/{id}/approve")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.StockAdjustmentApproval> approveAdjustment(
+            @PathVariable Long id,
+            @RequestBody(required = false) java.util.Map<String, String> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        Long userId = principal != null ? principal.getId() : null;
+        String note = body != null ? body.get("note") : null;
+        return ResponseEntity.ok(adjustmentApprovalService.approve(id, userId, note));
+    }
+
+    @PreAuthorize("hasAnyRole('OWNER','ADMIN')")
+    @PostMapping("/adjustment-approvals/{id}/reject")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.StockAdjustmentApproval> rejectAdjustment(
+            @PathVariable Long id,
+            @RequestBody(required = false) java.util.Map<String, String> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        Long userId = principal != null ? principal.getId() : null;
+        String note = body != null ? body.get("note") : null;
+        return ResponseEntity.ok(adjustmentApprovalService.reject(id, userId, note));
+    }
+
+    // Cycle count.
+    @PostMapping("/cycle-counts")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.CycleCount> planCycleCount(
+            @RequestBody java.util.Map<String, String> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        String initiator = principal != null ? principal.getUsername() : "system";
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED)
+                .body(cycleCountService.plan(body.getOrDefault("scope", "FULL"), initiator, body.get("notes")));
+    }
+
+    @GetMapping("/cycle-counts")
+    public ResponseEntity<java.util.List<com.desitech.vyaparsathi.inventory.entity.CycleCount>> listCycleCounts() {
+        return ResponseEntity.ok(cycleCountService.listAll());
+    }
+
+    @GetMapping("/cycle-counts/{id}")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.CycleCount> getCycleCount(@PathVariable Long id) {
+        return ResponseEntity.ok(cycleCountService.get(id));
+    }
+
+    @PostMapping("/cycle-counts/{id}/lines/{lineId}/count")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.CycleCount> recordCount(
+            @PathVariable Long id, @PathVariable Long lineId,
+            @RequestBody java.util.Map<String, Object> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        java.math.BigDecimal qty = new java.math.BigDecimal(body.get("countedQty").toString());
+        String counter = principal != null ? principal.getUsername() : "system";
+        String reason = body.get("reason") != null ? body.get("reason").toString() : null;
+        return ResponseEntity.ok(cycleCountService.recordCount(id, lineId, qty, counter, reason));
+    }
+
+    @PostMapping("/cycle-counts/{id}/commit")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.CycleCount> commitCycleCount(@PathVariable Long id) {
+        return ResponseEntity.ok(cycleCountService.commit(id));
+    }
+
+    @PostMapping("/cycle-counts/{id}/cancel")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.CycleCount> cancelCycleCount(
+            @PathVariable Long id, @RequestBody(required = false) java.util.Map<String, String> body) {
+        String reason = body != null ? body.get("reason") : null;
+        return ResponseEntity.ok(cycleCountService.cancel(id, reason));
+    }
+
+    // Batch recall.
+    @PostMapping("/recalls")
+    @PreAuthorize("hasAnyRole('OWNER','ADMIN')")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.BatchRecall> openRecall(
+            @RequestBody java.util.Map<String, Object> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        String batchNo = body.get("batchNumber").toString();
+        Long variantId = body.get("itemVariantId") != null ? Long.valueOf(body.get("itemVariantId").toString()) : null;
+        String reason = body.get("reason") != null ? body.get("reason").toString() : "-";
+        boolean notifySupplier = Boolean.parseBoolean(String.valueOf(body.getOrDefault("notifySupplier", false)));
+        boolean notifyCustomers = Boolean.parseBoolean(String.valueOf(body.getOrDefault("notifyCustomers", false)));
+        String initiator = principal != null ? principal.getUsername() : "system";
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED)
+                .body(batchRecallService.open(batchNo, variantId, reason, initiator, notifySupplier, notifyCustomers));
+    }
+
+    @GetMapping("/recalls")
+    public ResponseEntity<java.util.List<com.desitech.vyaparsathi.inventory.entity.BatchRecall>> listRecalls() {
+        return ResponseEntity.ok(batchRecallService.listAll());
+    }
+
+    @PostMapping("/recalls/{id}/close")
+    @PreAuthorize("hasAnyRole('OWNER','ADMIN')")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.BatchRecall> closeRecall(
+            @PathVariable Long id, @RequestBody(required = false) java.util.Map<String, String> body) {
+        return ResponseEntity.ok(batchRecallService.close(id, body != null ? body.get("note") : null));
+    }
+
+    @PostMapping("/recalls/{id}/impacts/{impactId}/outcome")
+    public ResponseEntity<com.desitech.vyaparsathi.inventory.entity.BatchRecall> updateImpactOutcome(
+            @PathVariable Long id, @PathVariable Long impactId,
+            @RequestBody java.util.Map<String, String> body) {
+        return ResponseEntity.ok(batchRecallService.updateImpactOutcome(id, impactId, body.get("outcome")));
+    }
 }

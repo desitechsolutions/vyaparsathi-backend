@@ -69,5 +69,36 @@ public class StockTransfer extends BaseEntity {
 
     public List<StockTransferItem> getItems() { return items; }
     public void setItems(List<StockTransferItem> items) { this.items = items; }
+
+    // V94 approval + in-transit lifecycle fields.
+    @Column(name = "approved_by")
+    private Long approvedBy;
+
+    @Column(name = "approved_at")
+    private LocalDateTime approvedAt;
+
+    @Column(name = "in_transit_at")
+    private LocalDateTime inTransitAt;
+
+    @Column(name = "received_at")
+    private LocalDateTime receivedAt;
+
+    @Column(name = "approval_note", length = 500)
+    private String approvalNote;
+
+    public Long getApprovedBy() { return approvedBy; }
+    public void setApprovedBy(Long approvedBy) { this.approvedBy = approvedBy; }
+
+    public LocalDateTime getApprovedAt() { return approvedAt; }
+    public void setApprovedAt(LocalDateTime approvedAt) { this.approvedAt = approvedAt; }
+
+    public LocalDateTime getInTransitAt() { return inTransitAt; }
+    public void setInTransitAt(LocalDateTime inTransitAt) { this.inTransitAt = inTransitAt; }
+
+    public LocalDateTime getReceivedAt() { return receivedAt; }
+    public void setReceivedAt(LocalDateTime receivedAt) { this.receivedAt = receivedAt; }
+
+    public String getApprovalNote() { return approvalNote; }
+    public void setApprovalNote(String approvalNote) { this.approvalNote = approvalNote; }
 }
 

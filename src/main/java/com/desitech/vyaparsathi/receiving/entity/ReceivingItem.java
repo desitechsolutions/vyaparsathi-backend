@@ -42,6 +42,13 @@ public class ReceivingItem extends ShopAwareEntity {
     @Column(name = "unit_cost", precision = 12, scale = 2)
     private BigDecimal unitCost;
 
+    /** V93 landed cost on receipt — freight-adjusted per-unit valuation. */
+    @Column(name = "landed_unit_cost", precision = 12, scale = 4)
+    private BigDecimal landedUnitCost;
+
+    public BigDecimal getLandedUnitCost() { return landedUnitCost; }
+    public void setLandedUnitCost(BigDecimal landedUnitCost) { this.landedUnitCost = landedUnitCost; }
+
     @Column(name = "putaway_qty")
     private Integer putawayQty;
 
@@ -141,11 +148,16 @@ public class ReceivingItem extends ShopAwareEntity {
     public String getPartReference() { return partReference; }
     public void setPartReference(String partReference) { this.partReference = partReference; }
 
+    /**
+     * Healthy units accepted into sellable stock. In this codebase received /
+     * damaged / rejected are three parallel buckets — the operator enters each
+     * separately (see {@code validateItemQuantities} which sums them, and
+     * {@code updatePOStatus} which treats them as additive). {@code receivedQty}
+     * is the healthy count; damaged and rejected are quarantined for RTV /
+     * debit-note / write-off flows and never hit sellable stock directly.
+     */
     public int getAcceptedQty() {
-        int r = receivedQty != null ? receivedQty : 0;
-        int d = damagedQty != null ? damagedQty : 0;
-        int rej = rejectedQty != null ? rejectedQty : 0;
-        return Math.max(0, r - d - rej);
+        return receivedQty != null ? Math.max(0, receivedQty) : 0;
     }
 
     public int getShortQty() {

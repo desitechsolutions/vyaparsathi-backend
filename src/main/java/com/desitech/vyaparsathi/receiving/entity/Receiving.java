@@ -51,6 +51,47 @@ public class Receiving extends ShopAwareEntity {
     @Column(name = "approved_at")
     private LocalDateTime approvedAt;
 
+    /** Free-form note captured at approval time (V89). */
+    @Column(name = "approval_note", length = 500)
+    private String approvalNote;
+
+    // V90 cancellation audit — populated when a GRN is voided.
+    @Column(name = "cancellation_reason", length = 500)
+    private String cancellationReason;
+
+    @Column(name = "cancelled_at")
+    private LocalDateTime cancelledAt;
+
+    @Column(name = "cancelled_by_user_id")
+    private Long cancelledByUserId;
+
+    // V91 enterprise fields — pre-receipt planning + variance flags.
+    @Column(name = "expected_delivery_date")
+    private java.time.LocalDate expectedDeliveryDate;
+
+    @Column(name = "dock_bay", length = 50)
+    private String dockBay;
+
+    @Column(name = "checklist_json", columnDefinition = "TEXT")
+    private String checklistJson;
+
+    @Column(name = "digital_signature_url", length = 500)
+    private String digitalSignatureUrl;
+
+    @Column(name = "cost_variance_flag", nullable = false)
+    private boolean costVarianceFlag = false;
+
+    @Column(name = "auto_ticket_raised", nullable = false)
+    private boolean autoTicketRaised = false;
+
+    /** V93 — freight paid at delivery (may differ from PO estimate). */
+    @Column(name = "freight_actual", precision = 12, scale = 2)
+    private java.math.BigDecimal freightActual;
+
+    /** V93 — when on, {@code freightActual} distributes into line landed cost. */
+    @Column(name = "landed_cost_enabled", nullable = false)
+    private boolean landedCostEnabled = false;
+
     @CreatedDate
     private LocalDateTime receivedAt;
 
@@ -92,6 +133,42 @@ public class Receiving extends ShopAwareEntity {
 
     public LocalDateTime getApprovedAt() { return approvedAt; }
     public void setApprovedAt(LocalDateTime approvedAt) { this.approvedAt = approvedAt; }
+
+    public String getApprovalNote() { return approvalNote; }
+    public void setApprovalNote(String approvalNote) { this.approvalNote = approvalNote; }
+
+    public String getCancellationReason() { return cancellationReason; }
+    public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
+
+    public LocalDateTime getCancelledAt() { return cancelledAt; }
+    public void setCancelledAt(LocalDateTime cancelledAt) { this.cancelledAt = cancelledAt; }
+
+    public Long getCancelledByUserId() { return cancelledByUserId; }
+    public void setCancelledByUserId(Long cancelledByUserId) { this.cancelledByUserId = cancelledByUserId; }
+
+    public java.time.LocalDate getExpectedDeliveryDate() { return expectedDeliveryDate; }
+    public void setExpectedDeliveryDate(java.time.LocalDate expectedDeliveryDate) { this.expectedDeliveryDate = expectedDeliveryDate; }
+
+    public String getDockBay() { return dockBay; }
+    public void setDockBay(String dockBay) { this.dockBay = dockBay; }
+
+    public String getChecklistJson() { return checklistJson; }
+    public void setChecklistJson(String checklistJson) { this.checklistJson = checklistJson; }
+
+    public String getDigitalSignatureUrl() { return digitalSignatureUrl; }
+    public void setDigitalSignatureUrl(String digitalSignatureUrl) { this.digitalSignatureUrl = digitalSignatureUrl; }
+
+    public boolean isCostVarianceFlag() { return costVarianceFlag; }
+    public void setCostVarianceFlag(boolean costVarianceFlag) { this.costVarianceFlag = costVarianceFlag; }
+
+    public boolean isAutoTicketRaised() { return autoTicketRaised; }
+    public void setAutoTicketRaised(boolean autoTicketRaised) { this.autoTicketRaised = autoTicketRaised; }
+
+    public java.math.BigDecimal getFreightActual() { return freightActual; }
+    public void setFreightActual(java.math.BigDecimal freightActual) { this.freightActual = freightActual; }
+
+    public boolean isLandedCostEnabled() { return landedCostEnabled; }
+    public void setLandedCostEnabled(boolean landedCostEnabled) { this.landedCostEnabled = landedCostEnabled; }
 
     public LocalDateTime getReceivedAt() { return receivedAt; }
     public void setReceivedAt(LocalDateTime receivedAt) { this.receivedAt = receivedAt; }

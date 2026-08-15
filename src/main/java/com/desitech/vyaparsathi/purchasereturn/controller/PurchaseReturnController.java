@@ -54,4 +54,47 @@ public class PurchaseReturnController {
             Pageable pageable) {
         return ResponseEntity.ok(purchaseReturnService.getPurchaseReturns(supplierId, pageable));
     }
+
+    // ── Signed URL / server-rendered PDF ─────────────────────────────────
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.purchasereturn.service.PurchaseReturnPdfService pdfService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.auth.security.JwtUtil jwtUtil;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.purchasereturn.repository.PurchaseReturnRepository prRepo;
+
+    @GetMapping("/{id}/signed-url")
+    public ResponseEntity<String> signedUrl(@PathVariable Long id) {
+        var pr = prRepo.findById(id).orElseThrow(() ->
+                new com.desitech.vyaparsathi.common.exception.ResourceNotFoundException("Purchase Return not found: " + id));
+        String token = jwtUtil.generatePurchaseReturnToken(pr.getId(), pr.getReturnNo());
+        return ResponseEntity.ok("/api/purchase-returns/signed?token=" + token);
+    }
+
+    @GetMapping("/signed")
+    @PreAuthorize("permitAll()")
+    public ResponseEntity<?> signedPdf(@RequestParam String token,
+                                       @RequestParam(defaultValue = "false") boolean download) {
+        try {
+            var data = jwtUtil.validatePurchaseReturnToken(token);
+            byte[] pdf = pdfService.generatePdf(data.getPurchaseReturnId());
+            String safeNo = data.getReturnNo() != null
+                    ? data.getReturnNo().replace('/', '_')
+                    : String.valueOf(data.getPurchaseReturnId());
+            String filename = "purchase_return_" + safeNo + ".pdf";
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_PDF);
+            headers.setContentLength(pdf.length);
+            headers.set(org.springframework.http.HttpHeaders.CACHE_CONTROL, "no-store, no-cache, must-revalidate");
+            String disposition = download ? "attachment" : "inline";
+            headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                    disposition + "; filename=\"" + filename + "\"");
+            return new ResponseEntity<>(pdf, headers, HttpStatus.OK);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .contentType(org.springframework.http.MediaType.TEXT_PLAIN)
+                    .body("Invalid or expired access");
+        }
+    }
 }

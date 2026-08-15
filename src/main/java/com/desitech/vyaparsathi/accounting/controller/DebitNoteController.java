@@ -83,6 +83,123 @@ public class DebitNoteController {
         return ResponseEntity.ok("/api/v1/debit-notes/signed?token=" + token);
     }
 
+    // ── V98 enterprise endpoints — get one, apply, reverse, cancel, reports ──
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.accounting.service.DebitNoteApplicationService applicationService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.accounting.service.DebitNoteReportService reportService;
+
+    @GetMapping("/{id}")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> getOne(@PathVariable Long id) {
+        DebitNote n = debitRepo.findById(id)
+                .orElseThrow(() -> new EntityNotFoundAppException("Debit Note", id));
+        java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("id", n.getId());
+        m.put("debitNoteNo", n.getDebitNoteNo());
+        m.put("debitNoteDate", n.getDebitNoteDate());
+        m.put("reason", n.getReason());
+        m.put("taxableAmount", n.getTaxableAmount());
+        m.put("cgstAmount", n.getCgstAmount());
+        m.put("sgstAmount", n.getSgstAmount());
+        m.put("igstAmount", n.getIgstAmount());
+        m.put("totalAmount", n.getTotalAmount());
+        m.put("appliedAmount", n.getAppliedAmount());
+        m.put("outstanding", n.getTotalAmount().subtract(
+                n.getAppliedAmount() == null ? java.math.BigDecimal.ZERO : n.getAppliedAmount()));
+        m.put("status", n.getStatus());
+        m.put("notes", n.getNotes());
+        if (n.getSupplier() != null) {
+            java.util.Map<String, Object> s = new java.util.LinkedHashMap<>();
+            s.put("id", n.getSupplier().getId());
+            s.put("name", n.getSupplier().getName());
+            s.put("phone", n.getSupplier().getPhone());
+            s.put("email", n.getSupplier().getEmail());
+            s.put("gstin", n.getSupplier().getGstin());
+            s.put("address", n.getSupplier().getAddress());
+            m.put("supplier", s);
+        }
+        if (n.getPurchaseReturn() != null) {
+            m.put("purchaseReturnId", n.getPurchaseReturn().getId());
+            m.put("purchaseReturnNo", n.getPurchaseReturn().getReturnNo());
+        }
+        if (n.getPurchaseInvoice() != null) {
+            m.put("purchaseInvoiceId", n.getPurchaseInvoice().getId());
+        }
+        return ResponseEntity.ok(new ApiResponse<>("success", "Debit Note", m));
+    }
+
+    @PostMapping("/{id}/apply")
+    public ResponseEntity<ApiResponse<com.desitech.vyaparsathi.accounting.entity.DebitNoteApplication>> apply(
+            @PathVariable Long id,
+            @RequestBody java.util.Map<String, Object> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        java.math.BigDecimal amount = new java.math.BigDecimal(body.get("amount").toString());
+        Long invoiceId = body.get("purchaseInvoiceId") != null ? Long.valueOf(body.get("purchaseInvoiceId").toString()) : null;
+        Long paymentId = body.get("supplierPaymentId") != null ? Long.valueOf(body.get("supplierPaymentId").toString()) : null;
+        String note = body.get("note") != null ? body.get("note").toString() : null;
+        String user = principal != null ? principal.getUsername() : "system";
+        var app = applicationService.apply(id, invoiceId, paymentId, amount, user, note);
+        return ResponseEntity.ok(new ApiResponse<>("success", "Applied", app));
+    }
+
+    @GetMapping("/{id}/applications")
+    public ResponseEntity<ApiResponse<java.util.List<com.desitech.vyaparsathi.accounting.entity.DebitNoteApplication>>> listApplications(@PathVariable Long id) {
+        return ResponseEntity.ok(new ApiResponse<>("success", "Applications",
+                applicationService.listApplications(id)));
+    }
+
+    @PostMapping("/applications/{appId}/reverse")
+    public ResponseEntity<ApiResponse<com.desitech.vyaparsathi.accounting.entity.DebitNoteApplication>> reverse(
+            @PathVariable Long appId,
+            @RequestBody(required = false) java.util.Map<String, String> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        String note = body != null ? body.get("note") : null;
+        String user = principal != null ? principal.getUsername() : "system";
+        return ResponseEntity.ok(new ApiResponse<>("success", "Reversed",
+                applicationService.reverse(appId, user, note)));
+    }
+
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<ApiResponse<DebitNote>> cancel(
+            @PathVariable Long id,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
+        String note = body != null ? body.get("note") : null;
+        return ResponseEntity.ok(new ApiResponse<>("success", "Cancelled",
+                applicationService.cancelDebitNote(id, note)));
+    }
+
+    @GetMapping("/reports/aging")
+    public ResponseEntity<ApiResponse<java.util.List<java.util.Map<String, Object>>>> aging() {
+        return ResponseEntity.ok(new ApiResponse<>("success", "Aging", reportService.aging()));
+    }
+
+    @GetMapping("/reports/supplier-summary")
+    public ResponseEntity<ApiResponse<java.util.List<java.util.Map<String, Object>>>> supplierSummary() {
+        return ResponseEntity.ok(new ApiResponse<>("success", "Supplier summary", reportService.supplierSummary()));
+    }
+
+    @GetMapping("/reports/export.csv")
+    public ResponseEntity<byte[]> exportCsv() {
+        byte[] body = reportService.exportCsv();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("text/csv"));
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"debit-notes.csv\"");
+        return new ResponseEntity<>(body, headers, HttpStatus.OK);
+    }
+
+    @GetMapping("/reports/export.xlsx")
+    public ResponseEntity<byte[]> exportXlsx() {
+        byte[] body = reportService.exportXlsx();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"debit-notes.xlsx\"");
+        return new ResponseEntity<>(body, headers, HttpStatus.OK);
+    }
+
     /** Streams the debit note PDF; validates the signed token. */
     @GetMapping("/signed")
     @PreAuthorize("permitAll()")

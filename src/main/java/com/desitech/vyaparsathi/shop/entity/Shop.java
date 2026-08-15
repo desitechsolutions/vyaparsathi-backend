@@ -106,6 +106,110 @@ public class Shop {
     @Column(name = "low_stock_sms_alerts_enabled", nullable = false)
     private Boolean lowStockSmsAlertsEnabled = Boolean.FALSE;
 
+    // ─── V85 (Phase 3) PO approval policy ──────────────────────────────
+    // Opt-in per shop: when poApprovalRequired is true, any PO submit whose
+    // grand total meets or exceeds poApprovalThresholdAmount is routed into
+    // PENDING_APPROVAL instead of straight-to-SUBMITTED. Threshold of 0 means
+    // "every PO needs approval regardless of amount". Default is disabled so
+    // existing shops keep the previous DRAFT → SUBMITTED flow.
+    @Column(name = "po_approval_required", nullable = false)
+    private Boolean poApprovalRequired = Boolean.FALSE;
+
+    @Column(name = "po_approval_threshold_amount", nullable = false, precision = 12, scale = 2)
+    private java.math.BigDecimal poApprovalThresholdAmount = java.math.BigDecimal.ZERO;
+
+    /**
+     * V94 — adjustments whose absolute value (delta × WAC) exceeds this
+     * threshold are held for OWNER approval before commit. Null / 0 disables
+     * the gate.
+     */
+    @Column(name = "adjustment_approval_threshold", precision = 14, scale = 2)
+    private java.math.BigDecimal adjustmentApprovalThreshold;
+
+    // ─── V99 — statutory issuer identity ──────────────────────────────
+    @Column(name = "legal_name")
+    private String legalName;
+
+    @Column(name = "trade_name")
+    private String tradeName;
+
+    @Column(name = "pan", length = 10)
+    private String pan;
+
+    @Column(name = "cin", length = 21)
+    private String cin;
+
+    @Column(name = "signatory_name", length = 120)
+    private String signatoryName;
+
+    @Column(name = "signatory_designation", length = 80)
+    private String signatoryDesignation;
+
+    @Column(name = "address_line2")
+    private String addressLine2;
+
+    @Column(name = "city", length = 120)
+    private String city;
+
+    @Column(name = "pincode", length = 10)
+    private String pincode;
+
+    @Column(name = "country", length = 80)
+    private String country = "IN";
+
+    @Column(name = "e_invoicing_enabled", nullable = false)
+    private Boolean eInvoicingEnabled = Boolean.FALSE;
+
+    @Column(name = "e_way_bill_enabled", nullable = false)
+    private Boolean eWayBillEnabled = Boolean.FALSE;
+
+    @Column(name = "digital_signing_enabled", nullable = false)
+    private Boolean digitalSigningEnabled = Boolean.FALSE;
+
+    public String getLegalName() { return legalName != null ? legalName : name; }
+    public void setLegalName(String legalName) { this.legalName = legalName; }
+
+    public String getTradeName() { return tradeName != null ? tradeName : name; }
+    public void setTradeName(String tradeName) { this.tradeName = tradeName; }
+
+    public String getPan() { return pan; }
+    public void setPan(String pan) { this.pan = pan; }
+
+    public String getCin() { return cin; }
+    public void setCin(String cin) { this.cin = cin; }
+
+    public String getSignatoryName() { return signatoryName; }
+    public void setSignatoryName(String signatoryName) { this.signatoryName = signatoryName; }
+
+    public String getSignatoryDesignation() { return signatoryDesignation; }
+    public void setSignatoryDesignation(String signatoryDesignation) { this.signatoryDesignation = signatoryDesignation; }
+
+    public String getAddressLine2() { return addressLine2; }
+    public void setAddressLine2(String addressLine2) { this.addressLine2 = addressLine2; }
+
+    public String getCity() { return city; }
+    public void setCity(String city) { this.city = city; }
+
+    public String getPincode() { return pincode; }
+    public void setPincode(String pincode) { this.pincode = pincode; }
+
+    public String getCountry() { return country != null ? country : "IN"; }
+    public void setCountry(String country) { this.country = country; }
+
+    public Boolean getEInvoicingEnabled() { return eInvoicingEnabled != null ? eInvoicingEnabled : Boolean.FALSE; }
+    public void setEInvoicingEnabled(Boolean v) { this.eInvoicingEnabled = v; }
+
+    public Boolean getEWayBillEnabled() { return eWayBillEnabled != null ? eWayBillEnabled : Boolean.FALSE; }
+    public void setEWayBillEnabled(Boolean v) { this.eWayBillEnabled = v; }
+
+    public Boolean getDigitalSigningEnabled() { return digitalSigningEnabled != null ? digitalSigningEnabled : Boolean.FALSE; }
+    public void setDigitalSigningEnabled(Boolean v) { this.digitalSigningEnabled = v; }
+
+    public java.math.BigDecimal getAdjustmentApprovalThreshold() { return adjustmentApprovalThreshold; }
+    public void setAdjustmentApprovalThreshold(java.math.BigDecimal adjustmentApprovalThreshold) {
+        this.adjustmentApprovalThreshold = adjustmentApprovalThreshold;
+    }
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -190,5 +294,19 @@ public class Shop {
     }
     public void setLowStockSmsAlertsEnabled(Boolean lowStockSmsAlertsEnabled) {
         this.lowStockSmsAlertsEnabled = lowStockSmsAlertsEnabled;
+    }
+
+    public Boolean getPoApprovalRequired() {
+        return poApprovalRequired != null ? poApprovalRequired : Boolean.FALSE;
+    }
+    public void setPoApprovalRequired(Boolean poApprovalRequired) {
+        this.poApprovalRequired = poApprovalRequired;
+    }
+
+    public java.math.BigDecimal getPoApprovalThresholdAmount() {
+        return poApprovalThresholdAmount != null ? poApprovalThresholdAmount : java.math.BigDecimal.ZERO;
+    }
+    public void setPoApprovalThresholdAmount(java.math.BigDecimal poApprovalThresholdAmount) {
+        this.poApprovalThresholdAmount = poApprovalThresholdAmount;
     }
 }

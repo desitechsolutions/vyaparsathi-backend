@@ -45,6 +45,22 @@ public class PurchaseOrderDto {
     private BigDecimal freightCharges;
     private BigDecimal roundOff;
 
+    // ─── V85 approval workflow ────────────────────────────────────────
+    private Long submittedBy;
+    private Long approvedBy;
+    @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
+    private LocalDateTime approvedAt;
+    private Long rejectedBy;
+    @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
+    private LocalDateTime rejectedAt;
+    private String rejectionReason;
+    // Display-friendly user names — populated in the service layer via a user
+    // lookup, not persisted on the PO row. Nullable when the user has been
+    // deleted or the stamp was written by "system".
+    private String approvedByName;
+    private String rejectedByName;
+    private String submittedByName;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -104,4 +120,31 @@ public class PurchaseOrderDto {
 
     public BigDecimal getRoundOff() { return roundOff; }
     public void setRoundOff(BigDecimal roundOff) { this.roundOff = roundOff; }
+
+    public Long getSubmittedBy() { return submittedBy; }
+    public void setSubmittedBy(Long submittedBy) { this.submittedBy = submittedBy; }
+
+    public Long getApprovedBy() { return approvedBy; }
+    public void setApprovedBy(Long approvedBy) { this.approvedBy = approvedBy; }
+
+    public LocalDateTime getApprovedAt() { return approvedAt; }
+    public void setApprovedAt(LocalDateTime approvedAt) { this.approvedAt = approvedAt; }
+
+    public Long getRejectedBy() { return rejectedBy; }
+    public void setRejectedBy(Long rejectedBy) { this.rejectedBy = rejectedBy; }
+
+    public LocalDateTime getRejectedAt() { return rejectedAt; }
+    public void setRejectedAt(LocalDateTime rejectedAt) { this.rejectedAt = rejectedAt; }
+
+    public String getRejectionReason() { return rejectionReason; }
+    public void setRejectionReason(String rejectionReason) { this.rejectionReason = rejectionReason; }
+
+    public String getApprovedByName() { return approvedByName; }
+    public void setApprovedByName(String approvedByName) { this.approvedByName = approvedByName; }
+
+    public String getRejectedByName() { return rejectedByName; }
+    public void setRejectedByName(String rejectedByName) { this.rejectedByName = rejectedByName; }
+
+    public String getSubmittedByName() { return submittedByName; }
+    public void setSubmittedByName(String submittedByName) { this.submittedByName = submittedByName; }
 }

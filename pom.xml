@@ -118,6 +118,14 @@
       <version>0.12.7</version>
       <scope>runtime</scope>
     </dependency>
+    <!-- Systemic fix for "ByteBuddy" serialization crashes on lazy Hibernate proxies.
+         Enables Jackson to inspect the initialized side of a lazy @ManyToOne without
+         trying to reflect the runtime proxy class. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-hibernate6</artifactId>
+      <version>2.17.2</version>
+    </dependency>
 
     <!-- API Documentation -->
     <dependency>

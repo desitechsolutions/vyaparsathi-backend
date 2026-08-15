@@ -52,6 +52,8 @@ public class SecurityConfig {
                                 "/api/quotations/signed",
                                 "/api/sales-orders/signed",
                                 "/api/purchase-orders/signed",
+                                "/api/receiving/signed",
+                                "/api/purchase-returns/signed",
                                 "/api/deliveries/challan/signed",
                                 "/api/v1/credit-notes/signed",
                                 "/api/v1/debit-notes/signed",

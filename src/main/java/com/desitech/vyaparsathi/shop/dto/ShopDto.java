@@ -54,4 +54,22 @@ public class ShopDto {
     /** Notification preferences (V80). Both default to false server-side. */
     private Boolean lowStockAlertsEnabled;
     private Boolean lowStockSmsAlertsEnabled;
+    // V85 Phase 3: purchase-order approval policy.
+    private Boolean poApprovalRequired;
+    private java.math.BigDecimal poApprovalThresholdAmount;
+
+    // ─── V99 — enterprise identity fields ───────────────────────────────
+    private String legalName;
+    private String tradeName;
+    private String pan;
+    private String cin;
+    private String signatoryName;
+    private String signatoryDesignation;
+    private String addressLine2;
+    private String city;
+    private String pincode;
+    private String country;
+    private Boolean eInvoicingEnabled;
+    private Boolean eWayBillEnabled;
+    private Boolean digitalSigningEnabled;
 }

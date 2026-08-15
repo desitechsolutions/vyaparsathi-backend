@@ -39,6 +39,7 @@ public class ReceivingDto {
     private Long approvedByUserId;
     private String approvedByUserName;
     private LocalDateTime approvedAt;
+    private String approvalNote;
 
     private SupplierDto supplier;
     private Integer putawayQty;
@@ -94,6 +95,9 @@ public class ReceivingDto {
 
     public LocalDateTime getApprovedAt() { return approvedAt; }
     public void setApprovedAt(LocalDateTime approvedAt) { this.approvedAt = approvedAt; }
+
+    public String getApprovalNote() { return approvalNote; }
+    public void setApprovalNote(String approvalNote) { this.approvalNote = approvalNote; }
 
     public SupplierDto getSupplier() { return supplier; }
     public void setSupplier(SupplierDto supplier) { this.supplier = supplier; }

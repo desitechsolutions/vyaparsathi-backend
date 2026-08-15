@@ -205,7 +205,10 @@ public class StockService {
 
 
     /**
-     * Deducts stock by creating a new 'DEDUCT' movement.
+     * Deducts stock via FEFO (First-Expired-First-Out) when batches are
+     * present. Non-perishable items fall back to a flat total deduction —
+     * behavior identical to the legacy path. Reservations count against
+     * sellable stock, so a partial hold prevents over-selling.
      */
     @Transactional
     public void deductStock(Long itemVariantId, BigDecimal quantityToDeduct, String reason, String reference) {
@@ -214,13 +217,62 @@ public class StockService {
         }
 
         BigDecimal currentStock = getCurrentStock(itemVariantId);
-        if (currentStock.compareTo(quantityToDeduct) < 0) {
-            logger.warn("Insufficient stock for item variant {} (requested: {}, available: {})", itemVariantId, quantityToDeduct, currentStock);
+        // Subtract active reservations so a soft-hold shields the sellable pool.
+        BigDecimal reserved = reservedFor(itemVariantId);
+        BigDecimal sellable = currentStock.subtract(reserved);
+        if (sellable.compareTo(quantityToDeduct) < 0) {
+            logger.warn("Insufficient sellable stock for variant {} (requested: {}, available: {}, reserved: {})",
+                    itemVariantId, quantityToDeduct, sellable, reserved);
             throw new InsufficientStockException("Insufficient stock for item variant " + itemVariantId);
         }
-        BigDecimal currentWac = getWeightedAverageCost(itemVariantId);
 
-        recordStockMovement(itemVariantId, StockMovementType.DEDUCT, quantityToDeduct.negate(), currentWac, null, reason, reference);
+        // FEFO pick: enumerate batches with earliest expiry first.
+        List<com.desitech.vyaparsathi.inventory.dto.BatchStockDto> batches = getBatchWiseStock().stream()
+                .filter(b -> b.getItemVariantId() != null && b.getItemVariantId().equals(itemVariantId))
+                .filter(b -> b.getQuantity() != null && b.getQuantity().signum() > 0)
+                .filter(b -> b.getExpiryDate() != null) // Only expiry-aware pick for perishables.
+                .sorted(java.util.Comparator.comparing(
+                        com.desitech.vyaparsathi.inventory.dto.BatchStockDto::getExpiryDate,
+                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
+                .collect(java.util.stream.Collectors.toList());
+
+        if (batches.isEmpty()) {
+            // Flat path — legacy behavior for non-batch items.
+            BigDecimal currentWac = getWeightedAverageCost(itemVariantId);
+            recordStockMovement(itemVariantId, StockMovementType.DEDUCT, quantityToDeduct.negate(), currentWac, null, reason, reference);
+            return;
+        }
+
+        BigDecimal remaining = quantityToDeduct;
+        for (com.desitech.vyaparsathi.inventory.dto.BatchStockDto b : batches) {
+            if (remaining.signum() <= 0) break;
+            BigDecimal available = b.getQuantity();
+            BigDecimal take = available.min(remaining);
+            BigDecimal cost = b.getCostPerUnit() != null ? b.getCostPerUnit() : getWeightedAverageCost(itemVariantId);
+            recordStockMovement(itemVariantId, StockMovementType.DEDUCT, take.negate(), cost, b.getBatchNumber(),
+                    reason + " · FEFO batch " + b.getBatchNumber(), reference);
+            remaining = remaining.subtract(take);
+        }
+        if (remaining.signum() > 0) {
+            // Any leftover comes from the un-batched pool.
+            BigDecimal currentWac = getWeightedAverageCost(itemVariantId);
+            recordStockMovement(itemVariantId, StockMovementType.DEDUCT, remaining.negate(), currentWac, null,
+                    reason + " · pool", reference);
+        }
+    }
+
+    /**
+     * Reservations count against the sellable pool. Wired through an
+     * @Autowired field-injection so this method stays test-friendly (no
+     * constructor change) and reservations are optional.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.desitech.vyaparsathi.inventory.service.InventoryReservationService reservationService;
+
+    private BigDecimal reservedFor(Long variantId) {
+        if (reservationService == null) return BigDecimal.ZERO;
+        try { return reservationService.reservedFor(variantId); }
+        catch (Exception e) { return BigDecimal.ZERO; }
     }
     public boolean isStockAvailable(Long itemVariantId, BigDecimal quantity) {
         BigDecimal currentStock = getCurrentStock(itemVariantId);

@@ -74,6 +74,15 @@ public class PurchaseOrderItem extends ShopAwareEntity {
     @Column(name = "line_total", nullable = false, precision = 12, scale = 2)
     private BigDecimal lineTotal = BigDecimal.ZERO;
 
+    /**
+     * V92 landed cost — allocated unit cost after freight distribution.
+     * Populated by {@code PurchaseOrderService.applyLandedCost()} when the PO
+     * header's {@code landedCostEnabled} flag is on. Downstream inventory
+     * valuation should prefer this over {@link #unitCost} when non-null.
+     */
+    @Column(name = "landed_unit_cost", precision = 12, scale = 4)
+    private BigDecimal landedUnitCost;
+
     public PurchaseOrder getPurchaseOrder() { return purchaseOrder; }
     public void setPurchaseOrder(PurchaseOrder purchaseOrder) { this.purchaseOrder = purchaseOrder; }
 
@@ -115,4 +124,7 @@ public class PurchaseOrderItem extends ShopAwareEntity {
 
     public BigDecimal getLineTotal() { return lineTotal; }
     public void setLineTotal(BigDecimal lineTotal) { this.lineTotal = lineTotal == null ? BigDecimal.ZERO : lineTotal; }
+
+    public BigDecimal getLandedUnitCost() { return landedUnitCost; }
+    public void setLandedUnitCost(BigDecimal landedUnitCost) { this.landedUnitCost = landedUnitCost; }
 }

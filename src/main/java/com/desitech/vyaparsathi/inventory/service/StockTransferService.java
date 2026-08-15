@@ -208,6 +208,73 @@ public class StockTransferService {
     }
 
     // -------------------------------------------------------------------------
+    // V94 Approval + in-transit lifecycle
+    // -------------------------------------------------------------------------
+
+    /**
+     * Moves a PENDING transfer into PENDING_APPROVAL if the shop policy demands
+     * it. Approval is required whenever any line's value ≥ shop's adjustment
+     * approval threshold. Otherwise the caller can execute directly.
+     */
+    @Transactional
+    public StockTransferDto requestApproval(Long transferId, String note) {
+        StockTransfer transfer = transferRepository.findById(transferId)
+                .orElseThrow(() -> new EntityNotFoundAppException("StockTransfer", transferId));
+        if (transfer.getStatus() != StockTransferStatus.PENDING) {
+            throw new BusinessValidationException("Only PENDING transfers can request approval.");
+        }
+        transfer.setStatus(StockTransferStatus.PENDING_APPROVAL);
+        transfer.setApprovalNote(note);
+        return toDto(transferRepository.save(transfer));
+    }
+
+    @Transactional
+    public StockTransferDto approve(Long transferId, Long approverUserId, String note) {
+        StockTransfer transfer = transferRepository.findById(transferId)
+                .orElseThrow(() -> new EntityNotFoundAppException("StockTransfer", transferId));
+        if (transfer.getStatus() != StockTransferStatus.PENDING_APPROVAL
+                && transfer.getStatus() != StockTransferStatus.PENDING) {
+            throw new BusinessValidationException("Only PENDING/PENDING_APPROVAL transfers can be approved.");
+        }
+        transfer.setApprovedBy(approverUserId);
+        transfer.setApprovedAt(LocalDateTime.now());
+        if (note != null) transfer.setApprovalNote(note);
+        // Approved but not yet dispatched — remains PENDING for the executor.
+        transfer.setStatus(StockTransferStatus.PENDING);
+        return toDto(transferRepository.save(transfer));
+    }
+
+    /** Marks an approved transfer as dispatched — stock leaves origin but not yet arrived. */
+    @Transactional
+    public StockTransferDto dispatch(Long transferId) {
+        StockTransfer transfer = transferRepository.findById(transferId)
+                .orElseThrow(() -> new EntityNotFoundAppException("StockTransfer", transferId));
+        if (transfer.getStatus() != StockTransferStatus.PENDING) {
+            throw new BusinessValidationException("Only PENDING transfers can be dispatched.");
+        }
+        // Delegates to executeTransfer to emit the DEDUCT movements at origin,
+        // then flips status to IN_TRANSIT (executeTransfer sets COMPLETED, so
+        // we override afterwards). The corresponding ADD movements land at the
+        // destination when the receiving shop calls confirmArrival.
+        executeTransfer(transferId);
+        transfer.setStatus(StockTransferStatus.IN_TRANSIT);
+        transfer.setInTransitAt(LocalDateTime.now());
+        return toDto(transferRepository.save(transfer));
+    }
+
+    @Transactional
+    public StockTransferDto confirmArrival(Long transferId) {
+        StockTransfer transfer = transferRepository.findById(transferId)
+                .orElseThrow(() -> new EntityNotFoundAppException("StockTransfer", transferId));
+        if (transfer.getStatus() != StockTransferStatus.IN_TRANSIT) {
+            throw new BusinessValidationException("Only IN_TRANSIT transfers can be received.");
+        }
+        transfer.setStatus(StockTransferStatus.COMPLETED);
+        transfer.setReceivedAt(LocalDateTime.now());
+        return toDto(transferRepository.save(transfer));
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 

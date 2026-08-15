@@ -11,6 +11,10 @@ package com.desitech.vyaparsathi.inventory.enums;
  */
 public enum StockTransferStatus {
     PENDING,
+    /** V94 — awaiting manager approval before the transfer can move. */
+    PENDING_APPROVAL,
+    /** V94 — approved and dispatched but not yet received at the destination. */
+    IN_TRANSIT,
     COMPLETED,
     CANCELLED
 }

@@ -48,14 +48,43 @@ public class SaleDocumentMapper {
         d.setFiscalYear(fiscalYear(sale));
         d.setStatus(sale.getStatus() != null ? sale.getStatus().name() : null);
         d.setReverseCharge(sale.getReverseCharge());
-        d.setPlaceOfSupplyState(sale.getPlaceOfSupply());
-        // Derive supply type from POS + shop state — full population happens in
-        // the service layer where GstJurisdictionService is available.
-        d.setSupplyType(deriveSupplyType(sale));
+        // Place of Supply resolution — CBIC rule 46(l) requires this on every
+        // tax invoice. We fall back through three sources so PoS is never
+        // blank on the printed doc:
+        //   1. sale.placeOfSupply (explicit at invoice time)
+        //   2. customer's state (recipient state → intra/inter-state derived)
+        //   3. shop's own state (intrastate default when neither is set)
+        String posState = sale.getPlaceOfSupply();
+        String posCode  = null;
+        if ((posState == null || posState.isBlank()) && sale.getCustomer() != null
+                && sale.getCustomer().getState() != null && !sale.getCustomer().getState().isBlank()) {
+            posState = sale.getCustomer().getState();
+            posCode  = sale.getCustomer().getStateCode();
+        } else if (posState != null && sale.getCustomer() != null
+                && posState.equalsIgnoreCase(sale.getCustomer().getState())) {
+            posCode = sale.getCustomer().getStateCode();
+        }
+        if ((posState == null || posState.isBlank()) && sale.getShop() != null) {
+            posState = sale.getShop().getState();
+            posCode  = sale.getShop().getStateCode();
+        }
+        d.setPlaceOfSupplyState(posState);
+        d.setPlaceOfSupplyStateCode(posCode);
+        // SupplyType — user-selected value on the sale wins; fall back to
+        // derivation (intra vs inter) from PoS + shop state.
+        SupplyType persisted = SupplyType.fromString(sale.getSupplyType());
+        d.setSupplyType(persisted != null ? persisted : deriveSupplyType(sale));
 
         // Parties
         d.setIssuer(partyMapper.fromShop(sale.getShop()));
         d.setCounterparty(partyMapper.fromCustomer(sale.getCustomer()));
+        // V99 address snapshots — override the counterparty's default address
+        // for bill-to/ship-to/consignee blocks when present. Kept as raw
+        // multi-line strings on the DTO for now; the renderer prints them
+        // beneath the counterparty block on statutory PDFs.
+        d.setBillToAddress(sale.getBillToPartySnapshot());
+        d.setShipToAddress(sale.getShipToPartySnapshot());
+        d.setConsigneeAddress(sale.getConsigneePartySnapshot());
 
         // Line items
         int lineNo = 1;

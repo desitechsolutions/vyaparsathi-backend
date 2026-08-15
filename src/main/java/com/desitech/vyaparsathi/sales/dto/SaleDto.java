@@ -71,6 +71,17 @@ public class SaleDto {
     /** Indian GST Place of Supply (e.g., "27-Maharashtra" or "19-West Bengal") */
     private String placeOfSupply;
 
+    /** SupplyType enum name (INTRASTATE / INTERSTATE / SEZ_WITH_PAYMENT / …).
+     *  Left null when derived server-side from PoS. */
+    private String supplyType;
+
+    /** Optional address snapshots. Rendered on statutory PDFs; frozen at doc
+     *  creation time so historical invoices remain immutable if the customer
+     *  address changes later. */
+    private String billToAddress;
+    private String shipToAddress;
+    private String consigneeAddress;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -142,6 +153,18 @@ public class SaleDto {
 
     public String getPlaceOfSupply() { return placeOfSupply; }
     public void setPlaceOfSupply(String placeOfSupply) { this.placeOfSupply = placeOfSupply; }
+
+    public String getSupplyType() { return supplyType; }
+    public void setSupplyType(String supplyType) { this.supplyType = supplyType; }
+
+    public String getBillToAddress() { return billToAddress; }
+    public void setBillToAddress(String billToAddress) { this.billToAddress = billToAddress; }
+
+    public String getShipToAddress() { return shipToAddress; }
+    public void setShipToAddress(String shipToAddress) { this.shipToAddress = shipToAddress; }
+
+    public String getConsigneeAddress() { return consigneeAddress; }
+    public void setConsigneeAddress(String consigneeAddress) { this.consigneeAddress = consigneeAddress; }
 
     // --- Issue 5: E-Invoice & E-Way Bill fields ---
     private String irn;

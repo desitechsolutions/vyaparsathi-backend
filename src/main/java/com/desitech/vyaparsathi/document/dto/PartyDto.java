@@ -44,6 +44,10 @@ public class PartyDto {
     private String bankIfsc;
     private String bankBranch;
     private String upiId;
+    /** Name registered against the bank account. May differ from the legal /
+     *  trade name — some shops receive to a partner's or proprietor's name.
+     *  Preferred as the UPI QR payee name when present. */
+    private String bankHolderName;
 
     /** Sub-block: signatory (only on issuer). */
     private String signatoryName;

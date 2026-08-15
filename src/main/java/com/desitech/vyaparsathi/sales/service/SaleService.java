@@ -321,6 +321,13 @@ public class SaleService {
 
         sale.setIsGstRequired(gstApplicable);
         sale.setReverseCharge(Boolean.TRUE.equals(dto.getReverseCharge()));
+        // V99 statutory fields — freeze at doc creation time. PoS is nullable;
+        // the SaleDocumentMapper falls back to customer/shop state when empty.
+        sale.setPlaceOfSupply(dto.getPlaceOfSupply());
+        sale.setSupplyType(dto.getSupplyType());
+        sale.setBillToPartySnapshot(dto.getBillToAddress());
+        sale.setShipToPartySnapshot(dto.getShipToAddress());
+        sale.setConsigneePartySnapshot(dto.getConsigneeAddress());
         sale.setSaleType(saleType);
         // Persist idempotency key + optional salesperson/notes.
         if (dto.getIdempotencyKey() != null && !dto.getIdempotencyKey().isBlank()) {
@@ -1016,6 +1023,13 @@ public class SaleService {
         // not the customer's GSTIN — the customer's GSTIN only affects ITC eligibility.
         sale.setIsGstRequired(Boolean.TRUE.equals(dto.getIsGstRequired()));
         sale.setReverseCharge(Boolean.TRUE.equals(dto.getReverseCharge()));
+        // Allow updates to statutory fields on the update path too. Null-safe —
+        // callers that don't touch them (POS retry, minor edits) skip via getter.
+        if (dto.getPlaceOfSupply()   != null) sale.setPlaceOfSupply(dto.getPlaceOfSupply());
+        if (dto.getSupplyType()      != null) sale.setSupplyType(dto.getSupplyType());
+        if (dto.getBillToAddress()   != null) sale.setBillToPartySnapshot(dto.getBillToAddress());
+        if (dto.getShipToAddress()   != null) sale.setShipToPartySnapshot(dto.getShipToAddress());
+        if (dto.getConsigneeAddress()!= null) sale.setConsigneePartySnapshot(dto.getConsigneeAddress());
         sale.setTotalAmount(totalTaxableValue.setScale(0, RoundingMode.HALF_UP));
         sale.setRoundOff(sale.getTotalAmount().subtract(totalTaxableValue)); // Difference for ledger balancing
         sale.getSaleItems().addAll(itemsToUpdate);

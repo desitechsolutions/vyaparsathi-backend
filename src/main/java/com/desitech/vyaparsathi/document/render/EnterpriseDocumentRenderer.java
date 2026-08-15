@@ -11,10 +11,13 @@ import com.desitech.vyaparsathi.document.dto.PartyDto;
 import com.lowagie.text.*;
 import com.lowagie.text.Font;
 import com.lowagie.text.Image;
+import com.desitech.vyaparsathi.document.service.QrCodeService;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
+import com.lowagie.text.pdf.draw.DottedLineSeparator;
 import com.lowagie.text.pdf.draw.LineSeparator;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -39,6 +42,9 @@ import java.util.Map;
 public class EnterpriseDocumentRenderer {
 
     private static final Logger log = LoggerFactory.getLogger(EnterpriseDocumentRenderer.class);
+
+    @Autowired(required = false)
+    private QrCodeService qrCodeService;
 
     private static final Color BRAND_DEFAULT = new Color(41, 128, 185);
     private static final Color SECTION_LABEL_BG = new Color(243, 244, 246);
@@ -87,6 +93,7 @@ public class EnterpriseDocumentRenderer {
             addPaymentAndTerms(pdf, doc, brand);
             addNotesAndSignatory(pdf, doc);
             addEInvoiceBlock(pdf, doc);
+            addThankYouLine(pdf, doc);
             pdf.close();
             return baos.toByteArray();
         } catch (Exception e) {
@@ -144,19 +151,22 @@ public class EnterpriseDocumentRenderer {
             }
             left.addElement(paragraph(issuer.displayName(),
                     new Font(Font.HELVETICA, 15, Font.BOLD, TEXT_STRONG)));
-            if (issuer.getLegalName() != null && !issuer.getLegalName().equalsIgnoreCase(issuer.getTradeName())) {
+            if (hasText(issuer.getLegalName()) && !issuer.getLegalName().equalsIgnoreCase(issuer.getTradeName())) {
                 left.addElement(paragraph(issuer.getLegalName(), BODY_MUTED));
             }
-            if (issuer.getAddressLine1() != null) left.addElement(paragraph(issuer.getAddressLine1(), BODY_MUTED));
-            if (issuer.getAddressLine2() != null) left.addElement(paragraph(issuer.getAddressLine2(), BODY_MUTED));
+            if (hasText(issuer.getAddressLine1())) left.addElement(paragraph(issuer.getAddressLine1(), BODY_MUTED));
+            if (hasText(issuer.getAddressLine2())) left.addElement(paragraph(issuer.getAddressLine2(), BODY_MUTED));
             String cityLine = joinComma(issuer.getCity(), issuer.getState(),
-                    issuer.getPincode() != null ? "— " + issuer.getPincode() : null);
+                    hasText(issuer.getPincode()) ? "— " + issuer.getPincode() : null);
             if (!cityLine.isBlank()) left.addElement(paragraph(cityLine, BODY_MUTED));
-            if (issuer.getPhone() != null) left.addElement(paragraph("Phone: " + issuer.getPhone(), BODY_MUTED));
-            if (issuer.getEmail() != null) left.addElement(paragraph("Email: " + issuer.getEmail(), BODY_MUTED));
-            if (issuer.getGstin() != null) left.addElement(paragraph("GSTIN: " + issuer.getGstin(), BODY_STRONG));
-            if (issuer.getPan() != null) left.addElement(paragraph("PAN: " + issuer.getPan(), BODY_MUTED));
-            if (issuer.getCin() != null) left.addElement(paragraph("CIN: " + issuer.getCin(), BODY_MUTED));
+            if (hasText(issuer.getPhone())) left.addElement(paragraph("Phone: " + issuer.getPhone(), BODY_MUTED));
+            if (hasText(issuer.getEmail())) left.addElement(paragraph("Email: " + issuer.getEmail(), BODY_MUTED));
+            String stateLine = joinKV(
+                    hasText(issuer.getGstin()) ? "GSTIN: " + issuer.getGstin() : null,
+                    hasText(issuer.getStateCode()) ? "State code: " + issuer.getStateCode() : null);
+            if (!stateLine.isBlank()) left.addElement(paragraph(stateLine, BODY_STRONG));
+            if (hasText(issuer.getPan())) left.addElement(paragraph("PAN: " + issuer.getPan(), BODY_MUTED));
+            if (hasText(issuer.getCin())) left.addElement(paragraph("CIN: " + issuer.getCin(), BODY_MUTED));
         }
         header.addCell(left);
 
@@ -177,9 +187,9 @@ public class EnterpriseDocumentRenderer {
         if (doc.getDocumentNumber() != null) rows.put("Doc No", doc.getDocumentNumber());
         if (doc.getDocumentDate() != null) rows.put("Doc Date", DATE_FMT.format(doc.getDocumentDate()));
         if (doc.getFiscalYear() != null) rows.put("FY", doc.getFiscalYear());
-        if (doc.getPlaceOfSupplyState() != null) rows.put("PoS",
+        if (hasText(doc.getPlaceOfSupplyState())) rows.put("PoS",
                 doc.getPlaceOfSupplyState() +
-                (doc.getPlaceOfSupplyStateCode() != null ? " (" + doc.getPlaceOfSupplyStateCode() + ")" : ""));
+                (hasText(doc.getPlaceOfSupplyStateCode()) ? " (" + doc.getPlaceOfSupplyStateCode() + ")" : ""));
         if (doc.getSupplyType() != null) rows.put("Supply", humaniseSupply(doc.getSupplyType().name()));
         if (doc.getReverseCharge() != null) rows.put("RCM", doc.getReverseCharge() ? "Yes" : "No");
         if (doc.getCurrencyCode() != null && !"INR".equalsIgnoreCase(doc.getCurrencyCode()))
@@ -267,18 +277,20 @@ public class EnterpriseDocumentRenderer {
         cell.addElement(lbl);
 
         cell.addElement(paragraph(p.displayName(), BODY_STRONG));
-        if (p.getLegalName() != null && !p.getLegalName().equalsIgnoreCase(p.getTradeName()))
+        if (hasText(p.getLegalName()) && !p.getLegalName().equalsIgnoreCase(p.getTradeName()))
             cell.addElement(paragraph(p.getLegalName(), BODY_MUTED));
-        if (p.getAddressLine1() != null) cell.addElement(paragraph(p.getAddressLine1(), BODY_MUTED));
-        if (p.getAddressLine2() != null) cell.addElement(paragraph(p.getAddressLine2(), BODY_MUTED));
+        if (hasText(p.getAddressLine1())) cell.addElement(paragraph(p.getAddressLine1(), BODY_MUTED));
+        if (hasText(p.getAddressLine2())) cell.addElement(paragraph(p.getAddressLine2(), BODY_MUTED));
         String cityLine = joinComma(p.getCity(), p.getState(),
-                p.getPincode() != null ? "— " + p.getPincode() : null);
+                hasText(p.getPincode()) ? "— " + p.getPincode() : null);
         if (!cityLine.isBlank()) cell.addElement(paragraph(cityLine, BODY_MUTED));
-        if (p.getGstin() != null) cell.addElement(paragraph("GSTIN: " + p.getGstin(), BODY_STRONG));
-        else if (p.getStateCode() != null) cell.addElement(paragraph("State code: " + p.getStateCode(), BODY_MUTED));
-        if (p.getPan() != null) cell.addElement(paragraph("PAN: " + p.getPan(), BODY_MUTED));
-        if (p.getPhone() != null) cell.addElement(paragraph("Phone: " + p.getPhone(), BODY_MUTED));
-        if (p.getEmail() != null) cell.addElement(paragraph("Email: " + p.getEmail(), BODY_MUTED));
+        String stateLine = joinKV(
+                hasText(p.getGstin()) ? "GSTIN: " + p.getGstin() : null,
+                hasText(p.getStateCode()) ? "State code: " + p.getStateCode() : null);
+        if (!stateLine.isBlank()) cell.addElement(paragraph(stateLine, BODY_STRONG));
+        if (hasText(p.getPan())) cell.addElement(paragraph("PAN: " + p.getPan(), BODY_MUTED));
+        if (hasText(p.getPhone())) cell.addElement(paragraph("Phone: " + p.getPhone(), BODY_MUTED));
+        if (hasText(p.getEmail())) cell.addElement(paragraph("Email: " + p.getEmail(), BODY_MUTED));
         return cell;
     }
 
@@ -321,18 +333,21 @@ public class EnterpriseDocumentRenderer {
         boolean isGrn   = doc.getDocumentType() == DocumentType.GOODS_RECEIPT_NOTE;
 
         // Layout choice: GRN gets Ordered/Received/Damaged/Rejected/Accepted;
-        // everything else gets Qty/Rate/Discount/Taxable/GST-split/Total.
+        // GST-bearing docs get Qty/Rate/Discount/Taxable/GST-split/Total;
+        // Bill of Supply / composition dealers get a slim non-GST layout.
+        // Column widths are tuned so that the widest data values ("1,23,456.78")
+        // fit without wrapping and the headers ("CGST (INR)") don't split.
         float[] widths;
         String[] headers;
         if (isGrn) {
-            widths  = new float[]{3, 24, 8, 6, 8, 8, 8, 8, 8, 9};
-            headers = new String[]{"#", "Item", "HSN", "UOM", "Ordered", "Received", "Damaged", "Rejected", "Accepted", "Unit Cost"};
+            widths  = new float[]{3, 20, 7, 8, 8, 9, 8, 8, 9, 10};
+            headers = new String[]{"#", "Item", "HSN", "UOM", "Ordered", "Received", "Damaged", "Rejected", "Accepted", "Unit Cost (INR)"};
         } else if (showGst) {
-            widths  = new float[]{3, 24, 8, 5, 6, 7, 7, 8, 8, 8, 8, 8};
-            headers = new String[]{"#", "Item", "HSN", "UOM", "Qty", "Rate", "Disc", "Taxable", "CGST", "SGST", "IGST", "Total"};
+            widths  = new float[]{3, 17, 7, 7, 6, 8, 6, 9, 9, 9, 9, 10};
+            headers = new String[]{"#", "Item", "HSN", "UOM", "Qty", "Rate (INR)", "Disc (INR)", "Taxable (INR)", "CGST (INR)", "SGST (INR)", "IGST (INR)", "Total (INR)"};
         } else {
-            widths  = new float[]{3, 40, 8, 5, 8, 10, 10, 16};
-            headers = new String[]{"#", "Item", "HSN", "UOM", "Qty", "Rate", "Disc", "Total"};
+            widths  = new float[]{3, 34, 8, 8, 8, 12, 10, 17};
+            headers = new String[]{"#", "Item", "HSN", "UOM", "Qty", "Rate (INR)", "Disc (INR)", "Total (INR)"};
         }
 
         PdfPTable t = new PdfPTable(widths);
@@ -348,8 +363,14 @@ public class EnterpriseDocumentRenderer {
             t.addCell(bodyCell(String.valueOf(ln.getLineNo() != null ? ln.getLineNo() : i), bg, Element.ALIGN_CENTER));
             t.addCell(itemCell(ln, bg));
             t.addCell(bodyCell(safe(ln.getHsnSac()), bg, Element.ALIGN_CENTER));
-            t.addCell(bodyCell(safe(ln.getUom()), bg, Element.ALIGN_CENTER));
+            PdfPCell uomCell = bodyCell(safe(ln.getUom()), bg, Element.ALIGN_CENTER);
+            uomCell.setNoWrap(true);
+            t.addCell(uomCell);
 
+            // UOM values like "PIECE" or "PACK OF 12" must not wrap — a
+            // narrow column forcing PIECE → "PIEC / E" is unacceptable in a
+            // tax invoice.
+            // (uom cell is the 4th column added above)
             if (isGrn) {
                 t.addCell(bodyCell(qty(ln.getOrderedQty()), bg, Element.ALIGN_RIGHT));
                 t.addCell(bodyCell(qty(ln.getReceivedQty()), bg, Element.ALIGN_RIGHT));
@@ -379,6 +400,9 @@ public class EnterpriseDocumentRenderer {
 
     private boolean shouldShowGst(EnterpriseDocumentDto doc) {
         DocumentType t = doc.getDocumentType();
+        // Bill of Supply is used by composition-scheme dealers who don't charge
+        // GST — CBIC rule 49 prohibits printing tax columns on it.
+        if (t == DocumentType.BILL_OF_SUPPLY) return false;
         return t == DocumentType.TAX_INVOICE
                 || t == DocumentType.PROFORMA_INVOICE
                 || t == DocumentType.QUOTATION
@@ -427,28 +451,45 @@ public class EnterpriseDocumentRenderer {
         hsnCell.setBorder(Rectangle.NO_BORDER);
         hsnCell.setPaddingRight(10f);
 
+        boolean showGstCols = shouldShowGst(doc);
         if (doc.getHsnSummary() != null && !doc.getHsnSummary().isEmpty()) {
-            Paragraph lbl = new Paragraph("HSN SUMMARY", SECTION_LABEL);
+            Paragraph lbl = new Paragraph(showGstCols ? "HSN SUMMARY" : "HSN / SAC SUMMARY", SECTION_LABEL);
             lbl.setSpacingAfter(4f);
             hsnCell.addElement(lbl);
 
-            PdfPTable hsn = new PdfPTable(new float[]{18, 20, 12, 12, 12, 12, 14});
-            hsn.setWidthPercentage(100);
-            hsn.addCell(headerCell("HSN/SAC"));
-            hsn.addCell(headerCell("Taxable"));
-            hsn.addCell(headerCell("CGST"));
-            hsn.addCell(headerCell("SGST"));
-            hsn.addCell(headerCell("IGST"));
-            hsn.addCell(headerCell("Cess"));
-            hsn.addCell(headerCell("Total"));
-            for (HsnSummaryRowDto r : doc.getHsnSummary()) {
-                hsn.addCell(bodyCell(safe(r.getHsnSac()), Color.WHITE, Element.ALIGN_LEFT));
-                hsn.addCell(bodyCell(money(r.getTaxableValue()), Color.WHITE, Element.ALIGN_RIGHT));
-                hsn.addCell(bodyCell(money(r.getCgstAmount()), Color.WHITE, Element.ALIGN_RIGHT));
-                hsn.addCell(bodyCell(money(r.getSgstAmount()), Color.WHITE, Element.ALIGN_RIGHT));
-                hsn.addCell(bodyCell(money(r.getIgstAmount()), Color.WHITE, Element.ALIGN_RIGHT));
-                hsn.addCell(bodyCell(money(r.getCessAmount()), Color.WHITE, Element.ALIGN_RIGHT));
-                hsn.addCell(bodyCell(money(r.getGrandTotal()), Color.WHITE, Element.ALIGN_RIGHT));
+            // For Bill of Supply / composition scheme, skip the tax columns
+            // — CBIC rule 49 requires the doc to be tax-free.
+            PdfPTable hsn;
+            if (showGstCols) {
+                hsn = new PdfPTable(new float[]{15, 18, 13, 13, 13, 12, 16});
+                hsn.setWidthPercentage(100);
+                hsn.addCell(headerCell("HSN/SAC"));
+                hsn.addCell(headerCell("Taxable (INR)"));
+                hsn.addCell(headerCell("CGST (INR)"));
+                hsn.addCell(headerCell("SGST (INR)"));
+                hsn.addCell(headerCell("IGST (INR)"));
+                hsn.addCell(headerCell("Cess (INR)"));
+                hsn.addCell(headerCell("Total (INR)"));
+                for (HsnSummaryRowDto r : doc.getHsnSummary()) {
+                    hsn.addCell(bodyCell(safe(r.getHsnSac()), Color.WHITE, Element.ALIGN_LEFT));
+                    hsn.addCell(noWrapMoneyCell(money(r.getTaxableValue()), Color.WHITE));
+                    hsn.addCell(noWrapMoneyCell(money(r.getCgstAmount()), Color.WHITE));
+                    hsn.addCell(noWrapMoneyCell(money(r.getSgstAmount()), Color.WHITE));
+                    hsn.addCell(noWrapMoneyCell(money(r.getIgstAmount()), Color.WHITE));
+                    hsn.addCell(noWrapMoneyCell(money(r.getCessAmount()), Color.WHITE));
+                    hsn.addCell(noWrapMoneyCell(money(r.getGrandTotal()), Color.WHITE));
+                }
+            } else {
+                hsn = new PdfPTable(new float[]{30, 40, 30});
+                hsn.setWidthPercentage(100);
+                hsn.addCell(headerCell("HSN/SAC"));
+                hsn.addCell(headerCell("Taxable (INR)"));
+                hsn.addCell(headerCell("Total (INR)"));
+                for (HsnSummaryRowDto r : doc.getHsnSummary()) {
+                    hsn.addCell(bodyCell(safe(r.getHsnSac()), Color.WHITE, Element.ALIGN_LEFT));
+                    hsn.addCell(noWrapMoneyCell(money(r.getTaxableValue()), Color.WHITE));
+                    hsn.addCell(noWrapMoneyCell(money(r.getGrandTotal()), Color.WHITE));
+                }
             }
             hsnCell.addElement(hsn);
         }
@@ -463,7 +504,12 @@ public class EnterpriseDocumentRenderer {
         var tt = doc.getTotals();
         if (tt == null) return;
 
-        addTotalsRow(totals, "Subtotal",             money(tt.getSubtotal()),        false);
+        // Subtotal / Grand Total / Outstanding are the three summary rows —
+        // rendered with the "INR " prefix so the header currency is unambiguous
+        // even when a printout is separated from the invoice header. Breakdown
+        // rows (Discount, CGST/SGST/…, Freight, Round-off, Paid) stay plain to
+        // preserve visual hierarchy.
+        addTotalsRow(totals, "Subtotal",             moneyWithCurrency(tt.getSubtotal()), false);
         if (nonZero(tt.getTotalDiscount()))
             addTotalsRow(totals, "Discount",         "(" + money(tt.getTotalDiscount()) + ")", false);
         if (nonZero(tt.getTotalTaxable()) && !equals(tt.getTotalTaxable(), tt.getSubtotal()))
@@ -492,7 +538,7 @@ public class EnterpriseDocumentRenderer {
 
         if (nonZero(tt.getPaidAmount())) addTotalsRow(totals, "Paid", money(tt.getPaidAmount()), false);
         if (nonZero(tt.getOutstandingAmount()))
-            addTotalsRow(totals, "Outstanding", money(tt.getOutstandingAmount()), true);
+            addTotalsRow(totals, "Outstanding", moneyWithCurrency(tt.getOutstandingAmount()), true);
 
         totalsCell.addElement(totals);
 
@@ -540,7 +586,7 @@ public class EnterpriseDocumentRenderer {
         t.setWidthPercentage(100);
         t.setSpacingAfter(8f);
 
-        // Left: Payment & bank
+        // Left: Payment & bank — bank details + UPI + QR code
         PdfPCell payCell = new PdfPCell();
         payCell.setBorder(Rectangle.BOX);
         payCell.setBorderColor(BORDER_LIGHT);
@@ -548,17 +594,47 @@ public class EnterpriseDocumentRenderer {
         Paragraph lb = new Paragraph("PAYMENT & BANK", SECTION_LABEL);
         lb.setSpacingAfter(4f);
         payCell.addElement(lb);
+
+        // Two-column mini table so bank details live on the left, QR on the right
+        PdfPTable payInner = new PdfPTable(new float[]{70, 30});
+        payInner.setWidthPercentage(100);
+
+        PdfPCell details = new PdfPCell();
+        details.setBorder(Rectangle.NO_BORDER);
+        details.setPaddingRight(6f);
         if (hasPay) {
-            if (doc.getPaymentTerms() != null) payCell.addElement(paragraph("Terms: " + doc.getPaymentTerms(), BODY));
-            if (doc.getDueDate() != null) payCell.addElement(paragraph("Due date: " + DATE_FMT.format(doc.getDueDate()), BODY));
+            if (hasText(doc.getPaymentTerms())) details.addElement(paragraph("Terms: " + doc.getPaymentTerms(), BODY));
+            if (doc.getDueDate() != null) details.addElement(paragraph("Due date: " + DATE_FMT.format(doc.getDueDate()), BODY));
         }
         if (hasBank) {
-            if (iss.getBankName() != null) payCell.addElement(paragraph("Bank: " + iss.getBankName(), BODY));
-            if (iss.getBankAccountNumber() != null) payCell.addElement(paragraph("A/c: " + iss.getBankAccountNumber(), BODY));
-            if (iss.getBankIfsc() != null) payCell.addElement(paragraph("IFSC: " + iss.getBankIfsc(), BODY));
-            if (iss.getBankBranch() != null) payCell.addElement(paragraph("Branch: " + iss.getBankBranch(), BODY_MUTED));
-            if (iss.getUpiId() != null) payCell.addElement(paragraph("UPI: " + iss.getUpiId(), BODY_STRONG));
+            if (hasText(iss.getBankHolderName())) details.addElement(paragraph("A/c Name: " + iss.getBankHolderName(), BODY));
+            if (hasText(iss.getBankName())) details.addElement(paragraph("Bank: " + iss.getBankName(), BODY));
+            if (hasText(iss.getBankAccountNumber())) details.addElement(paragraph("A/c No: " + iss.getBankAccountNumber(), BODY));
+            if (hasText(iss.getBankIfsc())) details.addElement(paragraph("IFSC: " + iss.getBankIfsc(), BODY));
+            if (hasText(iss.getBankBranch())) details.addElement(paragraph("Branch: " + iss.getBankBranch(), BODY_MUTED));
+            if (hasText(iss.getUpiId())) details.addElement(paragraph("UPI: " + iss.getUpiId(), BODY_STRONG));
         }
+        payInner.addCell(details);
+
+        // Right: UPI QR when a UPI ID is set
+        PdfPCell qrCell = new PdfPCell();
+        qrCell.setBorder(Rectangle.NO_BORDER);
+        qrCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+        qrCell.setVerticalAlignment(Element.ALIGN_TOP);
+        byte[] qrPng = tryBuildUpiQr(doc);
+        if (qrPng != null) {
+            try {
+                Image qr = Image.getInstance(qrPng);
+                qr.scaleToFit(80, 80);
+                qr.setAlignment(Image.ALIGN_RIGHT);
+                qrCell.addElement(qr);
+                Paragraph qrLbl = new Paragraph("Scan to pay", TABLE_CELL_MUTED);
+                qrLbl.setAlignment(Element.ALIGN_RIGHT);
+                qrCell.addElement(qrLbl);
+            } catch (Exception ignore) {}
+        }
+        payInner.addCell(qrCell);
+        payCell.addElement(payInner);
         t.addCell(payCell);
 
         // Right: Terms & conditions
@@ -598,32 +674,86 @@ public class EnterpriseDocumentRenderer {
         notes.addElement(paragraph(doc.getNotes() != null ? doc.getNotes() : "—", BODY_MUTED));
         t.addCell(notes);
 
-        // Signatory
+        // Signatory — proper enterprise block with signature line + stamp box
         PdfPCell sig = new PdfPCell();
         sig.setBorder(Rectangle.NO_BORDER);
         sig.setPaddingLeft(12f);
         sig.setHorizontalAlignment(Element.ALIGN_RIGHT);
         PartyDto iss = doc.getIssuer();
+
+        // Row 1: "For {legal name}"
         sig.addElement(rightPara("For " + (iss != null ? iss.displayLegal() : "—"), BODY_STRONG));
+
+        // Row 2: signature area — image if uploaded, otherwise a bordered stamp box
         if (doc.getSignatureBytes() != null && doc.getSignatureBytes().length > 0) {
             try {
                 Image simg = Image.getInstance(doc.getSignatureBytes());
-                simg.scaleToFit(120, 40);
+                simg.scaleToFit(120, 50);
                 simg.setAlignment(Image.ALIGN_RIGHT);
                 sig.addElement(simg);
-            } catch (Exception ignore) {}
+            } catch (Exception ignore) {
+                sig.addElement(buildStampBox());
+            }
         } else {
-            sig.addElement(rightPara(" ", BODY));
-            sig.addElement(rightPara(" ", BODY));
+            sig.addElement(buildStampBox());
         }
-        String signatoryName = iss != null && iss.getSignatoryName() != null
-                ? iss.getSignatoryName() : "Authorised Signatory";
-        String signatoryDesig = iss != null && iss.getSignatoryDesignation() != null
-                ? iss.getSignatoryDesignation() : "";
-        sig.addElement(rightPara(signatoryName, BODY_STRONG));
-        if (!signatoryDesig.isBlank()) sig.addElement(rightPara(signatoryDesig, BODY_MUTED));
+
+        // Row 3: dashed signature line
+        Paragraph line = new Paragraph();
+        line.setAlignment(Element.ALIGN_RIGHT);
+        DottedLineSeparator sep = new DottedLineSeparator();
+        sep.setGap(2f);
+        sep.setPercentage(60f);
+        sep.setAlignment(Element.ALIGN_RIGHT);
+        sep.setLineColor(TEXT_MUTED);
+        line.add(new Chunk(sep));
+        line.setSpacingBefore(2f);
+        sig.addElement(line);
+
+        // Row 4: label
+        sig.addElement(rightPara("Authorised Signatory", BODY_MUTED));
+
+        // Row 5+6: signatory name + designation (skip when both blank)
+        String signatoryName = iss != null && hasText(iss.getSignatoryName())
+                ? iss.getSignatoryName() : null;
+        String signatoryDesig = iss != null && hasText(iss.getSignatoryDesignation())
+                ? iss.getSignatoryDesignation() : null;
+        if (signatoryName != null) sig.addElement(rightPara(signatoryName, BODY_STRONG));
+        if (signatoryDesig != null) sig.addElement(rightPara(signatoryDesig, BODY_MUTED));
         t.addCell(sig);
         pdf.add(t);
+    }
+
+    /** Renders a 120×46 empty box as a "signature & stamp" placeholder. */
+    private PdfPTable buildStampBox() {
+        PdfPTable box = new PdfPTable(1);
+        box.setWidthPercentage(60);
+        box.setHorizontalAlignment(Element.ALIGN_RIGHT);
+        PdfPCell b = new PdfPCell(new Phrase(" "));
+        b.setFixedHeight(46f);
+        b.setBorder(Rectangle.BOX);
+        b.setBorderColor(BORDER_LIGHT);
+        b.setBorderWidth(0.5f);
+        box.addCell(b);
+        return box;
+    }
+
+    /** Best-effort UPI QR — needs the QR service + a UPI id. */
+    private byte[] tryBuildUpiQr(EnterpriseDocumentDto doc) {
+        if (qrCodeService == null) return null;
+        PartyDto iss = doc.getIssuer();
+        if (iss == null || !hasText(iss.getUpiId())) return null;
+        // Prefer the bank account holder name for the UPI payee — a shop
+        // may collect to a partner's or proprietor's name that differs
+        // from the trade/legal name.
+        String payee = hasText(iss.getBankHolderName())
+                ? iss.getBankHolderName() : iss.displayLegal();
+        String uri = qrCodeService.upiUri(
+                iss.getUpiId(),
+                payee,
+                doc.getTotals() != null ? doc.getTotals().getGrandTotal() : null,
+                doc.getDocumentNumber());
+        return qrCodeService.encode(uri, 200);
     }
 
     // ── e-Invoice IRN + QR ───────────────────────────────────────────────
@@ -650,6 +780,45 @@ public class EnterpriseDocumentRenderer {
                             : ""), BODY_MUTED));
         t.addCell(c);
         pdf.add(t);
+    }
+
+    // ── Thank-you closing line ───────────────────────────────────────────
+
+    /**
+     * Renders a small centred "Thank you for your business with {shop}." line
+     * as the last body element on customer-facing documents. Skipped on
+     * supplier-facing docs (PO / GRN / PR / debit-note / payment-voucher)
+     * where thanking the recipient reads awkwardly.
+     */
+    private void addThankYouLine(Document pdf, EnterpriseDocumentDto doc) throws DocumentException {
+        if (!isCustomerFacing(doc.getDocumentType())) return;
+        PartyDto iss = doc.getIssuer();
+        String shopName = iss != null ? iss.displayName() : null;
+        if (!hasText(shopName) || "—".equals(shopName)) return;
+
+        Paragraph p = new Paragraph("Thank you for your business with " + shopName + ".", BODY_MUTED);
+        p.setAlignment(Element.ALIGN_CENTER);
+        p.setSpacingBefore(8f);
+        p.setSpacingAfter(2f);
+        pdf.add(p);
+    }
+
+    /** Which document types are sent to a customer (vs. supplier / internal). */
+    private boolean isCustomerFacing(DocumentType t) {
+        if (t == null) return false;
+        switch (t) {
+            case TAX_INVOICE:
+            case BILL_OF_SUPPLY:
+            case PROFORMA_INVOICE:
+            case QUOTATION:
+            case SALES_ORDER:
+            case DELIVERY_CHALLAN:
+            case CREDIT_NOTE:
+            case RECEIPT_VOUCHER:
+                return true;
+            default:
+                return false;
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
@@ -685,6 +854,21 @@ public class EnterpriseDocumentRenderer {
         return c;
     }
 
+    /**
+     * Right-aligned numeric cell that never wraps — the fix for the
+     * "1,197.0 / 0" split-onto-two-lines defect in the HSN summary.
+     */
+    private PdfPCell noWrapMoneyCell(String text, Color bg) {
+        Phrase ph = new Phrase(text == null ? "—" : text, TABLE_CELL);
+        PdfPCell c = new PdfPCell(ph);
+        c.setBackgroundColor(bg);
+        c.setBorder(Rectangle.NO_BORDER);
+        c.setHorizontalAlignment(Element.ALIGN_RIGHT);
+        c.setPadding(5f);
+        c.setNoWrap(true);
+        return c;
+    }
+
     private PdfPCell metaCell(String text, Font f, int align) {
         PdfPCell c = new PdfPCell(new Paragraph(text == null ? "—" : text, f));
         c.setBorder(Rectangle.NO_BORDER);
@@ -694,9 +878,30 @@ public class EnterpriseDocumentRenderer {
     }
 
     private String safe(String s) { return s == null ? "" : s; }
+    private boolean hasText(String s) { return s != null && !s.trim().isEmpty(); }
+
+    /** Joins two label-value fragments with " · " — skips blanks so we never
+     *  print "GSTIN:" or "State code:" with no value beside it. */
+    private String joinKV(String... parts) {
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (String p : parts) {
+            if (!hasText(p)) continue;
+            if (!first) sb.append("  ·  ");
+            sb.append(p);
+            first = false;
+        }
+        return sb.toString();
+    }
     private String qty(BigDecimal b) { return b == null ? "0" : IndianCurrencyFormat.formatQty(b); }
     private String money(BigDecimal b) { return b == null || b.compareTo(BigDecimal.ZERO) == 0
             ? "0.00" : IndianCurrencyFormat.formatNumber(b); }
+    /** Currency-prefixed variant for the totals-block summary rows so
+     *  Subtotal / Grand Total / Outstanding all read uniformly as "INR X.XX". */
+    private String moneyWithCurrency(BigDecimal b) {
+        return b == null || b.compareTo(BigDecimal.ZERO) == 0
+                ? "INR 0.00" : IndianCurrencyFormat.formatCurrency(b);
+    }
     private boolean nonZero(BigDecimal b) { return b != null && b.compareTo(BigDecimal.ZERO) != 0; }
     private boolean equals(BigDecimal a, BigDecimal b) {
         if (a == null && b == null) return true;
@@ -723,7 +928,18 @@ public class EnterpriseDocumentRenderer {
 
     private String humaniseSupply(String v) {
         if (v == null) return "";
-        return v.replace('_', ' ').toLowerCase();
+        // "INTRASTATE" → "Intrastate", "SEZ_WITH_PAYMENT" → "SEZ with payment".
+        // The token "SEZ" stays uppercase because it's an initialism.
+        String[] parts = v.split("_");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            String p = parts[i];
+            if (p.isEmpty()) continue;
+            if (i > 0) sb.append(' ');
+            if (p.equals("SEZ")) sb.append(p);
+            else sb.append(Character.toUpperCase(p.charAt(0))).append(p.substring(1).toLowerCase());
+        }
+        return sb.toString();
     }
 
     private String humaniseType(String v) {

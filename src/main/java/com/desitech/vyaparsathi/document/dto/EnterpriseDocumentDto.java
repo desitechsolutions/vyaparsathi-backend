@@ -47,6 +47,14 @@ public class EnterpriseDocumentDto {
     private PartyDto consignee;
     private PartyDto boughtFrom;
 
+    /** Raw multi-line address snapshots frozen at doc creation time. When
+     *  populated they override the counterparty's default addressLine1/2 on
+     *  the printed doc. Kept as strings (not PartyDto) because the DB stores
+     *  them as free-text TEXT columns for statutory immutability. */
+    private String billToAddress;
+    private String shipToAddress;
+    private String consigneeAddress;
+
     // ─── Tax context ────────────────────────────────────────────────────
     private String placeOfSupplyState;
     private String placeOfSupplyStateCode;

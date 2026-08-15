@@ -133,6 +133,20 @@ public class Sale extends ShopAwareEntity {
     @Column(name = "place_of_supply", length = 100)
     private String placeOfSupply;
 
+    /** V99 statutory columns. Nullable — the shared enterprise renderer
+     *  falls back to derived / party defaults when these are blank. */
+    @Column(name = "supply_type", length = 30)
+    private String supplyType;
+
+    @Column(name = "bill_to_party_snapshot", columnDefinition = "TEXT")
+    private String billToPartySnapshot;
+
+    @Column(name = "ship_to_party_snapshot", columnDefinition = "TEXT")
+    private String shipToPartySnapshot;
+
+    @Column(name = "consignee_party_snapshot", columnDefinition = "TEXT")
+    private String consigneePartySnapshot;
+
     @Column(name = "due_date")
     private java.time.LocalDate dueDate;
 
@@ -213,6 +227,18 @@ public class Sale extends ShopAwareEntity {
 
     public String getPlaceOfSupply() { return placeOfSupply; }
     public void setPlaceOfSupply(String placeOfSupply) { this.placeOfSupply = placeOfSupply; }
+
+    public String getSupplyType() { return supplyType; }
+    public void setSupplyType(String supplyType) { this.supplyType = supplyType; }
+
+    public String getBillToPartySnapshot() { return billToPartySnapshot; }
+    public void setBillToPartySnapshot(String billToPartySnapshot) { this.billToPartySnapshot = billToPartySnapshot; }
+
+    public String getShipToPartySnapshot() { return shipToPartySnapshot; }
+    public void setShipToPartySnapshot(String shipToPartySnapshot) { this.shipToPartySnapshot = shipToPartySnapshot; }
+
+    public String getConsigneePartySnapshot() { return consigneePartySnapshot; }
+    public void setConsigneePartySnapshot(String consigneePartySnapshot) { this.consigneePartySnapshot = consigneePartySnapshot; }
 
     // --- Phase 5 E-Invoice & E-Way Bill Fields ---
     @Column(name = "irn", length = 100)

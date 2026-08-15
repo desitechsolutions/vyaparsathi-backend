@@ -30,7 +30,13 @@ CREATE PROCEDURE v99_add_col(
     IN p_ddl     VARCHAR(1024)
 )
 BEGIN
-    IF NOT EXISTS (
+    -- Fail-soft: skip when the target table doesn't exist in this shop's schema
+    -- (different modules ship on different environments).
+    IF EXISTS (
+        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table
+    )
+    AND NOT EXISTS (
         SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = DATABASE()
           AND TABLE_NAME   = p_table
@@ -126,16 +132,16 @@ CALL v99_add_col('sale', 'consignee_party_snapshot',   '`consignee_party_snapsho
 -- ─────────────────────────────────────────────────────────────────────
 -- PURCHASE_INVOICE (inward)
 -- ─────────────────────────────────────────────────────────────────────
-CALL v99_add_col('purchase_invoice', 'place_of_supply_state',      '`place_of_supply_state` VARCHAR(120) NULL');
-CALL v99_add_col('purchase_invoice', 'place_of_supply_state_code', '`place_of_supply_state_code` VARCHAR(2) NULL');
-CALL v99_add_col('purchase_invoice', 'supply_type',                '`supply_type` VARCHAR(30) NULL');
-CALL v99_add_col('purchase_invoice', 'reverse_charge',             '`reverse_charge` TINYINT(1) NOT NULL DEFAULT 0');
-CALL v99_add_col('purchase_invoice', 'amount_in_words',            '`amount_in_words` VARCHAR(500) NULL');
-CALL v99_add_col('purchase_invoice', 'document_hash',              '`document_hash` VARCHAR(80) NULL');
-CALL v99_add_col('purchase_invoice', 'print_count',                '`print_count` INT NOT NULL DEFAULT 0');
-CALL v99_add_col('purchase_invoice', 'printed_at',                 '`printed_at` DATETIME NULL');
-CALL v99_add_col('purchase_invoice', 'printed_by',                 '`printed_by` BIGINT NULL');
-CALL v99_add_col('purchase_invoice', 'revision_number',            '`revision_number` INT NOT NULL DEFAULT 0');
+CALL v99_add_col('purchase_invoices', 'place_of_supply_state',      '`place_of_supply_state` VARCHAR(120) NULL');
+CALL v99_add_col('purchase_invoices', 'place_of_supply_state_code', '`place_of_supply_state_code` VARCHAR(2) NULL');
+CALL v99_add_col('purchase_invoices', 'supply_type',                '`supply_type` VARCHAR(30) NULL');
+CALL v99_add_col('purchase_invoices', 'reverse_charge',             '`reverse_charge` TINYINT(1) NOT NULL DEFAULT 0');
+CALL v99_add_col('purchase_invoices', 'amount_in_words',            '`amount_in_words` VARCHAR(500) NULL');
+CALL v99_add_col('purchase_invoices', 'document_hash',              '`document_hash` VARCHAR(80) NULL');
+CALL v99_add_col('purchase_invoices', 'print_count',                '`print_count` INT NOT NULL DEFAULT 0');
+CALL v99_add_col('purchase_invoices', 'printed_at',                 '`printed_at` DATETIME NULL');
+CALL v99_add_col('purchase_invoices', 'printed_by',                 '`printed_by` BIGINT NULL');
+CALL v99_add_col('purchase_invoices', 'revision_number',            '`revision_number` INT NOT NULL DEFAULT 0');
 
 -- ─────────────────────────────────────────────────────────────────────
 -- DEBIT_NOTES / CREDIT_NOTES — statutory + originating-invoice reference
@@ -218,16 +224,16 @@ CALL v99_add_col('purchase_return', 'revision_number',            '`revision_num
 -- ─────────────────────────────────────────────────────────────────────
 -- DELIVERY (challan) — if the table exists
 -- ─────────────────────────────────────────────────────────────────────
-CALL v99_add_col('delivery', 'place_of_supply_state',      '`place_of_supply_state` VARCHAR(120) NULL');
-CALL v99_add_col('delivery', 'place_of_supply_state_code', '`place_of_supply_state_code` VARCHAR(2) NULL');
-CALL v99_add_col('delivery', 'supply_type',                '`supply_type` VARCHAR(30) NULL');
-CALL v99_add_col('delivery', 'ewb_number',                 '`ewb_number` VARCHAR(30) NULL');
-CALL v99_add_col('delivery', 'ewb_generated_at',           '`ewb_generated_at` DATETIME NULL');
-CALL v99_add_col('delivery', 'ewb_valid_till',             '`ewb_valid_till` DATETIME NULL');
-CALL v99_add_col('delivery', 'document_hash',              '`document_hash` VARCHAR(80) NULL');
-CALL v99_add_col('delivery', 'print_count',                '`print_count` INT NOT NULL DEFAULT 0');
-CALL v99_add_col('delivery', 'printed_at',                 '`printed_at` DATETIME NULL');
-CALL v99_add_col('delivery', 'printed_by',                 '`printed_by` BIGINT NULL');
+CALL v99_add_col('deliveries', 'place_of_supply_state',      '`place_of_supply_state` VARCHAR(120) NULL');
+CALL v99_add_col('deliveries', 'place_of_supply_state_code', '`place_of_supply_state_code` VARCHAR(2) NULL');
+CALL v99_add_col('deliveries', 'supply_type',                '`supply_type` VARCHAR(30) NULL');
+CALL v99_add_col('deliveries', 'ewb_number',                 '`ewb_number` VARCHAR(30) NULL');
+CALL v99_add_col('deliveries', 'ewb_generated_at',           '`ewb_generated_at` DATETIME NULL');
+CALL v99_add_col('deliveries', 'ewb_valid_till',             '`ewb_valid_till` DATETIME NULL');
+CALL v99_add_col('deliveries', 'document_hash',              '`document_hash` VARCHAR(80) NULL');
+CALL v99_add_col('deliveries', 'print_count',                '`print_count` INT NOT NULL DEFAULT 0');
+CALL v99_add_col('deliveries', 'printed_at',                 '`printed_at` DATETIME NULL');
+CALL v99_add_col('deliveries', 'printed_by',                 '`printed_by` BIGINT NULL');
 
 -- ─────────────────────────────────────────────────────────────────────
 -- DOCUMENT_REFERENCE — typed cross-reference table (PO → GRN → INV → DN)

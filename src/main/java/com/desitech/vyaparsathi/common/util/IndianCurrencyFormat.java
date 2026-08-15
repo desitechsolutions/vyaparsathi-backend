@@ -9,23 +9,14 @@ import java.util.Locale;
  * 12,345,678.90 — the lakh/crore grouping every enterprise Indian tax
  * document ships with.
  *
- * <p>Two shapes:
- * <ul>
- *   <li>{@link #formatCurrency(BigDecimal)} — with ₹ prefix, always 2 decimals
- *   <li>{@link #formatNumber(BigDecimal)}  — bare number, 2 decimals
- *   <li>{@link #formatQty(BigDecimal)}     — bare number, no forced decimals
- * </ul>
+ * <p>We deliberately avoid {@link NumberFormat#getCurrencyInstance} because
+ * it prefixes the ₹ symbol (U+20B9), which OpenPDF's built-in Helvetica
+ * cannot render (comes out blank). Every callsite uses "INR " (ISO 4217)
+ * so values render in any PDF font.
  */
 public final class IndianCurrencyFormat {
 
     private static final Locale INDIA = new Locale("en", "IN");
-
-    private static final ThreadLocal<NumberFormat> CURRENCY = ThreadLocal.withInitial(() -> {
-        NumberFormat nf = NumberFormat.getCurrencyInstance(INDIA);
-        nf.setMinimumFractionDigits(2);
-        nf.setMaximumFractionDigits(2);
-        return nf;
-    });
 
     private static final ThreadLocal<NumberFormat> NUMBER = ThreadLocal.withInitial(() -> {
         NumberFormat nf = NumberFormat.getInstance(INDIA);
@@ -45,15 +36,15 @@ public final class IndianCurrencyFormat {
 
     private IndianCurrencyFormat() {}
 
-    /** Returns "₹1,23,456.78" — with rupee symbol. Null → "₹0.00". */
+    /** Returns "INR 1,23,456.78" — ISO 4217 prefix so it renders in every
+     *  PDF font. Null → "INR 0.00". */
     public static String formatCurrency(BigDecimal value) {
         BigDecimal safe = value != null ? value : BigDecimal.ZERO;
-        // JDK's currency formatter includes a non-breaking space (₹ 1,234.00).
-        // Enterprise docs prefer tight prefix — strip the NBSP.
-        return CURRENCY.get().format(safe).replace(" ", "");
+        return "INR " + NUMBER.get().format(safe);
     }
 
-    /** Same as {@link #formatCurrency} but without the ₹ prefix — for tabular columns. */
+    /** Same as {@link #formatCurrency} but without the INR prefix — for
+     *  tabular columns whose header already carries the currency label. */
     public static String formatNumber(BigDecimal value) {
         BigDecimal safe = value != null ? value : BigDecimal.ZERO;
         return NUMBER.get().format(safe);

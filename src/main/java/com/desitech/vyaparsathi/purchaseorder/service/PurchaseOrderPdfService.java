@@ -58,6 +58,15 @@ public class PurchaseOrderPdfService {
     @Autowired
     private InvoiceUtil invoiceUtil;
 
+    @Autowired
+    private com.desitech.vyaparsathi.document.mapper.PurchaseOrderDocumentMapper poDocumentMapper;
+
+    @Autowired
+    private com.desitech.vyaparsathi.document.render.EnterpriseDocumentRenderer enterpriseRenderer;
+
+    @org.springframework.beans.factory.annotation.Value("${po.enterprise-pdf.enabled:true}")
+    private boolean enterprisePdfEnabled;
+
     public PurchaseOrderPdfService(PurchaseOrderRepository purchaseOrderRepository) {
         this.purchaseOrderRepository = purchaseOrderRepository;
     }
@@ -66,6 +75,16 @@ public class PurchaseOrderPdfService {
     public byte[] generatePdf(Long purchaseOrderId) {
         PurchaseOrder po = purchaseOrderRepository.findById(purchaseOrderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Purchase Order not found: " + purchaseOrderId));
+        if (enterprisePdfEnabled) {
+            com.desitech.vyaparsathi.document.dto.EnterpriseDocumentDto d = poDocumentMapper.map(po);
+            if (po.getShop() != null && po.getShop().getLogoPath() != null) {
+                d.setLogoBytes(invoiceUtil.loadImageBytes(po.getShop().getLogoPath(), "logo"));
+            }
+            if (po.getShop() != null && po.getShop().getSignaturePath() != null) {
+                d.setSignatureBytes(invoiceUtil.loadImageBytes(po.getShop().getSignaturePath(), "signature"));
+            }
+            return enterpriseRenderer.render(d);
+        }
         return render(po);
     }
 

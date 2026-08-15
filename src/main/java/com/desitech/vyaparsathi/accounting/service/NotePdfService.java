@@ -54,6 +54,21 @@ public class NotePdfService {
     private final CreditNoteRepository creditRepo;
     private final DebitNoteRepository debitRepo;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.document.mapper.CreditNoteDocumentMapper creditNoteMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.document.mapper.DebitNoteDocumentMapper debitNoteMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.document.render.EnterpriseDocumentRenderer enterpriseRenderer;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.invoice.utils.InvoiceUtil invoiceUtil;
+
+    @org.springframework.beans.factory.annotation.Value("${notes.enterprise-pdf.enabled:true}")
+    private boolean enterprisePdfEnabled;
+
     public NotePdfService(CreditNoteRepository creditRepo, DebitNoteRepository debitRepo) {
         this.creditRepo = creditRepo;
         this.debitRepo = debitRepo;
@@ -63,6 +78,11 @@ public class NotePdfService {
     public byte[] generateCreditNotePdf(Long creditNoteId) {
         CreditNote note = creditRepo.findById(creditNoteId)
                 .orElseThrow(() -> new EntityNotFoundAppException("Credit Note", creditNoteId));
+        if (enterprisePdfEnabled) {
+            com.desitech.vyaparsathi.document.dto.EnterpriseDocumentDto d = creditNoteMapper.map(note);
+            attachAssets(d, note.getShop());
+            return enterpriseRenderer.render(d);
+        }
         return renderCredit(note);
     }
 
@@ -70,7 +90,18 @@ public class NotePdfService {
     public byte[] generateDebitNotePdf(Long debitNoteId) {
         DebitNote note = debitRepo.findById(debitNoteId)
                 .orElseThrow(() -> new EntityNotFoundAppException("Debit Note", debitNoteId));
+        if (enterprisePdfEnabled) {
+            com.desitech.vyaparsathi.document.dto.EnterpriseDocumentDto d = debitNoteMapper.map(note);
+            attachAssets(d, note.getShop());
+            return enterpriseRenderer.render(d);
+        }
         return renderDebit(note);
+    }
+
+    private void attachAssets(com.desitech.vyaparsathi.document.dto.EnterpriseDocumentDto d, Shop shop) {
+        if (shop == null) return;
+        if (shop.getLogoPath() != null) d.setLogoBytes(invoiceUtil.loadImageBytes(shop.getLogoPath(), "logo"));
+        if (shop.getSignaturePath() != null) d.setSignatureBytes(invoiceUtil.loadImageBytes(shop.getSignaturePath(), "signature"));
     }
 
     // ─── Credit Note rendering ──────────────────────────────────────────

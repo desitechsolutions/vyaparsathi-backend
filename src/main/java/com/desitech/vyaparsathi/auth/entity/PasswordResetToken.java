@@ -11,8 +11,8 @@ import java.time.LocalDateTime;
 @Data
 public class PasswordResetToken extends ShopAwareEntity {
 
-    @Column(nullable = false, unique = true)
-    private String token;
+    @Column(name = "token_hash", nullable = false, unique = true, length = 64)
+    private String tokenHash;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
@@ -30,8 +30,8 @@ public class PasswordResetToken extends ShopAwareEntity {
     @Column(nullable = false, columnDefinition = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
     private LocalDateTime createdAt;
 
-    public String getToken() { return token; }
-    public void setToken(String token) { this.token = token; }
+    public String getTokenHash() { return tokenHash; }
+    public void setTokenHash(String tokenHash) { this.tokenHash = tokenHash; }
 
     public User getUser() { return user; }
     public void setUser(User user) { this.user = user; }

@@ -107,4 +107,26 @@ public class ReceivingDto {
 
     public String getPutAwayStatus() { return putAwayStatus; }
     public void setPutAwayStatus(String putAwayStatus) { this.putAwayStatus = putAwayStatus; }
+
+    // ─── V99 statutory GST fields (read-through from entity, editable on update) ───
+    private String placeOfSupply;
+    private String supplyType;
+    private Boolean reverseCharge;
+    private String billToAddress;
+    private String shipToAddress;
+
+    public String getPlaceOfSupply() { return placeOfSupply; }
+    public void setPlaceOfSupply(String placeOfSupply) { this.placeOfSupply = placeOfSupply; }
+
+    public String getSupplyType() { return supplyType; }
+    public void setSupplyType(String supplyType) { this.supplyType = supplyType; }
+
+    public Boolean getReverseCharge() { return reverseCharge; }
+    public void setReverseCharge(Boolean reverseCharge) { this.reverseCharge = reverseCharge; }
+
+    public String getBillToAddress() { return billToAddress; }
+    public void setBillToAddress(String billToAddress) { this.billToAddress = billToAddress; }
+
+    public String getShipToAddress() { return shipToAddress; }
+    public void setShipToAddress(String shipToAddress) { this.shipToAddress = shipToAddress; }
 }

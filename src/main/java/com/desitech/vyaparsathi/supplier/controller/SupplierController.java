@@ -15,7 +15,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/suppliers")
-@PreAuthorize("hasAnyRole('OWNER', 'STAFF','ADMIN')")
+// Class-level gate replaced by per-method @RequirePermission below.
 public class SupplierController {
 
     private static final Logger logger = LoggerFactory.getLogger(SupplierController.class);
@@ -24,6 +24,7 @@ public class SupplierController {
     private SupplierService service;
 
     @PostMapping
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SUPPLIER_CREATE")
     public ResponseEntity<SupplierDto> createSupplier(@RequestBody SupplierDto dto) {
         try {
             SupplierDto result = service.createSupplier(dto);
@@ -36,6 +37,7 @@ public class SupplierController {
     }
 
     @GetMapping
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SUPPLIER_VIEW")
     public ResponseEntity<List<SupplierDto>> getAllSuppliers() {
         try {
             List<SupplierDto> result = service.findAllSuppliers();
@@ -48,6 +50,7 @@ public class SupplierController {
     }
 
     @GetMapping("/{id}")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SUPPLIER_VIEW")
     public ResponseEntity<SupplierDto> getSupplierById(@PathVariable Long id) {
         try {
             SupplierDto result = service.findSupplierById(id);
@@ -60,6 +63,7 @@ public class SupplierController {
     }
 
     @PutMapping("/{id}")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SUPPLIER_EDIT")
     public ResponseEntity<SupplierDto> updateSupplier(@PathVariable Long id, @RequestBody SupplierDto dto) {
         try {
             SupplierDto result = service.updateSupplier(id, dto);
@@ -72,6 +76,7 @@ public class SupplierController {
     }
 
     @DeleteMapping("/{id}")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SUPPLIER_DELETE")
     public ResponseEntity<Void> deleteSupplier(@PathVariable Long id) {
         try {
             service.deleteSupplier(id);
@@ -81,5 +86,27 @@ public class SupplierController {
             logger.error("Error deleting supplier with id={}: {}", id, e.getMessage(), e);
             throw new ApplicationException("Failed to delete supplier", e);
         }
+    }
+
+    // ── V103 enterprise endpoints — stats + active toggle ─────────────
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.supplier.service.SupplierStatsService statsService;
+
+    /** Aggregate stats for the supplier detail KPI strip. */
+    @GetMapping("/{id}/stats")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SUPPLIER_VIEW")
+    public ResponseEntity<com.desitech.vyaparsathi.supplier.dto.SupplierStatsDto> getStats(@PathVariable Long id) {
+        return ResponseEntity.ok(statsService.compute(id));
+    }
+
+    /**
+     * Soft-toggle the supplier's active flag. Suppliers with historical
+     * transactions should never be hard-deleted — use this instead.
+     */
+    @PostMapping("/{id}/toggle-active")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SUPPLIER_EDIT")
+    public ResponseEntity<com.desitech.vyaparsathi.supplier.dto.SupplierDto> toggleActive(@PathVariable Long id) {
+        return ResponseEntity.ok(service.toggleActive(id));
     }
 }

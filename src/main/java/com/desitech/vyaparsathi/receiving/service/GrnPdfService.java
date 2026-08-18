@@ -63,6 +63,9 @@ public class GrnPdfService {
     @Autowired
     private com.desitech.vyaparsathi.document.render.EnterpriseDocumentRenderer enterpriseRenderer;
 
+    @Autowired
+    private com.desitech.vyaparsathi.document.service.DocumentPrintAuditService printAuditService;
+
     @org.springframework.beans.factory.annotation.Value("${grn.enterprise-pdf.enabled:true}")
     private boolean enterprisePdfEnabled;
 
@@ -83,7 +86,11 @@ public class GrnPdfService {
             if (receiving.getShop() != null && receiving.getShop().getSignaturePath() != null) {
                 d.setSignatureBytes(invoiceUtil.loadImageBytes(receiving.getShop().getSignaturePath(), "signature"));
             }
-            return enterpriseRenderer.render(d);
+            byte[] pdf = enterpriseRenderer.render(d);
+            printAuditService.recordPrint(d.getDocumentType(), receiving.getId(),
+                    receiving.getGrNumber(),
+                    d.getAudit() != null ? d.getAudit().getDocumentHash() : null);
+            return pdf;
         }
         return render(receiving);
     }

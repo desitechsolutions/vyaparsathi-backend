@@ -106,11 +106,43 @@ public class GlobalExceptionHandler {
         error.put("message", ex.getMessage());
         return error;
     }
+    /**
+     * DB-level constraint violation. We map anything that looks like a
+     * unique-index conflict to 409 Conflict with a user-friendly message,
+     * so callers (e.g. onboarding, admin-create-user) can surface an
+     * actionable error instead of a raw stack trace. Everything else
+     * degrades to 400.
+     */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Map<String, String>> handleDataExceptions(DataIntegrityViolationException ex) {
+        String rootMessage = ex.getMostSpecificCause() != null
+                ? ex.getMostSpecificCause().getMessage()
+                : ex.getMessage();
+        String lower = rootMessage != null ? rootMessage.toLowerCase() : "";
+
         Map<String, String> error = new HashMap<>();
-        String errors = ex.getMessage();
-        error.put("message", errors);
+
+        // Heuristic detection of unique-constraint conflicts. Errors from
+        // MySQL, PostgreSQL and H2 all mention "duplicate" or "unique";
+        // shop code specifically ships as a "shop_code" or "uk_" index.
+        boolean isDuplicate = lower.contains("duplicate") || lower.contains("unique");
+        if (isDuplicate) {
+            String friendly = "This value is already in use.";
+            if (lower.contains("code") && lower.contains("shop")) {
+                friendly = "That shop code is already taken — please pick a different one.";
+            } else if (lower.contains("email")) {
+                friendly = "That email is already registered.";
+            } else if (lower.contains("username")) {
+                friendly = "That username is already taken.";
+            } else if (lower.contains("gstin")) {
+                friendly = "That GSTIN is already registered to another shop.";
+            }
+            error.put("message", friendly);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+        }
+
+        // Not a duplicate — surface a generic bad-request without leaking the SQL.
+        error.put("message", "The request could not be completed because it violates a data constraint.");
         return ResponseEntity.badRequest().body(error);
     }
     @ExceptionHandler(SubscriptionException.class)

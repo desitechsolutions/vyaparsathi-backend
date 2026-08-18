@@ -176,3 +176,9 @@ Thumbs.db
 
 # Application specific
 application-local.properties
+
+# Environment variables — never commit real credentials
+.env
+.env.local
+.env.*.local
+!.env.example

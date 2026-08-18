@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -21,8 +22,17 @@ public class AuditLogService {
 
     /**
      * Records a new audit entry. Used by AuditAspect.
+     *
+     * <p>Runs in a NEW transaction so an audit failure (e.g. a downstream
+     * constraint or listener rejection) can never poison the caller's own
+     * transaction with a "marked as rollback-only" state. The AuditAspect
+     * already swallows any exception thrown here, so the business flow
+     * never sees audit failures — but with REQUIRED propagation the
+     * caller's TX would still be marked rollback-only. REQUIRES_NEW is
+     * the only propagation mode that keeps the two transactions truly
+     * independent.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void log(String username, String action, String entity, String entityId, String details, String ip, String ua) {
         AuditLog log = new AuditLog();
         log.setUsername(username);

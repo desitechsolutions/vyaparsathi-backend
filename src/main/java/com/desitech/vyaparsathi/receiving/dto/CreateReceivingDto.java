@@ -20,6 +20,33 @@ public class CreateReceivingDto {
 
     private List<ReceivingItemDto> receivingItems;
 
+    // ─── V99 statutory GST fields ─────────────────────────────────────
+    /** "27-Maharashtra"-style Place of Supply. Nullable; BE derives from
+     *  supplier / shop state when not provided. */
+    private String placeOfSupply;
+    /** SupplyType enum name — see common.enums.SupplyType. */
+    private String supplyType;
+    /** Reverse-charge inward supply (§9(3)). */
+    private Boolean reverseCharge;
+    /** Address snapshots frozen at GRN receipt time. */
+    private String billToAddress;
+    private String shipToAddress;
+
+    public String getPlaceOfSupply() { return placeOfSupply; }
+    public void setPlaceOfSupply(String placeOfSupply) { this.placeOfSupply = placeOfSupply; }
+
+    public String getSupplyType() { return supplyType; }
+    public void setSupplyType(String supplyType) { this.supplyType = supplyType; }
+
+    public Boolean getReverseCharge() { return reverseCharge; }
+    public void setReverseCharge(Boolean reverseCharge) { this.reverseCharge = reverseCharge; }
+
+    public String getBillToAddress() { return billToAddress; }
+    public void setBillToAddress(String billToAddress) { this.billToAddress = billToAddress; }
+
+    public String getShipToAddress() { return shipToAddress; }
+    public void setShipToAddress(String shipToAddress) { this.shipToAddress = shipToAddress; }
+
     public Long getReceivingId() { return receivingId; }
     public void setReceivingId(Long receivingId) { this.receivingId = receivingId; }
 

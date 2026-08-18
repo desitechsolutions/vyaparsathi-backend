@@ -58,7 +58,25 @@ public class JwtUtil {
     }
 
     // --- ACCESS TOKEN GENERATION ---
+    /**
+     * Legacy overload — kept because a handful of call sites (register,
+     * impersonation exit, MFA verify) don't have a session yet. Delegates
+     * to the session-aware form with a null {@code sid}, which produces
+     * an access token that can't be per-session revoked. New call sites
+     * MUST use {@link #generateAccessToken(User, Long, String)} so the
+     * denylist has a handle.
+     */
     public String generateAccessToken(User user, Long shopId) {
+        return generateAccessToken(user, shopId, null);
+    }
+
+    /**
+     * Session-aware access token generation. {@code sessionId} is
+     * embedded as the {@code sid} claim; {@link JwtAuthenticationFilter}
+     * consults {@code SessionDenylistService} on every request so a
+     * revoked session immediately kills all its in-flight access tokens.
+     */
+    public String generateAccessToken(User user, Long shopId, String sessionId) {
         JwtBuilder builder = Jwts.builder()
                 .setSubject(user.getUsername())
                 .claim("role", user.getRole().name())
@@ -70,8 +88,29 @@ public class JwtUtil {
         if (shopId != null) {
             builder.claim("shopId", shopId);
         }
+        if (sessionId != null && !sessionId.isBlank()) {
+            builder.claim("sid", sessionId);
+        }
 
         return builder.signWith(secretKey, SignatureAlgorithm.HS512).compact();
+    }
+
+    /**
+     * Pulls the session id claim from a session-aware access token.
+     * Returns {@code null} for legacy tokens minted before session
+     * tracking (register/impersonation) — filters treat null as
+     * "no session, skip denylist check".
+     */
+    public String extractSessionId(String token) {
+        try {
+            return parseClaims(token).get("sid", String.class);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public long getAccessTokenTtlMillis() {
+        return jwtExpirationMs;
     }
 
     // --- REFRESH TOKEN GENERATION ---
@@ -567,6 +606,57 @@ public class JwtUtil {
             return parseClaims(token).get("impersonationSessionId", String.class);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    // ─── MFA CHALLENGE TOKEN ──────────────────────────────────────────────
+    /**
+     * Short-lived (5 min) token handed to the client after a successful
+     * password authentication when the user has MFA enabled. The token
+     * carries the userId + a scope claim so it cannot be used as an
+     * access token — {@link JwtAuthenticationFilter} rejects any bearer
+     * token whose scope is {@code mfa:challenge}, and the MFA verify
+     * endpoint accepts only this scope.
+     */
+    public String generateMfaChallengeToken(User user) {
+        return Jwts.builder()
+                .setSubject(user.getUsername())
+                .claim("userId", user.getId())
+                .claim("scope", "mfa:challenge")
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + 5 * 60 * 1000L))
+                .signWith(secretKey, SignatureAlgorithm.HS512)
+                .setIssuer("vyaparsathi-mfa-service")
+                .compact();
+    }
+
+    /**
+     * Validates an MFA challenge token and returns the userId it references.
+     * Throws {@link JwtException} if the token is invalid, expired, or does
+     * not carry the {@code mfa:challenge} scope.
+     */
+    public Long validateMfaChallengeToken(String token) {
+        Claims claims = parseClaims(token);
+        String scope = claims.get("scope", String.class);
+        if (!"mfa:challenge".equals(scope)) {
+            throw new JwtException("Token is not a valid MFA challenge token.");
+        }
+        Long userId = claims.get("userId", Long.class);
+        if (userId == null) {
+            throw new JwtException("MFA challenge token is missing userId.");
+        }
+        return userId;
+    }
+
+    /**
+     * True if the token carries the MFA challenge scope — so the JWT auth
+     * filter can reject it as an access token.
+     */
+    public boolean isMfaChallengeToken(String token) {
+        try {
+            return "mfa:challenge".equals(parseClaims(token).get("scope", String.class));
+        } catch (Exception e) {
+            return false;
         }
     }
 }

@@ -17,16 +17,20 @@ public class TokenValidator {
             throw new BadCredentialsException("Invalid reset token");
         }
 
+        String hashPrefix = token.getTokenHash() != null && token.getTokenHash().length() >= 8
+                ? token.getTokenHash().substring(0, 8)
+                : "unknown";
+
         if (token.isUsed()) {
-            logger.warn("Token validation failed: Token has already been used, token: {}", token.getToken());
+            logger.warn("Token validation failed: token already used (hash prefix: {})", hashPrefix);
             throw new BadCredentialsException("This token has already been used");
         }
 
         if (token.getExpiryDate().isBefore(LocalDateTime.now())) {
-            logger.warn("Token validation failed: Token has expired, token: {}", token.getToken());
+            logger.warn("Token validation failed: token expired (hash prefix: {})", hashPrefix);
             throw new BadCredentialsException("This token has expired");
         }
 
-        logger.info("Token validated successfully: {}", token.getToken());
+        logger.info("Token validated successfully (hash prefix: {})", hashPrefix);
     }
 }

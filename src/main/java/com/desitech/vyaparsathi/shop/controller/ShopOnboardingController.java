@@ -7,8 +7,10 @@ import jakarta.persistence.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.desitech.vyaparsathi.auth.service.SessionService;
 import com.desitech.vyaparsathi.shop.dto.ShopDto;
 import com.desitech.vyaparsathi.shop.service.ShopService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -28,6 +30,9 @@ public class ShopOnboardingController {
     @Autowired
     private ShopService shopService;
 
+    @Autowired
+    private SessionService sessionService;
+
     /**
      * Endpoint to set up the initial shop.
      * Accessible only to the 'OWNER' role.
@@ -39,7 +44,8 @@ public class ShopOnboardingController {
     public ResponseEntity<ShopDto> completeOnboarding(
             @Valid @ModelAttribute ShopDto dto, // ModelAttribute for form-data
             @RequestParam(value = "logo", required = false) MultipartFile logo,
-            @AuthenticationPrincipal CustomUserDetails userDetails) {
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            HttpServletRequest httpRequest) {
 
         User currentUser = userDetails.getUser();
 
@@ -56,8 +62,11 @@ public class ShopOnboardingController {
             throw new IllegalStateException("Shop already exists");
         }
 
-        // Delegate to service
-        ShopDto createdShop = shopService.completeOnboarding(dto, currentUser, logo);
+        // Delegate to service. Build session metadata here so the fresh
+        // OWNER session created post-onboarding has a proper device label
+        // and shows up correctly in Active Sessions.
+        var sessionMetadata = sessionService.newSessionMetadata(httpRequest);
+        ShopDto createdShop = shopService.completeOnboarding(dto, currentUser, logo, sessionMetadata);
 
         logger.info("Onboarding completed for user={}, shopId={}",
                 currentUser.getUsername(), createdShop.getId());

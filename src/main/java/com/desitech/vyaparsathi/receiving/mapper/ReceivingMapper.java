@@ -67,4 +67,23 @@ public interface ReceivingMapper {
                 .map(this::toItemEntity)
                 .collect(Collectors.toList());
     }
+
+    /**
+     * The entity keeps V99 state / state-code as separate columns; the FE
+     * consumes a single "code-name" PoS string plus flat address fields.
+     * Combine them here so a GET /receivings/{id} returns the FE-friendly
+     * shape without service-layer post-processing.
+     */
+    @AfterMapping
+    default void flattenStatutory(Receiving src, @MappingTarget ReceivingDto tgt) {
+        if (src.getPlaceOfSupplyStateCode() != null && src.getPlaceOfSupplyState() != null) {
+            tgt.setPlaceOfSupply(src.getPlaceOfSupplyStateCode() + "-" + src.getPlaceOfSupplyState());
+        } else if (src.getPlaceOfSupplyState() != null) {
+            tgt.setPlaceOfSupply(src.getPlaceOfSupplyState());
+        }
+        tgt.setSupplyType(src.getSupplyType());
+        tgt.setReverseCharge(src.getReverseCharge());
+        tgt.setBillToAddress(src.getBillToPartySnapshot());
+        tgt.setShipToAddress(src.getShipToPartySnapshot());
+    }
 }

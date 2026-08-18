@@ -17,6 +17,9 @@ import java.util.Optional;
 public interface ReceivingRepository extends BaseRepository<Receiving, Long> {
     boolean existsByPurchaseOrder(PurchaseOrder po);
 
+    @Query("SELECT COUNT(r) FROM Receiving r WHERE r.purchaseOrder.supplier.id = :supplierId AND r.shop.id = :shopId")
+    long countBySupplierIdAndShopId(@Param("supplierId") Long supplierId, @Param("shopId") Long shopId);
+
     @Query("SELECT new com.desitech.vyaparsathi.receiving.dto.ReceivingQtySummary(" +
             "COALESCE(SUM(ri.receivedQty),0), " +
             "COALESCE(SUM(ri.damagedQty),0), " +

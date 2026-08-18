@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.auth.security;
 
+import com.desitech.vyaparsathi.auth.service.SessionDenylistService;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.platform.service.ImpersonationSessionCacheManager;
 import com.desitech.vyaparsathi.platform.service.ShopStatusCacheManager;
@@ -26,15 +27,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final CustomUserDetailsService userDetailsService;
     private final ImpersonationSessionCacheManager impersonationSessionCacheManager;
     private final ShopStatusCacheManager shopStatusCacheManager;
+    private final SessionDenylistService sessionDenylistService;
 
     public JwtAuthenticationFilter(JwtUtil jwtUtil,
                                    CustomUserDetailsService userDetailsService,
                                    ImpersonationSessionCacheManager impersonationSessionCacheManager,
-                                   ShopStatusCacheManager shopStatusCacheManager) {
+                                   ShopStatusCacheManager shopStatusCacheManager,
+                                   SessionDenylistService sessionDenylistService) {
         this.jwtUtil = jwtUtil;
         this.userDetailsService = userDetailsService;
         this.impersonationSessionCacheManager = impersonationSessionCacheManager;
         this.shopStatusCacheManager = shopStatusCacheManager;
+        this.sessionDenylistService = sessionDenylistService;
     }
 
     @Override
@@ -54,6 +58,31 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 logger.debug("Processing JWT for request: {}", request.getRequestURI());
 
                 if (jwtUtil.validateToken(jwt)) {
+                    // MFA challenge tokens are not access tokens. Reject them
+                    // outright so a stolen challenge token can't be used to
+                    // reach protected endpoints.
+                    if (jwtUtil.isMfaChallengeToken(jwt)) {
+                        logger.warn("Rejecting MFA challenge token used as access token on {}", request.getRequestURI());
+                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        response.setContentType("application/json");
+                        response.getWriter().write("{\"error\": \"MFA_PENDING\", \"message\": \"Complete MFA verification to continue.\"}");
+                        return;
+                    }
+
+                    // Session denylist check — kills revoked sessions
+                    // in milliseconds instead of waiting for the access
+                    // token to expire. Tokens without a `sid` claim
+                    // (legacy / impersonation) skip this check and rely
+                    // on their normal expiry.
+                    String sid = jwtUtil.extractSessionId(jwt);
+                    if (sid != null && sessionDenylistService.isRevoked(sid)) {
+                        logger.info("Rejecting revoked session {} on {}", sid, request.getRequestURI());
+                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        response.setContentType("application/json");
+                        response.getWriter().write("{\"error\": \"SESSION_REVOKED\", \"message\": \"This session has been revoked. Please sign in again.\"}");
+                        return;
+                    }
+
                     username = jwtUtil.extractUsername(jwt);
                     shopId = jwtUtil.extractShopId(jwt);
 

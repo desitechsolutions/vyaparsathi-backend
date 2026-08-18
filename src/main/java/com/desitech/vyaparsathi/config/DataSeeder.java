@@ -36,7 +36,7 @@ public class DataSeeder implements CommandLineRunner {
             logger.info("No OWNER found. Creating initial owner account...");
             User owner = new User();
             owner.setUsername(ownerUsername);
-            owner.setPinHash(passwordEncoder.encode(ownerPin));
+            owner.setPasswordHash(passwordEncoder.encode(ownerPin));
             owner.setRole(Role.OWNER);
             owner.setActive(true);
 

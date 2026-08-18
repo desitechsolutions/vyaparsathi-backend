@@ -13,6 +13,7 @@ package com.desitech.vyaparsathi.shop.enums;
  * {@link #GENERAL} so a botched migration does not lock the tenant out.
  */
 public enum IndustryType {
+    // ─── Original 10 ───
     CLOTHING,
     ELECTRONICS,
     HARDWARE,
@@ -22,7 +23,39 @@ public enum IndustryType {
     FOOTWEAR,
     FURNITURE,
     JEWELLERY,
-    GENERAL;
+    GENERAL,
+
+    // ─── Enterprise expansion (Phase 4) ───
+    // Sector-specific retail
+    BUILDING_MATERIALS,   // Cement, sand, aggregates, steel rods, bricks
+    RESTAURANT,           // Restaurants, dhabas, cloud kitchens, takeaway
+    BAKERY,               // Bakery, sweets, confectionery
+    DAIRY,                // Milk, ghee, paneer, curd
+    SUPERMARKET,          // Multi-category mini-mart / hypermarket
+    COSMETICS,            // Cosmetics, beauty supplies
+    OPTICAL,              // Spectacles, contact lenses, sunglasses
+    AGRICULTURE,          // Seeds, fertilizer, farm supplies
+    SPORTS,               // Sports goods, fitness equipment
+    BOOKS,                // Bookstore, educational materials
+    TOYS,                 // Toys, games
+    MOBILE_ACCESSORIES,   // Mobile phones + accessories (subset of ELECTRONICS)
+    HOME_APPLIANCES,      // Large white goods, kitchen appliances
+    KITCHENWARE,          // Utensils, cookware
+    TEXTILE,              // Fabric, upholstery, wholesale textile
+    PAINT,                // Paint, primer, coatings
+    SANITARY_TILES,       // Tiles, bath fixtures, sanitary ware
+    MEDICAL_EQUIPMENT,    // Medical devices, hospital supplies (NOT pharmacy)
+    PET_SUPPLIES,         // Pet food, accessories, aquarium supplies
+    MUSICAL_INSTRUMENTS,  // Instruments, sound equipment
+    FLORIST,              // Flowers, bouquets, event decor
+    HANDICRAFTS,          // Handmade goods, art, crafts
+
+    // Services / crosscut
+    SALON_SPA,            // Salon, spa (services + retail)
+    LAUNDRY,              // Laundry, dry-cleaning (services)
+    SERVICES,             // Consulting, professional services (billing time/labour)
+    WHOLESALE,            // Wholesale distribution (any category)
+    MANUFACTURING;        // Manufacturing / job-work
 
     /**
      * Lenient parser used everywhere strings cross the boundary — request

@@ -33,7 +33,9 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/sales")
-@PreAuthorize("hasAnyRole('OWNER', 'STAFF','ADMIN')")
+// Class-level "any authenticated" gate replaced by per-method @RequirePermission
+// checks below — bridge in PermissionResolver keeps existing role-based logins
+// working while granting the exact permission set (SALES_*) for each action.
 @Tag(name = "Sales Management", description = "Operations for sales management including COGS tracking, returns, cancellations, and profit reporting")
 public class SaleController {
 
@@ -47,6 +49,7 @@ public class SaleController {
     private JwtUtil jwtUtil;
 
     @PostMapping
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_CREATE")
     public ResponseEntity<SaleCreateResponse> create(
             @Valid @RequestBody SaleDto dto,
             @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
@@ -70,6 +73,7 @@ public class SaleController {
     }
 
     @PostMapping("/drafts")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_CREATE")
     public ResponseEntity<SaleCreateResponse> saveDraft(@Valid @RequestBody SaleDto dto) {
         // Walk-in / not-yet-selected customer is a valid POS case (esp. for "Hold" —
         // cashier parks the cart, then looks up the customer). Null-safe the log.
@@ -79,6 +83,7 @@ public class SaleController {
         return ResponseEntity.ok(new SaleCreateResponse(draft.getId(), draft.getInvoiceNo(), null));
     }
     @GetMapping("/{id}")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_VIEW")
     public ResponseEntity<SaleDto> getSale(@PathVariable Long id) {
         try {
             var result = service.getSaleById(id);
@@ -96,6 +101,7 @@ public class SaleController {
     }
 
     @PutMapping("/{id}/complete")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_CREATE")
     public ResponseEntity<SaleCreateResponse> completeDraft(
             @PathVariable Long id,
             @Valid @RequestBody SaleDto dto) {
@@ -116,6 +122,7 @@ public class SaleController {
     }
 
     @GetMapping
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_VIEW")
     public ResponseEntity<List<SaleDto>> listSales(
             @RequestParam(required = false) LocalDateTime startDate,
             @RequestParam(required = false) LocalDateTime endDate) {
@@ -130,6 +137,7 @@ public class SaleController {
     }
 
     @GetMapping("/with-due")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_VIEW")
     public ResponseEntity<List<SaleDueDto>> getSalesWithDue() {
         try {
             var result = service.getSalesWithDue();
@@ -142,6 +150,7 @@ public class SaleController {
     }
 
     @GetMapping("/history")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_VIEW")
     public ResponseEntity<Page<SaleDueDto>> getSalesHistory(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size,
@@ -172,6 +181,7 @@ public class SaleController {
 
 
     @GetMapping("/{id}/due")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_VIEW")
     public ResponseEntity<SaleDueDto> getSaleDueBySaleId(@PathVariable Long id) {
         try {
             var result = service.getSaleDueBySaleId(id);
@@ -183,6 +193,7 @@ public class SaleController {
         }
     }
     @GetMapping("/{customerId}/dues")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_VIEW")
     public ResponseEntity<Page<SaleDueDto>> getCustomerDues(
             @PathVariable Long customerId,
             @RequestParam(defaultValue = "0") int page,
@@ -199,6 +210,7 @@ public class SaleController {
     }
 
     @DeleteMapping("/drafts/{id}")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_DELETE")
     @Operation(summary = "Discard a DRAFT or HELD sale",
                description = "Hard-delete a work-in-progress sale that never became a committed row. Rejects COMPLETED / CANCELLED / RETURNED (those have ledger + stock impact — use /cancel for those). Used when a caller pivots (e.g. save-as-proforma after a draft) and the draft would otherwise orphan.")
     public ResponseEntity<Void> discardDraft(@PathVariable Long id) {
@@ -207,6 +219,7 @@ public class SaleController {
     }
 
     @PostMapping("/{id}/park")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_EDIT")
     @Operation(summary = "Park a DRAFT sale (POS 'hold order for later')",
                description = "DRAFT → HELD. Same underlying state (no ledger, no stock) but flagged HELD so the UI can list parked orders separately from auto-saved drafts. Idempotent — parking a HELD sale is a no-op. Rejects any other status.")
     public ResponseEntity<SaleDto> parkSale(@PathVariable Long id) {
@@ -214,6 +227,7 @@ public class SaleController {
     }
 
     @PostMapping("/{id}/resume")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_EDIT")
     @Operation(summary = "Resume a parked sale",
                description = "HELD → DRAFT. Returns the sale to active editing so the standard complete-draft flow works unchanged. Idempotent for DRAFT.")
     public ResponseEntity<SaleDto> resumeSale(@PathVariable Long id) {
@@ -238,7 +252,7 @@ public class SaleController {
     }
 
     @PostMapping("/{id}/return")
-    @PreAuthorize("hasAnyRole('OWNER', 'ADMIN')")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_CANCEL")
     @Operation(summary = "Process sale return",
                description = "Process partial or full return of items from a sale. Automatically restores stock and handles payment/ledger reversal if requested. Restricted to OWNER/ADMIN — staff can raise the request but not commit it.")
     @ApiResponse(responseCode = "200", description = "Sale return processed successfully")
@@ -257,7 +271,7 @@ public class SaleController {
     }
 
     @PostMapping("/{id}/cancel")
-    @PreAuthorize("hasAnyRole('OWNER', 'ADMIN')")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_CANCEL")
     @Operation(summary = "Cancel entire sale",
                description = "Cancel an entire sale transaction. Restores all stock, reverses all payments and ledger entries. Irreversible action. Restricted to OWNER/ADMIN.")
     @ApiResponse(responseCode = "200", description = "Sale cancelled successfully")

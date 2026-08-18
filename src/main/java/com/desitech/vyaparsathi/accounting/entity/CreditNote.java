@@ -65,6 +65,26 @@ public class CreditNote extends ShopAwareEntity {
     @Column(name = "notes", length = 500)
     private String notes;
 
+    // ─── V101 enterprise fields ─────────────────────────────────────
+    /** Enum-tagged reason code (§34 CGST). Paired with the free-text
+     *  {@code reason} column — the string stays authoritative for display
+     *  and legal record; the code drives compliance grouping / GSTR-1. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reason_code", length = 30)
+    private com.desitech.vyaparsathi.accounting.enums.CreditNoteReasonCode reasonCode;
+
+    /** True when the associated goods were flowed back into stock on
+     *  approval. Purely informational — the stock movement itself is
+     *  fired by CreditNoteService. */
+    @Column(name = "restock_items", nullable = false)
+    private Boolean restockItems = Boolean.FALSE;
+
+    /** True when the credit was settled via cash / bank refund and cannot
+     *  be applied to further invoices. Set by CreditNoteAllocationService
+     *  on the REFUND path. */
+    @Column(name = "refunded", nullable = false)
+    private Boolean refunded = Boolean.FALSE;
+
     @OneToMany(mappedBy = "creditNote", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @JsonManagedReference
     private List<CreditNoteItem> items = new ArrayList<>();
@@ -101,6 +121,23 @@ public class CreditNote extends ShopAwareEntity {
 
     public BigDecimal getAppliedAmount() { return appliedAmount; }
     public void setAppliedAmount(BigDecimal appliedAmount) { this.appliedAmount = appliedAmount; }
+
+    public com.desitech.vyaparsathi.accounting.enums.CreditNoteReasonCode getReasonCode() { return reasonCode; }
+    public void setReasonCode(com.desitech.vyaparsathi.accounting.enums.CreditNoteReasonCode reasonCode) { this.reasonCode = reasonCode; }
+
+    public Boolean getRestockItems() { return restockItems; }
+    public void setRestockItems(Boolean restockItems) { this.restockItems = restockItems != null && restockItems; }
+
+    public Boolean getRefunded() { return refunded; }
+    public void setRefunded(Boolean refunded) { this.refunded = refunded != null && refunded; }
+
+    /** Remaining credit — the "unused" balance rendered in the UI. */
+    public BigDecimal getOutstandingAmount() {
+        BigDecimal total = totalAmount == null ? BigDecimal.ZERO : totalAmount;
+        BigDecimal applied = appliedAmount == null ? BigDecimal.ZERO : appliedAmount;
+        BigDecimal rem = total.subtract(applied);
+        return rem.signum() < 0 ? BigDecimal.ZERO : rem;
+    }
 
     public CreditNoteStatus getStatus() { return status; }
     public void setStatus(CreditNoteStatus status) { this.status = status; }

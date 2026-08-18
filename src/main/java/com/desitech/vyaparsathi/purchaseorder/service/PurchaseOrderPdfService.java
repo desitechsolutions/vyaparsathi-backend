@@ -64,6 +64,9 @@ public class PurchaseOrderPdfService {
     @Autowired
     private com.desitech.vyaparsathi.document.render.EnterpriseDocumentRenderer enterpriseRenderer;
 
+    @Autowired
+    private com.desitech.vyaparsathi.document.service.DocumentPrintAuditService printAuditService;
+
     @org.springframework.beans.factory.annotation.Value("${po.enterprise-pdf.enabled:true}")
     private boolean enterprisePdfEnabled;
 
@@ -83,7 +86,11 @@ public class PurchaseOrderPdfService {
             if (po.getShop() != null && po.getShop().getSignaturePath() != null) {
                 d.setSignatureBytes(invoiceUtil.loadImageBytes(po.getShop().getSignaturePath(), "signature"));
             }
-            return enterpriseRenderer.render(d);
+            byte[] pdf = enterpriseRenderer.render(d);
+            printAuditService.recordPrint(d.getDocumentType(), po.getId(),
+                    po.getPoNumber(),
+                    d.getAudit() != null ? d.getAudit().getDocumentHash() : null);
+            return pdf;
         }
         return render(po);
     }

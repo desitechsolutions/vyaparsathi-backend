@@ -100,6 +100,20 @@
       <version>${mapstruct.version}</version>
     </dependency>
 
+    <!-- Rate Limiting (Bucket4j) — Phase 1: throttle /api/auth/** against brute-force -->
+    <dependency>
+      <groupId>com.bucket4j</groupId>
+      <artifactId>bucket4j_jdk17-core</artifactId>
+      <version>8.14.0</version>
+    </dependency>
+
+    <!-- TOTP MFA (Phase 3) — Google Authenticator / Authy compatible. -->
+    <dependency>
+      <groupId>dev.samstevens.totp</groupId>
+      <artifactId>totp</artifactId>
+      <version>1.7.1</version>
+    </dependency>
+
     <!-- Security -->
     <dependency>
       <groupId>io.jsonwebtoken</groupId>

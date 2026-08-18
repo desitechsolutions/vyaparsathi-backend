@@ -41,6 +41,14 @@ public class PurchaseReturnController {
         return ResponseEntity.ok(purchaseReturnService.cancelPurchaseReturn(id));
     }
 
+    @PostMapping("/{id}/issue-debit-note")
+    @Operation(summary = "Issue Debit Note for an approved Purchase Return",
+               description = "Idempotently issues (or returns the existing) Debit Note for an APPROVED PR. Used for historical PRs that were approved before auto-DN existed, or as a retry when the auto-DN post failed on approve.")
+    public ResponseEntity<com.desitech.vyaparsathi.accounting.entity.DebitNote> issueDebitNote(
+            @PathVariable Long id) {
+        return ResponseEntity.ok(purchaseReturnService.issueDebitNoteForApprovedReturn(id));
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "Get Purchase Return by ID", description = "Retrieves details of a specific Purchase Return")
     public ResponseEntity<PurchaseReturnDto> getPurchaseReturnById(@PathVariable Long id) {

@@ -1,5 +1,7 @@
 package com.desitech.vyaparsathi.common.aspect;
 
+import com.desitech.vyaparsathi.auth.entity.User;
+import com.desitech.vyaparsathi.auth.model.Role;
 import com.desitech.vyaparsathi.common.annotations.AuditValue;
 import com.desitech.vyaparsathi.common.annotations.LogAudit;
 import com.desitech.vyaparsathi.audit.service.AuditLogService;
@@ -62,6 +64,21 @@ public class AuditAspect {
                                Object result,
                                Exception businessException) {
 
+        // Prefer a User argument's data (for pre-authentication events like login,
+        // where SecurityContext is empty / anonymous). Falls back to
+        // SecurityContext for anything the user is signed in for.
+        User actorFromArgs = findUserArg(joinPoint);
+
+        // Skip audit for PENDING_OWNER — those events (register, first login
+        // before onboarding, forgot-password from the pre-shop state) don't
+        // have a shop context to attach to. Writing them with a null shop_id
+        // would break tenant queries; writing them at all adds noise without
+        // audit value. Once the user completes onboarding, subsequent events
+        // are audited normally.
+        if (actorFromArgs != null && actorFromArgs.getRole() == Role.PENDING_OWNER) {
+            return;
+        }
+
         ServletRequestAttributes attributes =
                 (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
 
@@ -72,9 +89,7 @@ public class AuditAspect {
         String userAgent = request != null ? request.getHeader("User-Agent") : "SYSTEM";
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        String username = (auth != null && auth.isAuthenticated())
-                ? auth.getName()
-                : "SYSTEM";
+        String username = resolveUsername(auth, actorFromArgs);
 
         // ✅ Generic Identification
         String entityId = extractId(result, joinPoint);
@@ -117,6 +132,39 @@ public class AuditAspect {
         }
 
         return base + " (" + status + ")";
+    }
+
+    /**
+     * Looks in the method arguments for a {@link User} instance. Used to
+     * recover the acting user's identity when the SecurityContext is empty
+     * (as during login, before the JWT filter has run).
+     */
+    private User findUserArg(ProceedingJoinPoint joinPoint) {
+        for (Object arg : joinPoint.getArgs()) {
+            if (arg instanceof User u) return u;
+        }
+        return null;
+    }
+
+    /**
+     * Resolves the username to record on the audit row. Priority:
+     *   1. A real, authenticated Spring principal (SecurityContext), when
+     *      it isn't the anonymous placeholder.
+     *   2. The User argument passed to the audited method (recovers login /
+     *      register username when SecurityContext isn't set yet).
+     *   3. Anonymous / SYSTEM fallback.
+     */
+    private String resolveUsername(Authentication auth, User actorFromArgs) {
+        if (auth != null && auth.isAuthenticated()) {
+            String name = auth.getName();
+            if (name != null && !"anonymousUser".equalsIgnoreCase(name)) {
+                return name;
+            }
+        }
+        if (actorFromArgs != null && actorFromArgs.getUsername() != null) {
+            return actorFromArgs.getUsername();
+        }
+        return auth != null ? auth.getName() : "SYSTEM";
     }
 
     /**

@@ -57,4 +57,16 @@ public record FieldSpec(
     public static FieldSpec select(String key, String label, boolean required, List<String> options, String part) {
         return new FieldSpec(key, label, "select", required, null, null, options, null, part);
     }
+
+    public static FieldSpec date(String key, String label, boolean required, String part) {
+        return new FieldSpec(key, label, "date", required, null, null, null, null, part);
+    }
+
+    /**
+     * Boolean flag field. Named {@code boolFlag} (not {@code boolean}) because
+     * "boolean" is a Java reserved word.
+     */
+    public static FieldSpec boolFlag(String key, String label, boolean required, String part) {
+        return new FieldSpec(key, label, "boolean", required, null, null, null, null, part);
+    }
 }

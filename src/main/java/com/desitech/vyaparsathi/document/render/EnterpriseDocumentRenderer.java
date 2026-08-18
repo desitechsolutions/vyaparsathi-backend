@@ -53,7 +53,15 @@ public class EnterpriseDocumentRenderer {
     private static final Color TEXT_MUTED = new Color(107, 114, 128);
     private static final Color TEXT_STRONG = new Color(17, 24, 39);
     private static final Color TOTAL_ROW_BG = new Color(250, 245, 235);
-    private static final Color WATERMARK_COLOR = new Color(220, 38, 38, 40);
+    /** Base watermark palette. Colour choice follows enterprise convention:
+     *  DRAFT and unfinished states use muted grey; CANCELLED / VOID is red;
+     *  positive states (PAID / RECEIVED / DELIVERED) use green. Alpha lives
+     *  on the {@code PdfGState} we push, NOT on the Color itself — OpenPDF's
+     *  {@link Font#setColor} ignores alpha because PDF fill has no alpha
+     *  channel unless a transparency ExtGState is applied. */
+    private static final Color WATERMARK_GREY  = new Color(90, 90, 90);
+    private static final Color WATERMARK_RED   = new Color(200, 40, 40);
+    private static final Color WATERMARK_GREEN = new Color(40, 140, 60);
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd MMM yyyy");
     private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm");
@@ -985,14 +993,29 @@ public class EnterpriseDocumentRenderer {
         public void onEndPage(PdfWriter writer, Document document) {
             com.lowagie.text.pdf.PdfContentByte cb = writer.getDirectContentUnder();
 
-            // Watermark
+            // Watermark — classic diagonal at 45°, sized so a short word
+            // (DRAFT / CANCELLED / PAID) fits well inside A4 margins.
+            // Transparency is applied via a PdfGState because PDF fill color
+            // has no alpha channel — passing an RGBA color to Font.setColor
+            // silently renders as opaque.
             if (doc.getWatermark() != null && !doc.getWatermark().isBlank()) {
                 try {
-                    Font wf = new Font(Font.HELVETICA, 90, Font.BOLD, WATERMARK_COLOR);
-                    Phrase p = new Phrase(doc.getWatermark().toUpperCase(), wf);
+                    String text = doc.getWatermark().toUpperCase();
+                    Color colour = watermarkColour(text);
+                    com.lowagie.text.pdf.PdfGState gs = new com.lowagie.text.pdf.PdfGState();
+                    gs.setFillOpacity(0.14f);   // ~14% opacity — reads as a subtle watermark, not a badge
+                    cb.saveState();
+                    cb.setGState(gs);
+                    // Longer words get scaled down so they still fit on A4.
+                    // "DRAFT" @ 72pt is ~180pt wide → sits comfortably centred;
+                    // "CANCELLED" (9 chars) @ 72pt is ~320pt so we drop to 60pt.
+                    int size = text.length() <= 6 ? 72 : (text.length() <= 9 ? 60 : 48);
+                    Font wf = new Font(Font.HELVETICA, size, Font.BOLD, colour);
+                    Phrase p = new Phrase(text, wf);
                     com.lowagie.text.pdf.ColumnText.showTextAligned(cb, Element.ALIGN_CENTER, p,
                             document.getPageSize().getWidth() / 2f,
-                            document.getPageSize().getHeight() / 2f, 30);
+                            document.getPageSize().getHeight() / 2f, 45);
+                    cb.restoreState();
                 } catch (Exception ignore) {}
             }
 
@@ -1024,6 +1047,17 @@ public class EnterpriseDocumentRenderer {
             com.lowagie.text.pdf.ColumnText.showTextAligned(over, Element.ALIGN_RIGHT,
                     new Phrase(page, footerFont),
                     document.getPageSize().getWidth() - 36, 22, 0);
+        }
+
+        /** Colour convention: neutral grey for in-progress states,
+         *  red for cancelled/void, green for positive terminal states. */
+        private static Color watermarkColour(String w) {
+            if (w == null) return WATERMARK_GREY;
+            String u = w.toUpperCase();
+            if (u.contains("CANCEL") || u.equals("VOID"))       return WATERMARK_RED;
+            if (u.equals("PAID") || u.contains("RECEIVED")
+                    || u.contains("DELIVERED") || u.contains("APPROVED")) return WATERMARK_GREEN;
+            return WATERMARK_GREY;   // DRAFT / PENDING / HELD / etc.
         }
     }
 }

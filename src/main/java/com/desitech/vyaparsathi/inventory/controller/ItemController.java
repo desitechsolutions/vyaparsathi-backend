@@ -81,7 +81,7 @@ public class ItemController {
     }
 
     @PostMapping(consumes = { "multipart/form-data" })
-    @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("ITEM_CREATE")
     public ResponseEntity<ItemDto> createItem(
             @Valid @RequestPart("itemDto") ItemDto itemDto,
             @RequestParam(required = false) Map<String, MultipartFile> photos) {
@@ -149,7 +149,7 @@ public class ItemController {
         }
     }
     @PostMapping("/bulk")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("ITEM_CREATE")
     public ResponseEntity<List<ItemDto>> createItems(@Valid @RequestBody List<ItemDto> items) {
         try {
             List<ItemDto> created = itemService.createItems(items);
@@ -161,7 +161,7 @@ public class ItemController {
         }
     }
     @PutMapping(value = "/{id}", consumes = { "multipart/form-data" })
-    @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("ITEM_EDIT")
     public ResponseEntity<ItemDto> updateItem(
             @PathVariable Long id,
             @Valid @RequestPart("itemDto") ItemDto itemDto,
@@ -202,7 +202,7 @@ public class ItemController {
         }
     }
     @DeleteMapping("/bulk")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("ITEM_DELETE")
     public ResponseEntity<Map<String, Integer>> deleteItemsBulk(@RequestBody Map<String, List<Long>> body) {
         List<Long> ids = body.getOrDefault("ids", List.of());
         int deleted = itemService.deleteItemsBulk(ids);
@@ -211,7 +211,7 @@ public class ItemController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("ITEM_DELETE")
     public ResponseEntity<Void> deleteItemVariant(@PathVariable Long id) {
         try {
             itemService.deleteItemVariant(id);

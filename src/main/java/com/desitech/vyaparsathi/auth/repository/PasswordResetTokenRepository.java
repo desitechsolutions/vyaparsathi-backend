@@ -11,10 +11,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface PasswordResetTokenRepository extends JpaRepository<PasswordResetToken, UUID> {
-    @Query(value = "SELECT * FROM password_reset_tokens WHERE token = :token", nativeQuery = true)
-    Optional<PasswordResetToken> findByTokenUnfiltered(@Param("token") String token);
+    @Query(value = "SELECT * FROM password_reset_tokens WHERE token_hash = :tokenHash", nativeQuery = true)
+    Optional<PasswordResetToken> findByTokenHashUnfiltered(@Param("tokenHash") String tokenHash);
 
-    Optional<PasswordResetToken> findByToken(String token);
+    Optional<PasswordResetToken> findByTokenHash(String tokenHash);
 
     @Modifying
     @Query("DELETE FROM PasswordResetToken t WHERE t.expiryDate < :now OR t.used = :used")

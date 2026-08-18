@@ -66,6 +66,9 @@ public class NotePdfService {
     @org.springframework.beans.factory.annotation.Autowired
     private com.desitech.vyaparsathi.invoice.utils.InvoiceUtil invoiceUtil;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.document.service.DocumentPrintAuditService printAuditService;
+
     @org.springframework.beans.factory.annotation.Value("${notes.enterprise-pdf.enabled:true}")
     private boolean enterprisePdfEnabled;
 
@@ -81,7 +84,11 @@ public class NotePdfService {
         if (enterprisePdfEnabled) {
             com.desitech.vyaparsathi.document.dto.EnterpriseDocumentDto d = creditNoteMapper.map(note);
             attachAssets(d, note.getShop());
-            return enterpriseRenderer.render(d);
+            byte[] pdf = enterpriseRenderer.render(d);
+            printAuditService.recordPrint(d.getDocumentType(), note.getId(),
+                    note.getCreditNoteNo(),
+                    d.getAudit() != null ? d.getAudit().getDocumentHash() : null);
+            return pdf;
         }
         return renderCredit(note);
     }
@@ -93,7 +100,11 @@ public class NotePdfService {
         if (enterprisePdfEnabled) {
             com.desitech.vyaparsathi.document.dto.EnterpriseDocumentDto d = debitNoteMapper.map(note);
             attachAssets(d, note.getShop());
-            return enterpriseRenderer.render(d);
+            byte[] pdf = enterpriseRenderer.render(d);
+            printAuditService.recordPrint(d.getDocumentType(), note.getId(),
+                    note.getDebitNoteNo(),
+                    d.getAudit() != null ? d.getAudit().getDocumentHash() : null);
+            return pdf;
         }
         return renderDebit(note);
     }

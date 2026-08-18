@@ -4,6 +4,8 @@ import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
+
 @Entity
 @Table(name = "supplier")
 @Getter
@@ -58,6 +60,43 @@ public class Supplier extends ShopAwareEntity {
 
     @Column(name = "country", length = 80)
     private String country = "IN";
+
+    // ─── V103 — lifecycle + AP terms ─────────────────────────────────
+    /** Soft on/off. Suppliers are never physically deleted once they carry
+     *  posted transactions — flip active=false to hide them from new-doc
+     *  pickers while preserving historical references. */
+    @Column(name = "active", nullable = false)
+    private Boolean active = Boolean.TRUE;
+
+    /** Default net-N payment terms (in days). Feeds PO due-date and aging. */
+    @Column(name = "credit_days")
+    private Integer creditDays;
+
+    /** Max outstanding payable we're willing to carry against this supplier. */
+    @Column(name = "credit_limit", precision = 14, scale = 2)
+    private BigDecimal creditLimit;
+
+    /** Free-text override — e.g. "50% advance, 50% NET30". */
+    @Column(name = "payment_terms", length = 200)
+    private String paymentTerms;
+
+    @Column(name = "notes", columnDefinition = "TEXT")
+    private String notes;
+
+    public Boolean getActive() { return active == null || active; }
+    public void setActive(Boolean active) { this.active = active != null && active; }
+
+    public Integer getCreditDays() { return creditDays; }
+    public void setCreditDays(Integer creditDays) { this.creditDays = creditDays; }
+
+    public BigDecimal getCreditLimit() { return creditLimit; }
+    public void setCreditLimit(BigDecimal creditLimit) { this.creditLimit = creditLimit; }
+
+    public String getPaymentTerms() { return paymentTerms; }
+    public void setPaymentTerms(String paymentTerms) { this.paymentTerms = paymentTerms; }
+
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
 
     public String getLegalName() { return legalName != null ? legalName : name; }
     public void setLegalName(String legalName) { this.legalName = legalName; }

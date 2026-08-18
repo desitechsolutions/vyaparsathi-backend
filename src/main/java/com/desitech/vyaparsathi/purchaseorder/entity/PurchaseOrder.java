@@ -241,6 +241,25 @@ public class PurchaseOrder extends ShopAwareEntity {
     @Column(name = "recurring_parent_id")
     private Long recurringParentId;
 
+    // ─── V99 statutory GST columns ───────────────────────────────────
+    @Column(name = "place_of_supply_state", length = 120)
+    private String placeOfSupplyState;
+
+    @Column(name = "place_of_supply_state_code", length = 2)
+    private String placeOfSupplyStateCode;
+
+    @Column(name = "supply_type", length = 30)
+    private String supplyType;
+
+    @Column(name = "reverse_charge", nullable = false)
+    private Boolean reverseCharge = Boolean.FALSE;
+
+    @Column(name = "bill_to_party_snapshot", columnDefinition = "TEXT")
+    private String billToPartySnapshot;
+
+    @Column(name = "ship_to_party_snapshot", columnDefinition = "TEXT")
+    private String shipToPartySnapshot;
+
     public String getCurrencyCode() { return currencyCode; }
     public void setCurrencyCode(String currencyCode) { this.currencyCode = currencyCode; }
 
@@ -270,4 +289,22 @@ public class PurchaseOrder extends ShopAwareEntity {
 
     public Long getClosedBy() { return closedBy; }
     public void setClosedBy(Long closedBy) { this.closedBy = closedBy; }
+
+    public String getPlaceOfSupplyState() { return placeOfSupplyState; }
+    public void setPlaceOfSupplyState(String placeOfSupplyState) { this.placeOfSupplyState = placeOfSupplyState; }
+
+    public String getPlaceOfSupplyStateCode() { return placeOfSupplyStateCode; }
+    public void setPlaceOfSupplyStateCode(String placeOfSupplyStateCode) { this.placeOfSupplyStateCode = placeOfSupplyStateCode; }
+
+    public String getSupplyType() { return supplyType; }
+    public void setSupplyType(String supplyType) { this.supplyType = supplyType; }
+
+    public Boolean getReverseCharge() { return reverseCharge; }
+    public void setReverseCharge(Boolean reverseCharge) { this.reverseCharge = reverseCharge != null && reverseCharge; }
+
+    public String getBillToPartySnapshot() { return billToPartySnapshot; }
+    public void setBillToPartySnapshot(String billToPartySnapshot) { this.billToPartySnapshot = billToPartySnapshot; }
+
+    public String getShipToPartySnapshot() { return shipToPartySnapshot; }
+    public void setShipToPartySnapshot(String shipToPartySnapshot) { this.shipToPartySnapshot = shipToPartySnapshot; }
 }

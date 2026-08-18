@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.document.mapper;
 
 import com.desitech.vyaparsathi.common.enums.DocumentType;
+import com.desitech.vyaparsathi.common.enums.SupplyType;
 import com.desitech.vyaparsathi.common.util.AmountInWordsIndian;
 import com.desitech.vyaparsathi.document.dto.DocumentAuditDto;
 import com.desitech.vyaparsathi.document.dto.EnterpriseDocumentDto;
@@ -43,6 +44,16 @@ public class PurchaseOrderDocumentMapper {
 
         d.setIssuer(partyMapper.fromShop(po.getShop()));
         d.setCounterparty(partyMapper.fromSupplier(po.getSupplier()));
+
+        // V99 statutory fields — feed the PDF renderer so the same
+        // presentation the SaleDocumentMapper produces (PoS, RCM, supply
+        // type, address snapshots) also lands on outward-facing POs.
+        d.setPlaceOfSupplyState(po.getPlaceOfSupplyState());
+        d.setPlaceOfSupplyStateCode(po.getPlaceOfSupplyStateCode());
+        d.setSupplyType(SupplyType.fromString(po.getSupplyType()));
+        d.setReverseCharge(Boolean.TRUE.equals(po.getReverseCharge()));
+        d.setBillToAddress(po.getBillToPartySnapshot());
+        d.setShipToAddress(po.getShipToPartySnapshot());
 
         if (po.getExpectedDeliveryDate() != null)
             d.setExpectedDeliveryDate(po.getExpectedDeliveryDate().toLocalDate());

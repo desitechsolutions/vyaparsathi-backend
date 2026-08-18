@@ -6,12 +6,15 @@ import com.desitech.vyaparsathi.customer.entity.Customer;
 import com.desitech.vyaparsathi.delivery.entity.Delivery;
 import com.desitech.vyaparsathi.delivery.entity.DeliveryItem;
 import com.desitech.vyaparsathi.delivery.repository.DeliveryRepository;
+import com.desitech.vyaparsathi.document.mapper.DeliveryDocumentMapper;
+import com.desitech.vyaparsathi.document.render.EnterpriseDocumentRenderer;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.invoice.service.InvoicePageEvent;
 import com.desitech.vyaparsathi.invoice.utils.InvoiceUtil;
 import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.entity.SaleItem;
 import com.desitech.vyaparsathi.shop.entity.Shop;
+import org.springframework.beans.factory.annotation.Value;
 import com.lowagie.text.*;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
@@ -60,14 +63,28 @@ public class DeliveryChallanPdfService {
 
     private final DeliveryRepository deliveryRepo;
     private final DeliveryChallanNumberService numberService;
+    private final DeliveryDocumentMapper deliveryDocumentMapper;
+    private final EnterpriseDocumentRenderer enterpriseRenderer;
 
     @Autowired
     private InvoiceUtil invoiceUtil;
 
+    @Autowired
+    private com.desitech.vyaparsathi.document.service.DocumentPrintAuditService printAuditService;
+
+    /** Feature flag matching the other doc suites — flip false to fall
+     *  back to the legacy renderer preserved below as {@link #render(Delivery)}. */
+    @Value("${delivery-challan.enterprise-pdf.enabled:true}")
+    private boolean enterprisePdfEnabled;
+
     public DeliveryChallanPdfService(DeliveryRepository deliveryRepo,
-                                     DeliveryChallanNumberService numberService) {
+                                     DeliveryChallanNumberService numberService,
+                                     DeliveryDocumentMapper deliveryDocumentMapper,
+                                     EnterpriseDocumentRenderer enterpriseRenderer) {
         this.deliveryRepo = deliveryRepo;
         this.numberService = numberService;
+        this.deliveryDocumentMapper = deliveryDocumentMapper;
+        this.enterpriseRenderer = enterpriseRenderer;
     }
 
     /**
@@ -87,6 +104,21 @@ public class DeliveryChallanPdfService {
             logger.info("Lazy-assigned challan number {} to delivery id={}", no, deliveryId);
         }
 
+        if (enterprisePdfEnabled) {
+            try {
+                com.desitech.vyaparsathi.document.dto.EnterpriseDocumentDto doc =
+                        deliveryDocumentMapper.map(d);
+                byte[] pdf = enterpriseRenderer.render(doc);
+                printAuditService.recordPrint(doc.getDocumentType(), d.getId(),
+                        d.getChallanNo(),
+                        doc.getAudit() != null ? doc.getAudit().getDocumentHash() : null);
+                return pdf;
+            } catch (RuntimeException e) {
+                logger.warn("Enterprise Delivery Challan renderer failed for id={} — falling back to legacy.", deliveryId, e);
+                // Fall through to legacy on any renderer failure so users
+                // never see a broken PDF endpoint.
+            }
+        }
         return render(d);
     }
 

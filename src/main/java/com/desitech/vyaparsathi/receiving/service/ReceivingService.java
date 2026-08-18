@@ -164,6 +164,7 @@ public class ReceivingService {
         receiving.setSupplierInvoiceDate(receivingDto.getSupplierInvoiceDate());
         receiving.setVehicleNo(receivingDto.getVehicleNo());
         receiving.setDeliveryChallanNo(receivingDto.getDeliveryChallanNo());
+        applyStatutoryFields(receiving, receivingDto);
 
         // Process detailed items with validation
         List<ReceivingItem> receivingItems = processReceivingItems(receivingDto.getReceivingItems(), receiving, true);
@@ -201,6 +202,7 @@ public class ReceivingService {
                     existingReceiving.setSupplierInvoiceDate(receivingDto.getSupplierInvoiceDate());
                     existingReceiving.setVehicleNo(receivingDto.getVehicleNo());
                     existingReceiving.setDeliveryChallanNo(receivingDto.getDeliveryChallanNo());
+                    applyStatutoryFields(existingReceiving, receivingDto);
 
                     // Process items with update logic (add/remove/update)
                     List<ReceivingItem> updatedItems = processReceivingItems(receivingDto.getReceivingItems(), existingReceiving, false);
@@ -1138,5 +1140,38 @@ public class ReceivingService {
         ticket.setResolvedAt(LocalDateTime.now());
         ticket.setResolutionNote(note);
         return receivingTicketRepository.save(ticket);
+    }
+
+    /**
+     * V99 statutory-field copy — shared by create + update paths. Splits
+     * "27-Maharashtra"-style PoS into state / state-code and stamps supply
+     * type / reverse charge / address snapshots. All fields are optional;
+     * absent fields on the DTO leave the entity's values untouched.
+     */
+    private static void applyStatutoryFields(Receiving r, CreateReceivingDto dto) {
+        applyStatutoryFields(r, dto.getPlaceOfSupply(), dto.getSupplyType(),
+                dto.getReverseCharge(), dto.getBillToAddress(), dto.getShipToAddress());
+    }
+
+    private static void applyStatutoryFields(Receiving r, ReceivingDto dto) {
+        applyStatutoryFields(r, dto.getPlaceOfSupply(), dto.getSupplyType(),
+                dto.getReverseCharge(), dto.getBillToAddress(), dto.getShipToAddress());
+    }
+
+    private static void applyStatutoryFields(Receiving r, String pos, String supplyType,
+                                             Boolean reverseCharge, String billTo, String shipTo) {
+        if (pos != null && !pos.isBlank()) {
+            String[] parts = pos.split("-", 2);
+            if (parts.length == 2 && parts[0].matches("\\d{2}")) {
+                r.setPlaceOfSupplyStateCode(parts[0]);
+                r.setPlaceOfSupplyState(parts[1].trim());
+            } else {
+                r.setPlaceOfSupplyState(pos);
+            }
+        }
+        if (supplyType    != null) r.setSupplyType(supplyType);
+        if (reverseCharge != null) r.setReverseCharge(reverseCharge);
+        if (billTo        != null) r.setBillToPartySnapshot(billTo);
+        if (shipTo        != null) r.setShipToPartySnapshot(shipTo);
     }
 }

@@ -20,7 +20,15 @@ public class ItemVariantDto {
     // ── Core variant identity ─────────────────────────────────────────
     private Long id;
 
-    @NotBlank(message = "SKU is required")
+    /**
+     * SKU. Optional on the wire — {@link
+     * com.desitech.vyaparsathi.inventory.service.ItemService#assignHsnAndSkuCodes}
+     * auto-generates one from the item's category + brand + variant axes
+     * when the client submits it blank. The DB column stays {@code NOT
+     * NULL UNIQUE}; the service is the one making sure that contract is
+     * met. Do NOT put {@code @NotBlank} back on this field — it would
+     * short-circuit Spring bean validation before the auto-gen ever runs.
+     */
     @Size(max = 100)
     private String sku;
 

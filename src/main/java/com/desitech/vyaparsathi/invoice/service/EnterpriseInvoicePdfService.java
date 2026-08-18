@@ -1,9 +1,11 @@
 package com.desitech.vyaparsathi.invoice.service;
 
+import com.desitech.vyaparsathi.common.enums.DocumentType;
 import com.desitech.vyaparsathi.common.exception.ExportAppException;
 import com.desitech.vyaparsathi.document.dto.EnterpriseDocumentDto;
 import com.desitech.vyaparsathi.document.mapper.SaleDocumentMapper;
 import com.desitech.vyaparsathi.document.render.EnterpriseDocumentRenderer;
+import com.desitech.vyaparsathi.document.service.DocumentPrintAuditService;
 import com.desitech.vyaparsathi.invoice.utils.InvoiceUtil;
 import com.desitech.vyaparsathi.payment.service.PaymentService;
 import com.desitech.vyaparsathi.sales.entity.Sale;
@@ -32,15 +34,18 @@ public class EnterpriseInvoicePdfService {
     private final SaleDocumentMapper mapper;
     private final PaymentService paymentService;
     private final InvoiceUtil invoiceUtil;
+    private final DocumentPrintAuditService printAuditService;
 
     public EnterpriseInvoicePdfService(EnterpriseDocumentRenderer renderer,
                                        SaleDocumentMapper mapper,
                                        PaymentService paymentService,
-                                       InvoiceUtil invoiceUtil) {
+                                       InvoiceUtil invoiceUtil,
+                                       DocumentPrintAuditService printAuditService) {
         this.renderer = renderer;
         this.mapper = mapper;
         this.paymentService = paymentService;
         this.invoiceUtil = invoiceUtil;
+        this.printAuditService = printAuditService;
     }
 
     public byte[] generate(Sale sale) {
@@ -56,7 +61,13 @@ public class EnterpriseInvoicePdfService {
             if (sale.getShop() != null && sale.getShop().getSignaturePath() != null) {
                 doc.setSignatureBytes(invoiceUtil.loadImageBytes(sale.getShop().getSignaturePath(), "signature"));
             }
-            return renderer.render(doc);
+            byte[] pdf = renderer.render(doc);
+            Long shopId = (sale.getShop() != null) ? sale.getShop().getId() : null;
+            printAuditService.recordPrint(doc.getDocumentType(), sale.getId(),
+                    sale.getInvoiceNo(),
+                    doc.getAudit() != null ? doc.getAudit().getDocumentHash() : null,
+                    shopId);
+            return pdf;
         } catch (Exception e) {
             log.error("EnterpriseInvoicePdfService failed for sale {}", sale.getId(), e);
             throw new ExportAppException("Failed to generate enterprise invoice PDF for sale " + sale.getId(), e);

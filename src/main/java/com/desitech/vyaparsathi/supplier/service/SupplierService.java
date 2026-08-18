@@ -41,13 +41,41 @@ public class SupplierService {
     public SupplierDto updateSupplier(Long id, SupplierDto dto) {
         Supplier supplier = supplierRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Supplier not found"));
-        // Update fields
+        // Basic contact + identity
         supplier.setName(dto.getName());
         supplier.setContactPerson(dto.getContactPerson());
         supplier.setPhone(dto.getPhone());
         supplier.setEmail(dto.getEmail());
         supplier.setAddress(dto.getAddress());
         supplier.setGstin(dto.getGstin());
+        if (dto.getStateCode() != null) supplier.setStateCode(dto.getStateCode());
+        // V99 statutory identity — nullable, apply only when provided
+        if (dto.getLegalName() != null) supplier.setLegalName(dto.getLegalName());
+        if (dto.getTradeName() != null) supplier.setTradeName(dto.getTradeName());
+        if (dto.getPan()       != null) supplier.setPan(dto.getPan());
+        if (dto.getState()     != null) supplier.setState(dto.getState());
+        if (dto.getCity()      != null) supplier.setCity(dto.getCity());
+        if (dto.getPincode()   != null) supplier.setPincode(dto.getPincode());
+        if (dto.getCountry()   != null) supplier.setCountry(dto.getCountry());
+        // V103 lifecycle + terms
+        if (dto.getActive()        != null) supplier.setActive(dto.getActive());
+        if (dto.getCreditDays()    != null) supplier.setCreditDays(dto.getCreditDays());
+        if (dto.getCreditLimit()   != null) supplier.setCreditLimit(dto.getCreditLimit());
+        if (dto.getPaymentTerms()  != null) supplier.setPaymentTerms(dto.getPaymentTerms());
+        if (dto.getNotes()         != null) supplier.setNotes(dto.getNotes());
+        supplierRepository.save(supplier);
+        return mapper.toDto(supplier);
+    }
+
+    /**
+     * Soft-toggle a supplier's {@code active} flag. Suppliers with any posted
+     * transaction should never be hard-deleted — this toggle is what removes
+     * them from the "new PO" / "new PR" pickers while preserving history.
+     */
+    public SupplierDto toggleActive(Long id) {
+        Supplier supplier = supplierRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Supplier not found"));
+        supplier.setActive(!Boolean.TRUE.equals(supplier.getActive()));
         supplierRepository.save(supplier);
         return mapper.toDto(supplier);
     }

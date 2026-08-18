@@ -20,6 +20,7 @@ public interface UserRepository extends BaseRepository<User, Long> {
     Optional<User> findByEmail(String email);
     Optional<User> findByUsernameAndShop_Id(String username, Long shopId);
     Optional<User> findFirstByShopOrderByCreatedAtAsc(Shop shop);
+    Optional<User> findByEmailVerificationTokenHash(String tokenHash);
 
     List<User> findByShopId(Long shopId);
 }

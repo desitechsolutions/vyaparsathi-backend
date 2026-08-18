@@ -30,13 +30,14 @@ public class PaymentController {
         private PaymentService paymentService;
 
         @PostMapping
-        @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+        @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("PAYMENT_RECORD")
         public ResponseEntity<PaymentDto> createPayment(@RequestBody PaymentDto paymentDto) {
                 PaymentDto saved = paymentService.createPayment(paymentDto);
                 return ResponseEntity.ok(saved);
         }
 
         @GetMapping
+        @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("PAYMENT_VIEW")
         public ResponseEntity<Page<PaymentDto>> getPayments(
                 @RequestParam(required = false) PaymentSourceType sourceType,
                 @RequestParam(required = false) Long sourceId,
@@ -59,6 +60,7 @@ public class PaymentController {
         }
 
         @GetMapping("/{id}")
+        @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("PAYMENT_VIEW")
         public ResponseEntity<PaymentDto> getPayment(@PathVariable Long id) {
                 return paymentService.getPayment(id)
                         .map(ResponseEntity::ok)
@@ -66,7 +68,7 @@ public class PaymentController {
         }
 
         @PostMapping("/record")
-        @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+        @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("PAYMENT_RECORD")
         public ResponseEntity<ApiResponse<PaymentResponse>> recordPayment(
                 @Valid @RequestBody PaymentReceivedRequest request) {
                 try {
@@ -96,7 +98,7 @@ public class PaymentController {
         }
 
         @PostMapping("/record-batch")
-        @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+        @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("PAYMENT_RECORD")
         public ResponseEntity<ApiResponse<List<PaymentResponse>>> recordPaymentsBatch(
                 @Valid @RequestBody List<PaymentReceivedRequest> requests) {
                 List<PaymentResponse> responses = new ArrayList<>();
@@ -124,7 +126,7 @@ public class PaymentController {
         }
 
         @PostMapping("/bulk")
-        @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
+        @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("PAYMENT_RECORD")
         public ResponseEntity<ApiResponse<Void>> recordBulkPayment(
                 @Valid @RequestBody BulkPaymentRequest request) {
                 try {

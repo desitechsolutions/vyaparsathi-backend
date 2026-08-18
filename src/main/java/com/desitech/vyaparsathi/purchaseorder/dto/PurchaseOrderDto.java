@@ -61,6 +61,18 @@ public class PurchaseOrderDto {
     private String rejectedByName;
     private String submittedByName;
 
+    // ─── V99 statutory GST fields ─────────────────────────────────────
+    /** "27-Maharashtra"-style Place of Supply. Nullable; server falls back
+     *  to supplier / shop state when not provided. */
+    private String placeOfSupply;
+    /** SupplyType enum name — see common.enums.SupplyType. */
+    private String supplyType;
+    /** Reverse-charge PO (§9(3) inward supplies where the shop pays tax). */
+    private Boolean reverseCharge;
+    /** Bill-to / ship-to address snapshots frozen at PO creation. */
+    private String billToAddress;
+    private String shipToAddress;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -147,4 +159,19 @@ public class PurchaseOrderDto {
 
     public String getSubmittedByName() { return submittedByName; }
     public void setSubmittedByName(String submittedByName) { this.submittedByName = submittedByName; }
+
+    public String getPlaceOfSupply() { return placeOfSupply; }
+    public void setPlaceOfSupply(String placeOfSupply) { this.placeOfSupply = placeOfSupply; }
+
+    public String getSupplyType() { return supplyType; }
+    public void setSupplyType(String supplyType) { this.supplyType = supplyType; }
+
+    public Boolean getReverseCharge() { return reverseCharge; }
+    public void setReverseCharge(Boolean reverseCharge) { this.reverseCharge = reverseCharge; }
+
+    public String getBillToAddress() { return billToAddress; }
+    public void setBillToAddress(String billToAddress) { this.billToAddress = billToAddress; }
+
+    public String getShipToAddress() { return shipToAddress; }
+    public void setShipToAddress(String shipToAddress) { this.shipToAddress = shipToAddress; }
 }

@@ -13,6 +13,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.desitech.vyaparsathi.auth.service.AuthService;
+import com.desitech.vyaparsathi.auth.service.RefreshTokenService;
+import com.desitech.vyaparsathi.auth.service.SessionService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -31,6 +34,16 @@ public class AuthController {
 
     private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
 
+    /**
+     * All refresh-token cookies use SameSite=None so cross-origin
+     * withCredentials calls from the SPA work in every browser. `Secure` is
+     * required by browsers when SameSite=None is set. When we introduce
+     * same-origin deployment (Phase 6+), switch to Lax and add a config flag.
+     */
+    private static final String COOKIE_SAME_SITE = "None";
+    private static final String COOKIE_NAME = "refreshToken";
+    private static final Duration REFRESH_COOKIE_TTL = Duration.ofDays(7);
+
     @Autowired
     private AuthService authService;
 
@@ -46,49 +59,77 @@ public class AuthController {
     @Autowired
     private RefreshTokenService refreshTokenService;
 
-    @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody AuthRequest request) {
-        User user = authService.getUserByUsername(request.getUsername());
-        String token = authService.authenticateAndGenerateToken(user, request.getPin());
-        String refreshToken = authService.createRefreshToken(user.getUsername());
+    @Autowired
+    private com.desitech.vyaparsathi.auth.service.EmailVerificationService emailVerificationService;
 
-        logger.info("User login successful: {}", request.getUsername());
+    @Autowired
+    private SessionService sessionService;
 
-        ResponseCookie cookie = ResponseCookie.from("refreshToken", refreshToken)
+    private ResponseCookie buildRefreshCookie(String value, Duration maxAge) {
+        return ResponseCookie.from(COOKIE_NAME, value == null ? "" : value)
                 .httpOnly(true)
                 .secure(true)
                 .path("/")
-                .sameSite("Strict")
-                .maxAge(Duration.ofDays(7))
+                .sameSite(COOKIE_SAME_SITE)
+                .maxAge(maxAge)
                 .build();
+    }
+
+    private ResponseCookie clearRefreshCookie() {
+        return buildRefreshCookie("", Duration.ZERO);
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody AuthRequest request,
+                                              HttpServletRequest httpRequest) {
+        User user = authService.getUserByUsername(request.getUsername());
+
+        // Pre-generate the session identity BEFORE minting the access
+        // token so the `sid` claim points at the same session_id we
+        // then persist on the refresh_token row. This is the join key
+        // between JWT and DB for per-session revocation.
+        RefreshTokenService.SessionMetadata sessionMetadata = sessionService.newSessionMetadata(httpRequest);
+
+        AuthService.LoginOutcome outcome = authService.authenticateForLoginWithSession(
+                user, request.getPassword(), sessionMetadata.getSessionId());
+
+        if (outcome.isMfaRequired()) {
+            // Password checked out, but MFA is enabled — hand the FE a
+            // short-lived challenge token and skip the refresh cookie until
+            // MFA is verified. NOTE: intentionally no refresh cookie here
+            // so a stolen challenge alone can't keep a session alive. The
+            // real session is opened inside MfaController.verify() once
+            // the second factor succeeds.
+            logger.info("Password OK, MFA challenge issued for {}", request.getUsername());
+            return ResponseEntity.ok(AuthResponse.mfaChallenge(outcome.getToken(), user.getRole().name()));
+        }
+
+        String refreshToken = refreshTokenService
+                .createRefreshToken(user.getUsername(), sessionMetadata)
+                .getToken();
+        logger.info("User login successful: {} (session={})", request.getUsername(), sessionMetadata.getSessionId());
 
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .body(new AuthResponse(token, user.getRole().name(), false));
+                .header(HttpHeaders.SET_COOKIE, buildRefreshCookie(refreshToken, REFRESH_COOKIE_TTL).toString())
+                .body(new AuthResponse(outcome.getToken(), user.getRole().name(), false));
     }
 
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request,
+                                                 HttpServletRequest httpRequest) {
         try {
             User user = userManagementService.createInitialUser(request);
 
-            String accessToken = jwtUtil.generateAccessToken(user, null);
+            RefreshTokenService.SessionMetadata sessionMetadata = sessionService.newSessionMetadata(httpRequest);
+            String accessToken = jwtUtil.generateAccessToken(user, null, sessionMetadata.getSessionId());
             logger.info("New user registered: username={}", request.getUsername());
 
             String refreshToken = refreshTokenService
-                    .createRefreshToken(user.getUsername())
+                    .createRefreshToken(user.getUsername(), sessionMetadata)
                     .getToken();
 
-            ResponseCookie cookie = ResponseCookie.from("refreshToken", refreshToken)
-                    .httpOnly(true)
-                    .secure(true)
-                    .path("/")
-                    .sameSite("Strict")
-                    .maxAge(Duration.ofDays(7))
-                    .build();
-
             return ResponseEntity.ok()
-                    .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                    .header(HttpHeaders.SET_COOKIE, buildRefreshCookie(refreshToken, REFRESH_COOKIE_TTL).toString())
                     .body(new AuthResponse(accessToken, user.getRole().name(), true));
 
         } catch (Exception e) {
@@ -96,8 +137,8 @@ public class AuthController {
         }
     }
 
-    @PostMapping("/change-pin")
-    public ResponseEntity<String> changePin(
+    @PostMapping({"/change-pin", "/change-password"})
+    public ResponseEntity<String> changePassword(
             @Valid @RequestBody ChangePinRequest request,
             Authentication authentication) {
 
@@ -106,83 +147,64 @@ public class AuthController {
 
             authService.changeUserPin(
                     username,
-                    request.getCurrentPin(),
-                    request.getNewPin()
+                    request.getCurrentPassword(),
+                    request.getNewPassword()
             );
 
-            // 1️⃣ Invalidate all refresh tokens
-            refreshTokenService.deleteByUsername(username);
-
-            // 2️⃣ Delete cookie
-            ResponseCookie deleteCookie = ResponseCookie.from("refreshToken", "")
-                    .httpOnly(true)
-                    .secure(true)
-                    .path("/")
-                    .sameSite("None")
-                    .maxAge(0) // expire immediately
-                    .build();
-
-            logger.info("PIN changed successfully for user {}", username);
+            logger.info("Password changed successfully for user {}", username);
 
             return ResponseEntity.ok()
-                    .header(HttpHeaders.SET_COOKIE, deleteCookie.toString())
-                    .body("PIN changed successfully. Please log in again.");
+                    .header(HttpHeaders.SET_COOKIE, clearRefreshCookie().toString())
+                    .body("Password changed successfully. Please log in again.");
 
         } catch (Exception e) {
-            logger.error("Failed to change PIN: {}", e.getMessage(), e);
-            throw new ApplicationException("Failed to change PIN", e);
+            logger.error("Failed to change password: {}", e.getMessage(), e);
+            throw new ApplicationException("Failed to change password", e);
         }
     }
 
 
     @PostMapping("/refresh")
     public ResponseEntity<AuthResponse> refreshToken(
-            @CookieValue(name = "refreshToken", required = false) String refreshToken) {
+            @CookieValue(name = COOKIE_NAME, required = false) String refreshToken,
+            HttpServletRequest httpRequest) {
 
         try {
             if (refreshToken == null) {
                 throw new ApplicationException("Refresh token missing");
             }
 
-            // 1. Rotate the token in the DB and get the new Entity
-            RefreshToken newTokenEntity = authService.rotateRefreshToken(refreshToken);
+            // Peek at the outgoing session_id so we can pass it into
+            // both the rotation (preserve identity) and the new access
+            // token (sid claim). rotateRefreshToken preserves session_id
+            // internally regardless, so this is just for the JWT claim.
+            String sessionIdForNewJwt = refreshTokenService.findByToken(refreshToken)
+                    .map(rt -> rt.getSessionId()).orElse(null);
+
+            RefreshTokenService.SessionMetadata refreshedMeta =
+                    sessionService.refreshedMetadata(httpRequest, sessionIdForNewJwt);
+
+            RefreshToken newTokenEntity = authService.rotateRefreshToken(refreshToken, refreshedMeta);
             User user = authService.getUserByUsername(newTokenEntity.getUsername());
 
-            // 2. Generate new Access Token
             String newAccessToken = jwtUtil.generateAccessToken(
                     user,
-                    user.getShop() != null ? user.getShop().getId() : null
+                    user.getShop() != null ? user.getShop().getId() : null,
+                    newTokenEntity.getSessionId()
             );
 
-            // 3. Create the new Secure Cookie
-            ResponseCookie cookie = ResponseCookie.from("refreshToken", newTokenEntity.getToken())
-                    .httpOnly(true)
-                    .secure(true)
-                    .path("/")
-                    .sameSite("None")
-                    .maxAge(Duration.ofDays(7))
-                    .build();
-
-            logger.info("Token rotation successful for user: {}", user.getUsername());
+            logger.info("Token rotation successful for user: {} (session={})",
+                    user.getUsername(), newTokenEntity.getSessionId());
 
             return ResponseEntity.ok()
-                    .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                    .header(HttpHeaders.SET_COOKIE, buildRefreshCookie(newTokenEntity.getToken(), REFRESH_COOKIE_TTL).toString())
                     .body(new AuthResponse(newAccessToken, user.getRole().name(), false));
 
         } catch (Exception e) {
             logger.error("Refresh failed: {}", e.getMessage());
 
-            // Clear cookie on failure to stop the frontend from retrying a bad token
-            ResponseCookie clearCookie = ResponseCookie.from("refreshToken", "")
-                    .httpOnly(true)
-                    .secure(true)
-                    .path("/")
-                    .sameSite("None")
-                    .maxAge(0)
-                    .build();
-
             return ResponseEntity.status(401)
-                    .header(HttpHeaders.SET_COOKIE, clearCookie.toString())
+                    .header(HttpHeaders.SET_COOKIE, clearRefreshCookie().toString())
                     .build();
         }
     }
@@ -228,8 +250,7 @@ public class AuthController {
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-            logger.error("Error resetting password with token: {}",
-                    resetPasswordRequest.getToken(), e);
+            logger.error("Error resetting password", e);
 
             return ResponseEntity.badRequest()
                     .body(new ApiResponse<>("error", e.getMessage(), null));
@@ -240,8 +261,7 @@ public class AuthController {
     public ResponseEntity<Map<String, Boolean>> validateResetToken(
             @RequestBody ResetTokenRequest resetTokenRequest) {
 
-        logger.info("Received validation request for token: {}",
-                resetTokenRequest != null ? resetTokenRequest.getToken() : "NULL REQUEST");
+        logger.info("Received validation request for reset token");
 
         try {
             assert resetTokenRequest != null;
@@ -254,8 +274,7 @@ public class AuthController {
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-            logger.error("Error validating reset token: {}",
-                    resetTokenRequest.getToken(), e);
+            logger.error("Error validating reset token", e);
 
             Map<String, Boolean> response = new HashMap<>();
             response.put("valid", false);
@@ -263,25 +282,53 @@ public class AuthController {
             return ResponseEntity.badRequest().body(response);
         }
     }
+
     @PostMapping("/logout")
     public ResponseEntity<?> logout(
-            @CookieValue(name = "refreshToken", required = false) String refreshToken) {
+            @CookieValue(name = COOKIE_NAME, required = false) String refreshToken) {
 
-        if (refreshToken != null) {
-            refreshTokenService.deleteByToken(refreshToken);
-        }
-
-        ResponseCookie cookie = ResponseCookie.from("refreshToken", "")
-                .httpOnly(true)
-                .secure(true)
-                .path("/")
-                .sameSite("None")
-                .maxAge(0)
-                .build();
+        authService.logout(refreshToken);
 
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                .header(HttpHeaders.SET_COOKIE, clearRefreshCookie().toString())
                 .body("Logged out successfully");
+    }
+
+    /**
+     * Confirms an email-verification token emailed at registration time.
+     * Response is idempotent — a second visit still returns success once
+     * the account has been verified.
+     */
+    @PostMapping("/verify-email")
+    public ResponseEntity<ApiResponse<String>> verifyEmail(@RequestBody Map<String, String> body) {
+        String token = body != null ? body.get("token") : null;
+        try {
+            emailVerificationService.verifyToken(token);
+            return ResponseEntity.ok(new ApiResponse<>("success", "Email verified successfully.", null));
+        } catch (Exception e) {
+            logger.warn("Email verification failed: {}", e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body(new ApiResponse<>("error", e.getMessage(), null));
+        }
+    }
+
+    /**
+     * Re-sends a verification email for the given address. The response is
+     * intentionally identical whether or not the email exists, to avoid
+     * enumerating users.
+     */
+    @PostMapping("/resend-verification")
+    public ResponseEntity<ApiResponse<String>> resendVerification(@RequestBody Map<String, String> body) {
+        String email = body != null ? body.get("email") : null;
+        try {
+            emailVerificationService.resendForEmail(email);
+        } catch (Exception e) {
+            logger.warn("Resend verification error (silently ignored to avoid enumeration): {}", e.getMessage());
+        }
+        return ResponseEntity.ok(new ApiResponse<>(
+                "success",
+                "If this email is registered and unverified, a new verification link is on its way.",
+                null));
     }
 
 }

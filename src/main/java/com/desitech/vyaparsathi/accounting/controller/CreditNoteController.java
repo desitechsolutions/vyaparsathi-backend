@@ -94,8 +94,29 @@ public class CreditNoteController {
     @PreAuthorize("permitAll()")   // access is gated by the JWT, not by session
     public ResponseEntity<?> getSignedPdf(@RequestParam String token,
                                           @RequestParam(defaultValue = "false") boolean download) {
+        CreditNoteTokenData data;
         try {
-            CreditNoteTokenData data = jwtUtil.validateCreditNoteToken(token);
+            data = jwtUtil.validateCreditNoteToken(token);
+        } catch (Exception e) {
+            logger.warn("Invalid or expired credit note token", e);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("Invalid or expired access");
+        }
+
+        // Populate TenantContext from the credit note's own shop_id. The
+        // signed-URL path is @PermitAll (JWT-in-URL is the credential), so
+        // there is no session-derived tenant. Without this, any shop-scoped
+        // query in the PDF pipeline — including the print-audit write —
+        // rejects at the ShopEntityListener.
+        Long previousShopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        try {
+            CreditNote note = creditRepo.findById(data.getCreditNoteId())
+                    .orElseThrow(() -> new EntityNotFoundAppException("Credit Note", data.getCreditNoteId()));
+            if (note.getShop() != null && note.getShop().getId() != null) {
+                com.desitech.vyaparsathi.common.configs.TenantContext.setCurrentShopId(note.getShop().getId());
+            }
+
             byte[] pdf = notePdfService.generateCreditNotePdf(data.getCreditNoteId());
             String filename = "credit_note_" + (data.getCreditNoteNo() != null
                     ? data.getCreditNoteNo().replace('/', '_') : data.getCreditNoteId()) + ".pdf";
@@ -108,10 +129,20 @@ public class CreditNoteController {
             headers.set(HttpHeaders.CONTENT_DISPOSITION, disposition + "; filename=\"" + filename + "\"");
             return new ResponseEntity<>(pdf, headers, HttpStatus.OK);
         } catch (Exception e) {
-            logger.error("Invalid or expired credit note token", e);
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+            // Token was valid — this is a PDF generation failure. Log the
+            // real cause so we don't misdiagnose it as a token issue.
+            logger.error("Credit note PDF generation failed for id={}", data.getCreditNoteId(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .contentType(MediaType.TEXT_PLAIN)
-                    .body("Invalid or expired access");
+                    .body("Failed to generate credit note PDF");
+        } finally {
+            // Restore original (usually null) so we don't leak tenant state
+            // to the next request that reuses this thread.
+            if (previousShopId != null) {
+                com.desitech.vyaparsathi.common.configs.TenantContext.setCurrentShopId(previousShopId);
+            } else {
+                com.desitech.vyaparsathi.common.configs.TenantContext.clear();
+            }
         }
     }
 
@@ -169,5 +200,111 @@ public class CreditNoteController {
         dto.setAppliedAmount(note.getAppliedAmount());
         dto.setStatus(note.getStatus().name());
         return ResponseEntity.ok(new ApiResponse<>("success", "Credit Note applied", dto));
+    }
+
+    // ── V101 enterprise endpoints — get one, allocate, refund, reverse, cancel ──
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.desitech.vyaparsathi.accounting.service.CreditNoteAllocationService allocationService;
+
+    /** Full detail — used by the enterprise CreditNoteDetailPage. Returns a flat
+     *  map so we don't have to grow CreditNoteDto for read-only aggregate fields
+     *  (outstanding, reasonCode, restockItems, refunded, links). */
+    @GetMapping("/{id}")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getOne(@PathVariable Long id) {
+        CreditNote n = creditRepo.findById(id)
+                .orElseThrow(() -> new EntityNotFoundAppException("Credit Note", id));
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("id", n.getId());
+        m.put("creditNoteNo", n.getCreditNoteNo());
+        m.put("creditNoteDate", n.getCreditNoteDate());
+        m.put("reason", n.getReason());
+        m.put("reasonCode", n.getReasonCode() != null ? n.getReasonCode().name() : null);
+        m.put("restockItems", Boolean.TRUE.equals(n.getRestockItems()));
+        m.put("refunded", Boolean.TRUE.equals(n.getRefunded()));
+        m.put("taxableAmount", n.getTaxableAmount());
+        m.put("cgstAmount", n.getCgstAmount());
+        m.put("sgstAmount", n.getSgstAmount());
+        m.put("igstAmount", n.getIgstAmount());
+        m.put("totalAmount", n.getTotalAmount());
+        m.put("appliedAmount", n.getAppliedAmount());
+        m.put("outstanding", n.getOutstandingAmount());
+        m.put("status", n.getStatus() != null ? n.getStatus().name() : null);
+        m.put("notes", n.getNotes());
+        if (n.getCustomer() != null) {
+            Map<String, Object> c = new java.util.LinkedHashMap<>();
+            c.put("id", n.getCustomer().getId());
+            c.put("name", n.getCustomer().getName());
+            c.put("phone", n.getCustomer().getPhone());
+            c.put("email", n.getCustomer().getEmail());
+            c.put("gstin", n.getCustomer().getGstNumber());
+            c.put("addressLine1", n.getCustomer().getAddressLine1());
+            m.put("customer", c);
+        }
+        if (n.getSale() != null) {
+            m.put("saleId", n.getSale().getId());
+            m.put("invoiceNo", n.getSale().getInvoiceNo());
+            m.put("invoiceDate", n.getSale().getDate());
+        }
+        return ResponseEntity.ok(new ApiResponse<>("success", "Credit Note", m));
+    }
+
+    /** Apply remaining credit against a customer's unpaid sale. */
+    @PostMapping("/{id}/allocate")
+    public ResponseEntity<ApiResponse<com.desitech.vyaparsathi.accounting.entity.CreditNoteAllocation>> allocate(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        Long saleId = body.get("saleId") != null ? Long.valueOf(body.get("saleId").toString()) : null;
+        BigDecimal amount = new BigDecimal(String.valueOf(body.get("amount")));
+        String note = body.get("note") != null ? body.get("note").toString() : null;
+        String user = principal != null ? principal.getUsername() : "system";
+        var row = allocationService.applyToInvoice(id, saleId, amount, user, note);
+        return ResponseEntity.ok(new ApiResponse<>("success", "Allocated", row));
+    }
+
+    /** Record a cash/bank refund payout for the remaining credit. */
+    @PostMapping("/{id}/refund")
+    public ResponseEntity<ApiResponse<com.desitech.vyaparsathi.accounting.entity.CreditNoteAllocation>> refund(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        BigDecimal amount = new BigDecimal(String.valueOf(body.get("amount")));
+        String mode = body.get("paymentMode") != null ? body.get("paymentMode").toString() : "CASH";
+        String ref  = body.get("paymentReference") != null ? body.get("paymentReference").toString() : null;
+        String note = body.get("note") != null ? body.get("note").toString() : null;
+        String user = principal != null ? principal.getUsername() : "system";
+        var row = allocationService.recordRefund(id, amount, mode, ref, user, note);
+        return ResponseEntity.ok(new ApiResponse<>("success", "Refund recorded", row));
+    }
+
+    @GetMapping("/{id}/allocations")
+    public ResponseEntity<ApiResponse<java.util.List<com.desitech.vyaparsathi.accounting.entity.CreditNoteAllocation>>> listAllocations(
+            @PathVariable Long id) {
+        return ResponseEntity.ok(new ApiResponse<>("success", "Allocations",
+                allocationService.listAllocations(id)));
+    }
+
+    @PostMapping("/allocations/{allocId}/reverse")
+    public ResponseEntity<ApiResponse<com.desitech.vyaparsathi.accounting.entity.CreditNoteAllocation>> reverse(
+            @PathVariable Long allocId,
+            @RequestBody(required = false) Map<String, String> body,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+                com.desitech.vyaparsathi.auth.security.CustomUserDetails principal) {
+        String note = body != null ? body.get("note") : null;
+        String user = principal != null ? principal.getUsername() : "system";
+        return ResponseEntity.ok(new ApiResponse<>("success", "Reversed",
+                allocationService.reverse(allocId, user, note)));
+    }
+
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<ApiResponse<CreditNote>> cancel(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> body) {
+        String note = body != null ? body.get("note") : null;
+        return ResponseEntity.ok(new ApiResponse<>("success", "Cancelled",
+                allocationService.cancel(id, note)));
     }
 }

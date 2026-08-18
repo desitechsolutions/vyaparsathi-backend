@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.purchasereturn.service;
 
 import com.desitech.vyaparsathi.accounting.entity.DebitNote;
+import com.desitech.vyaparsathi.accounting.repository.DebitNoteRepository;
 import com.desitech.vyaparsathi.accounting.service.DebitNoteService;
 import com.desitech.vyaparsathi.common.annotations.LogAudit;
 import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
@@ -84,6 +85,9 @@ public class PurchaseReturnService {
     // 1.6: Auto-issue a formal DebitNote document (with number, items, status) on approve
     @Autowired
     private DebitNoteService debitNoteService;
+
+    @Autowired
+    private DebitNoteRepository debitNoteRepository;
 
     @Transactional
     public PurchaseReturnDto createPurchaseReturn(CreatePurchaseReturnDto dto) {
@@ -192,6 +196,51 @@ public class PurchaseReturnService {
                 updated.getReturnNo(), updated.getId(), debitNote.getDebitNoteNo());
 
         return purchaseReturnMapper.toDto(updated);
+    }
+
+    /**
+     * Idempotently issues a Debit Note for an already-APPROVED Purchase Return
+     * that doesn't have one yet. Solves two problems:
+     *
+     * <ol>
+     *   <li>Historical PRs that were approved before the auto-DN hook existed
+     *       (or were approved when the DN save silently rolled back) — they
+     *       sit in APPROVED status with no supplier-side document.</li>
+     *   <li>Retry-after-failure — if the ledger post fails on approve,
+     *       operators can retry DN issuance without going through the
+     *       "already approved" guard.</li>
+     * </ol>
+     *
+     * <p>Returns the existing DN if one is already linked. Rejects only when
+     * the PR isn't in APPROVED status (drafts must go through approve, not
+     * this retro path).
+     */
+    @Transactional
+    @LogAudit(action = "ISSUE_DEBIT_NOTE_FOR_APPROVED_PR", entity = "PURCHASE_RETURN")
+    public DebitNote issueDebitNoteForApprovedReturn(Long purchaseReturnId) {
+        PurchaseReturn pr = purchaseReturnRepository.findById(purchaseReturnId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Purchase Return not found with ID: " + purchaseReturnId));
+
+        if (pr.getStatus() != PurchaseReturnStatus.APPROVED) {
+            throw new BusinessValidationException(
+                    "Debit note can only be issued for an APPROVED Purchase Return. Current status: "
+                    + pr.getStatus());
+        }
+
+        java.util.List<DebitNote> existing = debitNoteRepository
+                .findByPurchaseReturnIdOrderByIdDesc(purchaseReturnId);
+        if (existing != null && !existing.isEmpty()) {
+            DebitNote dn = existing.get(0);
+            logger.info("Debit note {} already exists for PR {} — returning existing",
+                    dn.getDebitNoteNo(), pr.getReturnNo());
+            return dn;
+        }
+
+        DebitNote created = debitNoteService.createFromPurchaseReturn(pr);
+        logger.info("Retroactively issued Debit Note {} for approved PR {}",
+                created.getDebitNoteNo(), pr.getReturnNo());
+        return created;
     }
 
     @Transactional

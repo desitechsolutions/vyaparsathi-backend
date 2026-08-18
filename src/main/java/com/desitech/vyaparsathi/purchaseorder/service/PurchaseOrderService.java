@@ -104,6 +104,7 @@ public class PurchaseOrderService {
         purchaseOrder.setStatus(PurchaseOrderStatus.DRAFT); // always DRAFT on create
         purchaseOrder.setNotes(dto.getNotes());
         purchaseOrder.setFreightCharges(nz(dto.getFreightCharges()));
+        applyStatutoryFields(purchaseOrder, dto);
 
         // Persist the header first so line items can carry the FK.
         PurchaseOrder savedPurchaseOrder = purchaseOrderRepository.save(purchaseOrder);
@@ -205,6 +206,7 @@ public class PurchaseOrderService {
         purchaseOrder.setExpectedDeliveryDate(dto.getExpectedDeliveryDate());
         purchaseOrder.setNotes(dto.getNotes());
         purchaseOrder.setFreightCharges(nz(dto.getFreightCharges()));
+        applyStatutoryFields(purchaseOrder, dto);
         // Do not allow changing status here, always keep as DRAFT until submit
         purchaseOrder.setStatus(PurchaseOrderStatus.DRAFT);
 
@@ -923,6 +925,28 @@ public class PurchaseOrderService {
     /** null-safe BigDecimal: null → ZERO. */
     private static BigDecimal nz(BigDecimal v) {
         return v == null ? BigDecimal.ZERO : v;
+    }
+
+    /**
+     * V99 statutory-field copy — extracted so the create + update paths stay
+     * in sync. Splits "27-Maharashtra"-style PoS into its state + code parts
+     * and stamps the reverse-charge / supply-type / address snapshots.
+     */
+    private static void applyStatutoryFields(PurchaseOrder po, PurchaseOrderDto dto) {
+        String pos = dto.getPlaceOfSupply();
+        if (pos != null && !pos.isBlank()) {
+            String[] parts = pos.split("-", 2);
+            if (parts.length == 2 && parts[0].matches("\\d{2}")) {
+                po.setPlaceOfSupplyStateCode(parts[0]);
+                po.setPlaceOfSupplyState(parts[1].trim());
+            } else {
+                po.setPlaceOfSupplyState(pos);
+            }
+        }
+        if (dto.getSupplyType()    != null) po.setSupplyType(dto.getSupplyType());
+        if (dto.getReverseCharge() != null) po.setReverseCharge(dto.getReverseCharge());
+        if (dto.getBillToAddress() != null) po.setBillToPartySnapshot(dto.getBillToAddress());
+        if (dto.getShipToAddress() != null) po.setShipToPartySnapshot(dto.getShipToAddress());
     }
 
     /**

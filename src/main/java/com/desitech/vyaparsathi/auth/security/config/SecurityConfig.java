@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.auth.security.config;
 
 import com.desitech.vyaparsathi.auth.security.JwtAuthenticationFilter;
+import com.desitech.vyaparsathi.auth.security.RateLimitFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -27,6 +28,9 @@ public class SecurityConfig {
 
     @Autowired
     private JwtAuthenticationFilter jwtAuthenticationFilter;
+
+    @Autowired
+    private RateLimitFilter rateLimitFilter;
 
     @Value("${app.allowed-origins:http://localhost:3000}")
     private String allowedOrigins;
@@ -61,6 +65,10 @@ public class SecurityConfig {
                                 "/api/notifications/public/**",
                                 "/api/newsletter/subscribe",
                                 "/api/newsletter/unsubscribe",
+                                // Shop invitation preview + accept are public so an invitee
+                                // (not yet signed in) can look up + accept via the emailed link.
+                                "/api/shop/invitations/lookup",
+                                "/api/shop/invitations/accept",
                                 "/uploads/**",
                                 "/api/files/**",
                                 // Razorpay server-to-server webhook — must be public (no JWT)
@@ -71,14 +79,23 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // Rate limit BEFORE the JWT filter — attackers hitting /api/auth/** are
+                // by definition unauthenticated, so the check must run at the door.
+                .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
 
+    /**
+     * Password encoder — BCrypt at strength 12.
+     * Enterprise minimum recommended by OWASP is ≥ 10; we run at 12 which
+     * takes ~250ms on a modern CPU per hash. Adjust {@code BCRYPT_STRENGTH}
+     * via env only if you have profiled the auth path.
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+        return new BCryptPasswordEncoder(12);
     }
 
     @Bean

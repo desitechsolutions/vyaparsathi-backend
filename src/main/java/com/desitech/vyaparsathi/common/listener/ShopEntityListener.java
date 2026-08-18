@@ -1,11 +1,13 @@
 package com.desitech.vyaparsathi.common.listener;
 
+import com.desitech.vyaparsathi.audit.entity.AuditLog;
 import com.desitech.vyaparsathi.auth.entity.PasswordResetToken;
 import com.desitech.vyaparsathi.auth.entity.RefreshToken;
-import com.desitech.vyaparsathi.auth.entity.User;  // ← import your User class
+import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.common.util.SpringContext;
+import com.desitech.vyaparsathi.document.entity.DocumentPrintAudit;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PrePersist;
@@ -34,6 +36,25 @@ public class ShopEntityListener {
             if (entity instanceof User || entity instanceof RefreshToken || entity instanceof PasswordResetToken) {
                 log.debug("Skipping shop enforcement for {} (no TenantContext – onboarding/login flow)",
                         entity.getClass().getSimpleName());
+                return;
+            }
+            // AuditLog captures platform-admin (SUPER_ADMIN / TECH_ADMIN /
+            // SUPPORT_AGENT / BILLING_ADMIN) events that legitimately have no
+            // shop context. PENDING_OWNER events are filtered upstream by
+            // AuditAspect, so anything reaching this path is either a
+            // platform admin action or a system-level event. Multi-tenancy
+            // stays intact because ShopFilterAspect scopes tenant queries
+            // by shop_id — a null-shop audit row can only be surfaced
+            // through platform-admin endpoints that bypass the filter.
+            if (entity instanceof AuditLog) {
+                log.debug("Skipping shop enforcement for AuditLog (platform-level event)");
+                return;
+            }
+            // DocumentPrintAudit is a write-once audit log and may be written from
+            // public / signed-URL PDF endpoints where TenantContext is empty.
+            // Silently allow — the shop foreign key is nullable for this table.
+            if (entity instanceof DocumentPrintAudit) {
+                log.debug("Skipping shop enforcement for DocumentPrintAudit (public/signed-URL PDF path)");
                 return;
             }
             if (isSuperAdmin && entity instanceof ShopAwareEntity sae && sae.getShop() != null) {

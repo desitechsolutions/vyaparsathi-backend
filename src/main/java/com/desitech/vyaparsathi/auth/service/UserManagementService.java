@@ -33,6 +33,12 @@ public class UserManagementService {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private PasswordHistoryService passwordHistoryService;
+
+    @Autowired
+    private EmailVerificationService emailVerificationService;
+
     @Transactional
     public UserDto createUser(RegisterRequest request) {
         if (userRepository.findByUsernameAndShop_Id(request.getUsername(), TenantContext.getCurrentShopId()).isPresent()) {
@@ -51,7 +57,7 @@ public class UserManagementService {
         user.setPhone(request.getPhone());
         user.setEmail(request.getEmail());
         user.setUsername(request.getUsername());
-        user.setPinHash(passwordEncoder.encode(request.getPin()));
+        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         user.setRole(request.getRole());
         user.setActive(true);
         if (TenantContext.getCurrentShopId() != null) {
@@ -60,6 +66,12 @@ public class UserManagementService {
             user.setShop(shop);
         }
         User savedUser = userRepository.save(user);
+        passwordHistoryService.recordHash(savedUser.getId(), savedUser.getPasswordHash());
+        // Admin-created accounts get a verification email so the invitee can
+        // confirm they own the address before their first sign-in.
+        if (savedUser.getEmail() != null && !savedUser.getEmail().isBlank()) {
+            emailVerificationService.issueVerificationToken(savedUser);
+        }
         return toUserDto(savedUser);
     }
 
@@ -183,7 +195,7 @@ public class UserManagementService {
         }
         User user = new User();
         user.setUsername(request.getUsername());
-        user.setPinHash(passwordEncoder.encode(request.getPin()));
+        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         user.setFirstName(request.getFirstName());
         user.setLastName(request.getLastName());
         user.setEmail(request.getEmail());
@@ -191,6 +203,15 @@ public class UserManagementService {
         user.setRole(Role.PENDING_OWNER);
         user.setActive(true);
 
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        passwordHistoryService.recordHash(saved.getId(), saved.getPasswordHash());
+        // Self-service registration: send the verification email immediately.
+        // The user's session is still valid; they can complete shop onboarding
+        // in parallel and verify their email at any point before the grace
+        // period (currently unenforced) kicks in.
+        if (saved.getEmail() != null && !saved.getEmail().isBlank()) {
+            emailVerificationService.issueVerificationToken(saved);
+        }
+        return saved;
     }
 }

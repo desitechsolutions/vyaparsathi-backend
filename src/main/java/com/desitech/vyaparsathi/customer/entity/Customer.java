@@ -47,6 +47,90 @@ public class Customer extends ShopAwareEntity {
     @Column(name = "legal_name")
     private String legalName;
 
+    // ─── V104 CRM + lifecycle ─────────────────────────────────────────
+    @Column(name = "active", nullable = false)
+    private Boolean active = Boolean.TRUE;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "customer_type", nullable = false, length = 20)
+    private com.desitech.vyaparsathi.customer.enums.CustomerType customerType =
+            com.desitech.vyaparsathi.customer.enums.CustomerType.INDIVIDUAL;
+
+    /** Default net-N receivable terms in days. */
+    @Column(name = "credit_days")
+    private Integer creditDays;
+
+    /** Max outstanding receivable we'll extend before flagging. */
+    @Column(name = "credit_limit", precision = 14, scale = 2)
+    private BigDecimal creditLimit;
+
+    /** Free-text override — e.g. "COD only", "NET15", "30 days from GRN". */
+    @Column(name = "payment_terms", length = 200)
+    private String paymentTerms;
+
+    /** Comma-separated tags for CRM segmentation. */
+    @Column(name = "tags", length = 500)
+    private String tags;
+
+    /** Display name distinct from legal — e.g. "Acme" vs "Acme Traders Pvt Ltd". */
+    @Column(name = "trade_name")
+    private String tradeName;
+
+    /** Individual customer's birthday — birthday-marketing hook. */
+    @Column(name = "date_of_birth")
+    private java.time.LocalDate dateOfBirth;
+
+    /** Anniversary date (wedding / business incorporation). */
+    @Column(name = "anniversary_date")
+    private java.time.LocalDate anniversaryDate;
+
+    /** Free-text industry for B2B customers. */
+    @Column(name = "industry", length = 100)
+    private String industry;
+
+    /** Where the customer came from — WALK_IN / REFERRAL / ONLINE / MARKETING / OTHER. */
+    @Column(name = "source", length = 30)
+    private String source;
+
+    public Boolean getActive() { return active == null || active; }
+    public void setActive(Boolean active) { this.active = active != null && active; }
+
+    public com.desitech.vyaparsathi.customer.enums.CustomerType getCustomerType() {
+        return customerType == null
+                ? com.desitech.vyaparsathi.customer.enums.CustomerType.INDIVIDUAL
+                : customerType;
+    }
+    public void setCustomerType(com.desitech.vyaparsathi.customer.enums.CustomerType customerType) {
+        this.customerType = customerType;
+    }
+
+    public Integer getCreditDays() { return creditDays; }
+    public void setCreditDays(Integer creditDays) { this.creditDays = creditDays; }
+
+    public BigDecimal getCreditLimit() { return creditLimit; }
+    public void setCreditLimit(BigDecimal creditLimit) { this.creditLimit = creditLimit; }
+
+    public String getPaymentTerms() { return paymentTerms; }
+    public void setPaymentTerms(String paymentTerms) { this.paymentTerms = paymentTerms; }
+
+    public String getTags() { return tags; }
+    public void setTags(String tags) { this.tags = tags; }
+
+    public String getTradeName() { return tradeName != null ? tradeName : name; }
+    public void setTradeName(String tradeName) { this.tradeName = tradeName; }
+
+    public java.time.LocalDate getDateOfBirth() { return dateOfBirth; }
+    public void setDateOfBirth(java.time.LocalDate dateOfBirth) { this.dateOfBirth = dateOfBirth; }
+
+    public java.time.LocalDate getAnniversaryDate() { return anniversaryDate; }
+    public void setAnniversaryDate(java.time.LocalDate anniversaryDate) { this.anniversaryDate = anniversaryDate; }
+
+    public String getIndustry() { return industry; }
+    public void setIndustry(String industry) { this.industry = industry; }
+
+    public String getSource() { return source; }
+    public void setSource(String source) { this.source = source; }
+
     public String getLegalName() { return legalName != null ? legalName : name; }
     public void setLegalName(String legalName) { this.legalName = legalName; }
 

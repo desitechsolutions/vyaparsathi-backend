@@ -119,7 +119,7 @@ public class AdminInvitationService {
         newAdmin.setEmail(invite.getEmail());
         newAdmin.setFirstName(firstName);
         newAdmin.setLastName(lastName);
-        newAdmin.setPinHash(passwordEncoder.encode(password));
+        newAdmin.setPasswordHash(passwordEncoder.encode(password));
         newAdmin.setRole(Role.fromString(invite.getRole()));
         newAdmin.setActive(true);
         newAdmin.setShop(null); // Platform Admin

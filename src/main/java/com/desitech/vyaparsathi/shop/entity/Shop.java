@@ -166,6 +166,17 @@ public class Shop {
     @Column(name = "digital_signing_enabled", nullable = false)
     private Boolean digitalSigningEnabled = Boolean.FALSE;
 
+    /**
+     * When true, OWNER + ADMIN members of this shop must have MFA enabled
+     * on their user account. Enforced by AuthService at login time.
+     * Phase 5 deferred item shipped as part of the Phase 5 polish.
+     */
+    @Column(name = "require_mfa_for_admins", nullable = false)
+    private Boolean requireMfaForAdmins = Boolean.FALSE;
+
+    public Boolean getRequireMfaForAdmins() { return requireMfaForAdmins != null ? requireMfaForAdmins : Boolean.FALSE; }
+    public void setRequireMfaForAdmins(Boolean v) { this.requireMfaForAdmins = v; }
+
     public String getLegalName() { return legalName != null ? legalName : name; }
     public void setLegalName(String legalName) { this.legalName = legalName; }
 

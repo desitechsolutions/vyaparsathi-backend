@@ -59,6 +59,9 @@ public class PurchaseReturnPdfService {
     @Autowired
     private com.desitech.vyaparsathi.document.render.EnterpriseDocumentRenderer enterpriseRenderer;
 
+    @Autowired
+    private com.desitech.vyaparsathi.document.service.DocumentPrintAuditService printAuditService;
+
     @org.springframework.beans.factory.annotation.Value("${purchase-return.enterprise-pdf.enabled:true}")
     private boolean enterprisePdfEnabled;
 
@@ -78,7 +81,11 @@ public class PurchaseReturnPdfService {
             if (r.getShop() != null && r.getShop().getSignaturePath() != null) {
                 d.setSignatureBytes(invoiceUtil.loadImageBytes(r.getShop().getSignaturePath(), "signature"));
             }
-            return enterpriseRenderer.render(d);
+            byte[] pdf = enterpriseRenderer.render(d);
+            printAuditService.recordPrint(d.getDocumentType(), r.getId(),
+                    r.getReturnNo(),
+                    d.getAudit() != null ? d.getAudit().getDocumentHash() : null);
+            return pdf;
         }
         return render(r);
     }

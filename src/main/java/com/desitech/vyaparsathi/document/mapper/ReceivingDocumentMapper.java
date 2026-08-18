@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.document.mapper;
 
 import com.desitech.vyaparsathi.common.enums.DocumentType;
+import com.desitech.vyaparsathi.common.enums.SupplyType;
 import com.desitech.vyaparsathi.document.dto.DocumentAuditDto;
 import com.desitech.vyaparsathi.document.dto.DocumentReferenceDto;
 import com.desitech.vyaparsathi.document.dto.EnterpriseDocumentDto;
@@ -45,6 +46,14 @@ public class ReceivingDocumentMapper {
         if (po != null && po.getSupplier() != null) {
             d.setCounterparty(partyMapper.fromSupplier(po.getSupplier()));
         }
+
+        // V99 statutory pass-through
+        d.setPlaceOfSupplyState(r.getPlaceOfSupplyState());
+        d.setPlaceOfSupplyStateCode(r.getPlaceOfSupplyStateCode());
+        d.setSupplyType(SupplyType.fromString(r.getSupplyType()));
+        d.setReverseCharge(Boolean.TRUE.equals(r.getReverseCharge()));
+        d.setBillToAddress(r.getBillToPartySnapshot());
+        d.setShipToAddress(r.getShipToPartySnapshot());
 
         // Cross-references
         if (po != null) {

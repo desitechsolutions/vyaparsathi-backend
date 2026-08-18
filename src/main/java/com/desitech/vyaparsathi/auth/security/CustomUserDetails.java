@@ -29,7 +29,7 @@ public class CustomUserDetails implements UserDetails {
 
     @Override
     public String getPassword() {
-        return user.getPinHash();
+        return user.getPasswordHash();
     }
 
     @Override

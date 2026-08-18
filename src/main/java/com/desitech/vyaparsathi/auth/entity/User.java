@@ -35,9 +35,9 @@ public class User extends ShopAwareEntity {
     @Column(unique = true, nullable = false, length = 100)
     private String username;
 
-    @NotBlank(message = "PIN hash is required")
-    @Column(nullable = false, length = 255)
-    private String pinHash;
+    @NotBlank(message = "Password hash is required")
+    @Column(name = "password_hash", nullable = false, length = 255)
+    private String passwordHash;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -51,6 +51,26 @@ public class User extends ShopAwareEntity {
 
     @Column
     private LocalDateTime lastPasswordChangeAt;
+
+    /** Consecutive failed-login counter. Reset to 0 on successful auth. */
+    @Column(name = "failed_login_attempts", nullable = false)
+    private int failedLoginAttempts = 0;
+
+    /** When set and in the future, the account is temporarily locked. */
+    @Column(name = "locked_until")
+    private LocalDateTime lockedUntil;
+
+    /** Whether the user's email has been verified via the email-verification flow. */
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified = false;
+
+    /** SHA-256 hex of the current email-verification token; null when no verification is pending. */
+    @Column(name = "email_verification_token_hash", length = 64)
+    private String emailVerificationTokenHash;
+
+    /** Expiry timestamp of the current email-verification token. */
+    @Column(name = "email_verification_expiry")
+    private LocalDateTime emailVerificationExpiry;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "shop_id", nullable = true)
@@ -71,8 +91,8 @@ public class User extends ShopAwareEntity {
     public String getUsername() { return username; }
     public void setUsername(String username) { this.username = username; }
 
-    public String getPinHash() { return pinHash; }
-    public void setPinHash(String pinHash) { this.pinHash = pinHash; }
+    public String getPasswordHash() { return passwordHash; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 
     public Role getRole() { return role; }
     public void setRole(Role role) { this.role = role; }
@@ -85,6 +105,25 @@ public class User extends ShopAwareEntity {
 
     public LocalDateTime getLastPasswordChangeAt() { return lastPasswordChangeAt; }
     public void setLastPasswordChangeAt(LocalDateTime lastPasswordChangeAt) { this.lastPasswordChangeAt = lastPasswordChangeAt; }
+
+    public int getFailedLoginAttempts() { return failedLoginAttempts; }
+    public void setFailedLoginAttempts(int failedLoginAttempts) { this.failedLoginAttempts = failedLoginAttempts; }
+
+    public LocalDateTime getLockedUntil() { return lockedUntil; }
+    public void setLockedUntil(LocalDateTime lockedUntil) { this.lockedUntil = lockedUntil; }
+
+    public boolean isEmailVerified() { return emailVerified; }
+    public void setEmailVerified(boolean emailVerified) { this.emailVerified = emailVerified; }
+
+    public String getEmailVerificationTokenHash() { return emailVerificationTokenHash; }
+    public void setEmailVerificationTokenHash(String emailVerificationTokenHash) {
+        this.emailVerificationTokenHash = emailVerificationTokenHash;
+    }
+
+    public LocalDateTime getEmailVerificationExpiry() { return emailVerificationExpiry; }
+    public void setEmailVerificationExpiry(LocalDateTime emailVerificationExpiry) {
+        this.emailVerificationExpiry = emailVerificationExpiry;
+    }
 
     public Shop getShop() { return shop; }
     public void setShop(Shop shop) { this.shop = shop; }

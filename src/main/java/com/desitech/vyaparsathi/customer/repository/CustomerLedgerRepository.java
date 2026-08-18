@@ -20,4 +20,18 @@ public interface CustomerLedgerRepository extends BaseRepository<CustomerLedger,
     List<CustomerLedger> findByCustomerAndDateRange(@Param("customer") Customer customer,
                                                     @Param("startDate") LocalDateTime startDate,
                                                     @Param("endDate") LocalDateTime endDate);
+
+    /**
+     * Same as {@link #findByCustomerAndDateRange} but keyed by
+     * customer id — used by the enterprise statement builder so
+     * callers don't have to fetch the Customer entity just to walk
+     * its ledger rows.
+     */
+    @Query("SELECT l FROM CustomerLedger l WHERE l.customer.id = :customerId " +
+            "AND (:startDate IS NULL OR l.createdAt >= :startDate) " +
+            "AND (:endDate IS NULL OR l.createdAt <= :endDate) " +
+            "ORDER BY l.createdAt DESC")
+    List<CustomerLedger> findByCustomerIdAndDateRange(@Param("customerId") Long customerId,
+                                                     @Param("startDate") LocalDateTime startDate,
+                                                     @Param("endDate") LocalDateTime endDate);
 }

@@ -55,95 +55,27 @@ public class CustomerDto {
     private String industry;
     private String source;
 
+    // ─── V115 enterprise fields ────────────────────────────────────────
+    /** When TRUE, invoice creation is blocked by the credit-limit gate. */
+    private Boolean creditHold;
+    /** Sales rep / account manager (users.id). */
+    private Long assignedUserId;
+    /** ISO-4217 currency code; defaults to INR. */
+    private String preferredCurrency;
+    private String msmeUdyam;
+    private String tan;
+    private Boolean tdsApplicable;
+    private Boolean emailOptIn;
+    private Boolean smsOptIn;
+    private Boolean whatsappOptIn;
+
     @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
     private LocalDateTime createdAt;
     @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
     private LocalDateTime updatedAt;
 
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-
-    public String getPhone() { return phone; }
-    public void setPhone(String phone) { this.phone = phone; }
-
-    public String getEmail() { return email; }
-    public void setEmail(String email) { this.email = email; }
-
-    public String getAddressLine1() { return addressLine1; }
-    public void setAddressLine1(String addressLine1) { this.addressLine1 = addressLine1; }
-
-    public String getAddressLine2() { return addressLine2; }
-    public void setAddressLine2(String addressLine2) { this.addressLine2 = addressLine2; }
-
-    public String getCity() { return city; }
-    public void setCity(String city) { this.city = city; }
-
-    public String getState() { return state; }
-    public void setState(String state) { this.state = state; }
-
-    public String getStateCode() { return stateCode; }
-    public void setStateCode(String stateCode) { this.stateCode = stateCode; }
-
-    public String getPostalCode() { return postalCode; }
-    public void setPostalCode(String postalCode) { this.postalCode = postalCode; }
-
-    public String getCountry() { return country; }
-    public void setCountry(String country) { this.country = country; }
-
-    public String getGstNumber() { return gstNumber; }
-    public void setGstNumber(String gstNumber) { this.gstNumber = gstNumber; }
-
-    public String getPanNumber() { return panNumber; }
-    public void setPanNumber(String panNumber) { this.panNumber = panNumber; }
-
-    public String getNotes() { return notes; }
-    public void setNotes(String notes) { this.notes = notes; }
-
-    public BigDecimal getCreditBalance() { return creditBalance; }
-    public void setCreditBalance(BigDecimal creditBalance) { this.creditBalance = creditBalance; }
-
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
-
-    public String getLegalName() { return legalName; }
-    public void setLegalName(String legalName) { this.legalName = legalName; }
-
-    public Boolean getActive() { return active; }
-    public void setActive(Boolean active) { this.active = active; }
-
-    public String getCustomerType() { return customerType; }
-    public void setCustomerType(String customerType) { this.customerType = customerType; }
-
-    public Integer getCreditDays() { return creditDays; }
-    public void setCreditDays(Integer creditDays) { this.creditDays = creditDays; }
-
-    public BigDecimal getCreditLimit() { return creditLimit; }
-    public void setCreditLimit(BigDecimal creditLimit) { this.creditLimit = creditLimit; }
-
-    public String getPaymentTerms() { return paymentTerms; }
-    public void setPaymentTerms(String paymentTerms) { this.paymentTerms = paymentTerms; }
-
-    public String getTags() { return tags; }
-    public void setTags(String tags) { this.tags = tags; }
-
-    public String getTradeName() { return tradeName; }
-    public void setTradeName(String tradeName) { this.tradeName = tradeName; }
-
-    public LocalDate getDateOfBirth() { return dateOfBirth; }
-    public void setDateOfBirth(LocalDate dateOfBirth) { this.dateOfBirth = dateOfBirth; }
-
-    public LocalDate getAnniversaryDate() { return anniversaryDate; }
-    public void setAnniversaryDate(LocalDate anniversaryDate) { this.anniversaryDate = anniversaryDate; }
-
-    public String getIndustry() { return industry; }
-    public void setIndustry(String industry) { this.industry = industry; }
-
-    public String getSource() { return source; }
-    public void setSource(String source) { this.source = source; }
+    // Manual getters/setters were previously duplicated for every field
+    // alongside Lombok's @Data. All pass-throughs removed — Lombok now
+    // generates them (which was already the effective behaviour anyway,
+    // since Lombok skipped fields with a matching hand-written accessor).
 }

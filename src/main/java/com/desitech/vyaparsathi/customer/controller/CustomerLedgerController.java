@@ -6,7 +6,6 @@ import org.slf4j.LoggerFactory;
 
 import com.desitech.vyaparsathi.customer.dto.CustomerLedgerDto;
 import com.desitech.vyaparsathi.customer.service.CustomerLedgerService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -21,8 +20,11 @@ import java.util.List;
 public class CustomerLedgerController {
 
     private static final Logger logger = LoggerFactory.getLogger(CustomerLedgerController.class);
-    @Autowired
-    private CustomerLedgerService ledgerService;
+    private final CustomerLedgerService ledgerService;
+
+    public CustomerLedgerController(CustomerLedgerService ledgerService) {
+        this.ledgerService = ledgerService;
+    }
 
     @PostMapping
     public ResponseEntity<CustomerLedgerDto> addLedgerEntry(

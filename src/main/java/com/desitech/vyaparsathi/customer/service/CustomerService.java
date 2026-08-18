@@ -60,18 +60,78 @@ public class CustomerService {
 
     @Transactional
     public CustomerDto addCustomer(CustomerDto dto) {
+        Long shopId = TenantContext.getCurrentShopId();
+
+        // Hard-duplicate guard: refuse a create that would collide on
+        // phone within the same shop. (The DB has UNIQUE(shop_id,
+        // phone) via V114 — a race would still trip the constraint
+        // and throw, this pre-check just gives the FE a friendly
+        // error message instead of a raw SQL exception.) A future
+        // enhancement is to run duplicate detection on GSTIN + PAN
+        // and return a WARNING rather than a hard refuse — for now
+        // we surface those candidates via the /duplicates endpoint.
+        if (shopId != null && dto.getPhone() != null && !dto.getPhone().isBlank()) {
+            List<Customer> phoneDups = customerRepository.findPotentialDuplicates(
+                    shopId, dto.getPhone(), null, null, null);
+            if (!phoneDups.isEmpty()) {
+                Customer existing = phoneDups.get(0);
+                throw new ApplicationException(
+                        "A customer named '" + existing.getName() + "' with phone " + dto.getPhone() +
+                        " already exists (id=" + existing.getId() + "). Search for them or use the Duplicates panel.");
+            }
+        }
+
         Customer customer = mapper.toEntity(dto);
-        if (customer.getCreditBalance() == null) {
-            customer.setCreditBalance(BigDecimal.ZERO);
-        }
-        if (customer.getActive() == null) {
-            customer.setActive(true);
-        }
+
+        // ── Null-safe defaults for NOT NULL columns ───────────────────────
+        // MapStruct's toEntity() copies null DTO fields onto the entity,
+        // overriding Java field initialisers. The Sales quick-add modal sends
+        // only name + phone — all V115 enterprise booleans / strings arrive
+        // as null and would violate NOT NULL DB constraints.
+        if (customer.getCreditBalance() == null)     customer.setCreditBalance(BigDecimal.ZERO);
+        if (customer.getActive() == null)            customer.setActive(true);
+        if (customer.getPreferredCurrency() == null) customer.setPreferredCurrency("INR");
+        if (customer.getTdsApplicable() == null)     customer.setTdsApplicable(Boolean.FALSE);
+        if (customer.getCreditHold() == null)        customer.setCreditHold(Boolean.FALSE);
+        if (customer.getEmailOptIn() == null)        customer.setEmailOptIn(Boolean.TRUE);
+        if (customer.getSmsOptIn() == null)           customer.setSmsOptIn(Boolean.TRUE);
+        if (customer.getWhatsappOptIn() == null)     customer.setWhatsappOptIn(Boolean.TRUE);
+        if (customer.getCustomerType() == null)      customer.setCustomerType(
+                com.desitech.vyaparsathi.customer.enums.CustomerType.INDIVIDUAL);
+        // ──────────────────────────────────────────────────────────────────
+
         customer.setShop(getCurrentShop());
 
         customer = customerRepository.save(customer);
         auditService.recordAction(customer.getId(), "CREATED", "Customer profile created: " + customer.getName(), null);
         return mapper.toDto(customer);
+    }
+
+    /**
+     * Duplicate-detection helper called by the FE create form during
+     * data entry — matches on phone / GSTIN / PAN within the current
+     * shop. Returns a (possibly empty) list of candidates so the FE
+     * can offer "Open existing" / "Continue anyway" / "Merge later".
+     *
+     * <p>Non-transactional read; skips out gracefully when no criteria
+     * are supplied rather than returning every customer in the shop.</p>
+     */
+    @Transactional(readOnly = true)
+    public List<CustomerDto> findPotentialDuplicates(String phone, String gstNumber, String panNumber, Long excludeId) {
+        Long shopId = TenantContext.getCurrentShopId();
+        if (shopId == null) return List.of();
+        String p = normalize(phone);
+        String g = normalize(gstNumber);
+        String n = normalize(panNumber);
+        if (p == null && g == null && n == null) return List.of();
+        return customerRepository.findPotentialDuplicates(shopId, p, g, n, excludeId)
+                .stream().map(mapper::toDto).toList();
+    }
+
+    private static String normalize(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
     }
 
     @Transactional
@@ -84,11 +144,29 @@ public class CustomerService {
         return mapper.toDto(customer);
     }
 
+    /**
+     * Legacy unbounded list. Kept for backward compatibility with the
+     * few callers (sales screen customer picker, dashboard widget) that
+     * still hit {@code GET /api/customers} without pagination, but
+     * hard-capped at {@link #LEGACY_LIST_CAP} rows so a tenant with
+     * 50k customers can't OOM the server.
+     *
+     * <p>The paged endpoint at {@code /api/customers/paged} is the
+     * correct path for any new caller. Any hit above the cap logs a
+     * warning so we can find and migrate the remaining offenders.</p>
+     */
+    private static final int LEGACY_LIST_CAP = 500;
+
     @Transactional(readOnly = true)
     public List<CustomerDto> listCustomers() {
-        return customerRepository.findAll().stream()
-                .map(mapper::toDto)
-                .toList();
+        Page<Customer> firstPage = customerRepository.findAll(
+                PageRequest.of(0, LEGACY_LIST_CAP, Sort.by(Sort.Direction.ASC, "name")));
+        if (firstPage.getTotalElements() > LEGACY_LIST_CAP) {
+            logger.warn(
+                    "Legacy /api/customers hit — {} customers exist but only {} returned. Migrate caller to /api/customers/paged.",
+                    firstPage.getTotalElements(), LEGACY_LIST_CAP);
+        }
+        return firstPage.getContent().stream().map(mapper::toDto).toList();
     }
 
     /**
@@ -196,21 +274,27 @@ public class CustomerService {
         return mapper.toDto(customer);
     }
 
+    /**
+     * Toggle the active flag on many customers in one SQL UPDATE.
+     * Previously an N+1 for-loop of {@code save(c)} calls per id —
+     * bad on the 1000-row bulk actions the FE now supports. Falls
+     * through the JPA layer to a bulk UPDATE, then records one
+     * audit event per successful id.
+     */
     @Transactional
     public int bulkToggleActive(List<Long> ids, boolean active) {
         if (ids == null || ids.isEmpty()) return 0;
-        int count = 0;
+        int updated = customerRepository.bulkUpdateActive(ids, active);
+        // Audit each id one at a time — the audit table is the truth
+        // for who-changed-what and we don't want to lose that granularity
+        // just because the state update went bulk. Errors here don't
+        // roll back the update (AuditLog uses REQUIRES_NEW).
+        String action = active ? "ACTIVATED" : "DEACTIVATED";
+        String summary = "Bulk " + (active ? "activated" : "deactivated");
         for (Long id : ids) {
-            Optional<Customer> opt = customerRepository.findById(id);
-            if (opt.isPresent()) {
-                Customer c = opt.get();
-                c.setActive(active);
-                customerRepository.save(c);
-                auditService.recordAction(c.getId(), active ? "ACTIVATED" : "DEACTIVATED", "Bulk " + (active ? "activated" : "deactivated"), null);
-                count++;
-            }
+            auditService.recordAction(id, action, summary, null);
         }
-        return count;
+        return updated;
     }
 
     @Transactional
@@ -256,18 +340,6 @@ public class CustomerService {
     @Transactional(readOnly = true)
     public List<Customer> getAllCustomers() {
         return customerRepository.findAll();
-    }
-
-    @Transactional
-    public Customer createCustomer(Customer customer) {
-        customer.setShop(getCurrentShop());
-        if (customer.getCreditBalance() == null) {
-            customer.setCreditBalance(BigDecimal.ZERO);
-        }
-        if (customer.getActive() == null) {
-            customer.setActive(true);
-        }
-        return customerRepository.save(customer);
     }
 
     @Transactional(readOnly = true)

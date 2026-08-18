@@ -116,4 +116,17 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
             @Param("endDate") LocalDateTime endDate,
             Pageable pageable
     );
+
+    /**
+     * Sum of totalAmount for outstanding (unpaid or partially-paid,
+     * non-cancelled) sales of a customer. Used by the credit-limit
+     * gate in {@code SaleService.createSale} — DB-side SUM avoids
+     * loading every historical sale into memory just to add totals.
+     */
+    @Query("SELECT COALESCE(SUM(s.totalAmount), 0) FROM Sale s " +
+            "WHERE s.customer.id = :customerId " +
+            "  AND s.status <> com.desitech.vyaparsathi.sales.enums.SaleStatus.CANCELLED " +
+            "  AND s.paymentStatus IN (com.desitech.vyaparsathi.payment.enums.PaymentStatus.PENDING, " +
+            "                          com.desitech.vyaparsathi.payment.enums.PaymentStatus.PARTIALLY_PAID)")
+    java.math.BigDecimal sumOutstandingByCustomerId(@Param("customerId") Long customerId);
 }

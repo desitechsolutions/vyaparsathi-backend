@@ -7,6 +7,8 @@ import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.customer.dto.*;
 import com.desitech.vyaparsathi.customer.entity.CustomerAudit;
 import com.desitech.vyaparsathi.customer.service.*;
+import com.desitech.vyaparsathi.delivery.entity.Delivery;
+import com.desitech.vyaparsathi.delivery.repository.DeliveryRepository;
 import com.desitech.vyaparsathi.payment.entity.Payment;
 import com.desitech.vyaparsathi.payment.repository.PaymentRepository;
 import com.desitech.vyaparsathi.quotation.entity.Quotation;
@@ -48,6 +50,8 @@ public class CustomerController {
     private final PaymentRepository paymentRepo;
     private final QuotationRepository quotationRepo;
     private final SalesOrderRepository salesOrderRepo;
+    private final DeliveryRepository deliveryRepo;
+    private final CustomerMergeService mergeService;
 
     public CustomerController(CustomerService customerService,
                               CustomerTransactionService transactionService,
@@ -57,7 +61,9 @@ public class CustomerController {
                               CreditNoteRepository creditNoteRepo,
                               PaymentRepository paymentRepo,
                               QuotationRepository quotationRepo,
-                              SalesOrderRepository salesOrderRepo) {
+                              SalesOrderRepository salesOrderRepo,
+                              DeliveryRepository deliveryRepo,
+                              CustomerMergeService mergeService) {
         this.customerService = customerService;
         this.transactionService = transactionService;
         this.statementPdfService = statementPdfService;
@@ -67,6 +73,8 @@ public class CustomerController {
         this.paymentRepo = paymentRepo;
         this.quotationRepo = quotationRepo;
         this.salesOrderRepo = salesOrderRepo;
+        this.deliveryRepo = deliveryRepo;
+        this.mergeService = mergeService;
     }
 
     @PostMapping
@@ -150,6 +158,39 @@ public class CustomerController {
             logger.error("Error fetching paged customers: {}", e.getMessage(), e);
             throw new ApplicationException("Failed to fetch paged customers", e);
         }
+    }
+
+    /**
+     * V115: Merge two customers. Re-links every transactional record
+     * (sales, quotations, sales orders, credit notes, payments,
+     * refunds, receipts, ledger) from the source to the target;
+     * union-adds segment memberships; sums credit balances; then
+     * deletes the source. Refuses cross-shop merges.
+     *
+     * Body: {@code {"sourceId": 12, "targetId": 34}}.
+     * Returns a per-table summary of rows re-linked.
+     */
+    @PostMapping("/merge")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_DELETE")
+    public ResponseEntity<Map<String, Object>> merge(@RequestBody Map<String, Object> body) {
+        Long sourceId = body != null && body.get("sourceId") != null ? Long.valueOf(body.get("sourceId").toString()) : null;
+        Long targetId = body != null && body.get("targetId") != null ? Long.valueOf(body.get("targetId").toString()) : null;
+        return ResponseEntity.ok(mergeService.merge(sourceId, targetId));
+    }
+
+    /**
+     * V115: Live duplicate check for the create form. Match by phone /
+     * GSTIN / PAN within the current shop. Empty result = safe to
+     * create; non-empty = show "similar customers" UI.
+     */
+    @GetMapping("/duplicates")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
+    public ResponseEntity<List<CustomerDto>> findDuplicates(
+            @RequestParam(required = false) String phone,
+            @RequestParam(required = false) String gstNumber,
+            @RequestParam(required = false) String panNumber,
+            @RequestParam(required = false) Long excludeId) {
+        return ResponseEntity.ok(customerService.findPotentialDuplicates(phone, gstNumber, panNumber, excludeId));
     }
 
     /**
@@ -267,6 +308,7 @@ public class CustomerController {
     // ─── CSV Export / Import ────────────────────────────────────────────
 
     @GetMapping("/export.csv")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
     public ResponseEntity<byte[]> exportCsv() {
         try {
             byte[] csvData = customerService.exportCsv();
@@ -295,6 +337,7 @@ public class CustomerController {
     // ─── Statement PDF & Email ──────────────────────────────────────────
 
     @GetMapping("/{id}/statement/pdf")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
     public ResponseEntity<byte[]> getStatementPdf(
             @PathVariable Long id,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -311,6 +354,7 @@ public class CustomerController {
     }
 
     @PostMapping("/{id}/statement/email")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_EDIT")
     public ResponseEntity<Map<String, String>> sendStatementEmail(
             @PathVariable Long id,
             @RequestBody(required = false) Map<String, String> body) {
@@ -334,6 +378,7 @@ public class CustomerController {
     // ─── Transactions & Sub-resources ───────────────────────────────────
 
     @GetMapping("/{id}/transactions")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
     public ResponseEntity<Page<CustomerTransactionDto>> getTransactions(
             @PathVariable Long id,
             @RequestParam(defaultValue = "0") int page,
@@ -342,11 +387,13 @@ public class CustomerController {
     }
 
     @GetMapping("/{id}/audit")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
     public ResponseEntity<List<CustomerAudit>> getAuditTrail(@PathVariable Long id) {
         return ResponseEntity.ok(auditService.getAuditTrail(id));
     }
 
     @GetMapping("/{id}/credit-notes")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
     public ResponseEntity<Page<CreditNote>> getCreditNotes(
             @PathVariable Long id,
             @RequestParam(defaultValue = "0") int page,
@@ -356,6 +403,7 @@ public class CustomerController {
     }
 
     @GetMapping("/{id}/payments")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
     public ResponseEntity<Page<Payment>> getPayments(
             @PathVariable Long id,
             @RequestParam(defaultValue = "0") int page,
@@ -364,6 +412,7 @@ public class CustomerController {
     }
 
     @GetMapping("/{id}/quotations")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
     public ResponseEntity<Page<Quotation>> getQuotations(
             @PathVariable Long id,
             @RequestParam(defaultValue = "0") int page,
@@ -373,11 +422,26 @@ public class CustomerController {
     }
 
     @GetMapping("/{id}/sales-orders")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
     public ResponseEntity<Page<SalesOrder>> getSalesOrders(
             @PathVariable Long id,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         Long shopId = TenantContext.getCurrentShopId();
         return ResponseEntity.ok(salesOrderRepo.findByShopIdAndCustomer_Id(shopId, id, PageRequest.of(page, size)));
+    }
+
+    /**
+     * V115 — delivery challans is the 7th customer sub-resource. The
+     * Delivery entity has no direct customer FK; the repo query walks
+     * through the linked Sale to find every challan for the customer.
+     */
+    @GetMapping("/{id}/delivery-challans")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
+    public ResponseEntity<Page<Delivery>> getDeliveryChallans(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(deliveryRepo.findByCustomerIdViaSale(id, PageRequest.of(page, size)));
     }
 }

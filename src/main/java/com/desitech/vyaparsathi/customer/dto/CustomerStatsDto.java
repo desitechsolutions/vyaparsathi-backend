@@ -40,6 +40,34 @@ public class CustomerStatsDto {
     /** Active sales orders for this customer. */
     private long salesOrderCount;
 
+    // ─── V115 aging buckets ─────────────────────────────────────────────
+    /**
+     * Age-of-receivable buckets summing to {@link #outstandingReceivable}.
+     * Bucket definition: days since invoice date for non-cancelled sales
+     * with paymentStatus PENDING or PARTIALLY_PAID.
+     *
+     *   agingCurrent = 0–30d overdue (or not yet overdue)
+     *   aging31_60   = 31–60d overdue
+     *   aging61_90   = 61–90d overdue
+     *   aging90Plus  = 90d+ overdue
+     */
+    private BigDecimal agingCurrent = BigDecimal.ZERO;
+    private BigDecimal aging31_60   = BigDecimal.ZERO;
+    private BigDecimal aging61_90   = BigDecimal.ZERO;
+    private BigDecimal aging90Plus  = BigDecimal.ZERO;
+
+    public BigDecimal getAgingCurrent() { return agingCurrent; }
+    public void setAgingCurrent(BigDecimal v) { this.agingCurrent = v == null ? BigDecimal.ZERO : v; }
+
+    public BigDecimal getAging31_60() { return aging31_60; }
+    public void setAging31_60(BigDecimal v) { this.aging31_60 = v == null ? BigDecimal.ZERO : v; }
+
+    public BigDecimal getAging61_90() { return aging61_90; }
+    public void setAging61_90(BigDecimal v) { this.aging61_90 = v == null ? BigDecimal.ZERO : v; }
+
+    public BigDecimal getAging90Plus() { return aging90Plus; }
+    public void setAging90Plus(BigDecimal v) { this.aging90Plus = v == null ? BigDecimal.ZERO : v; }
+
     public Long getCustomerId() { return customerId; }
     public void setCustomerId(Long customerId) { this.customerId = customerId; }
 

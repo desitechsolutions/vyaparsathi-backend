@@ -19,6 +19,16 @@ public interface DeliveryRepository extends BaseRepository<Delivery, Long> {
     List<Delivery> findBySaleIdOrderByCreatedAtDesc(Long saleId);
 
     /**
+     * All delivery challans for a given customer. Delivery has no
+     * direct FK to Customer — it links via Sale — so we walk through
+     * the Sale.customer relationship. Shop scope is enforced by the
+     * ShopFilterAspect against both entities.
+     */
+    @Query("SELECT d FROM Delivery d JOIN d.sale s WHERE s.customer.id = :customerId " +
+            "ORDER BY d.createdAt DESC")
+    Page<Delivery> findByCustomerIdViaSale(@Param("customerId") Long customerId, Pageable pageable);
+
+    /**
      * Paginated, filtered list. Eager-loads {@code deliveryPerson} and
      * {@code statusHistory} via an entity graph to kill the N+1 that the
      * previous {@code findAll()} + lazy-mapper flow triggered.

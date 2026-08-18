@@ -6,6 +6,7 @@ import com.desitech.vyaparsathi.customer.enums.CustomerType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -50,5 +51,39 @@ public interface CustomerRepository extends BaseRepository<Customer, Long>, JpaS
     /** Check if customer has ledger entries. */
     @Query("SELECT CASE WHEN COUNT(l) > 0 THEN true ELSE false END FROM CustomerLedger l WHERE l.customer.id = :customerId")
     boolean hasLedgerEntries(@Param("customerId") Long customerId);
+
+    // ─── Phase 5 bulk operations ──────────────────────────────────────
+    /**
+     * Set the active flag on many rows in one SQL UPDATE. Replaces
+     * the previous N+1 for-loop-of-saves in
+     * {@code CustomerService.bulkToggleActive}. Returns the number of
+     * rows actually updated.
+     */
+    @Modifying
+    @Query("UPDATE Customer c SET c.active = :active WHERE c.id IN :ids")
+    int bulkUpdateActive(@Param("ids") List<Long> ids, @Param("active") boolean active);
+
+    // ─── V115 duplicate-detection queries ─────────────────────────────
+    /**
+     * Find candidate duplicates within the current shop. Any of phone /
+     * gstNumber / panNumber matching counts as a candidate — the FE
+     * shows these as "Similar customer found: XYZ. Continue anyway or
+     * open the existing one?" before creating a new record.
+     *
+     * <p>Params may be null; null means "don't match on this field".
+     * At least one must be non-blank or the caller gets an empty list
+     * (guarded at service layer).</p>
+     */
+    @Query("SELECT c FROM Customer c WHERE c.shop.id = :shopId AND (" +
+            "  (:phone     IS NOT NULL AND c.phone     = :phone) OR " +
+            "  (:gstNumber IS NOT NULL AND UPPER(c.gstNumber) = UPPER(:gstNumber)) OR " +
+            "  (:panNumber IS NOT NULL AND UPPER(c.panNumber) = UPPER(:panNumber))" +
+            ") AND (:excludeId IS NULL OR c.id <> :excludeId)")
+    List<Customer> findPotentialDuplicates(
+            @Param("shopId") Long shopId,
+            @Param("phone") String phone,
+            @Param("gstNumber") String gstNumber,
+            @Param("panNumber") String panNumber,
+            @Param("excludeId") Long excludeId);
 }
 

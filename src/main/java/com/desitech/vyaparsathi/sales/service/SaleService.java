@@ -295,7 +295,14 @@ public class SaleService {
         BigDecimal finalTotalAmount = grandTotal.setScale(0, RoundingMode.HALF_UP);
         BigDecimal roundOff = finalTotalAmount.subtract(grandTotal);
 
-        // 5. Deduct Stock — skipped for PROFORMA sales (non-binding, no goods
+        // 5. Credit-hold + credit-limit gate (V115 enterprise) — skip
+        // for PROFORMA sales (non-binding, no receivable created) and
+        // when there is no linked customer (walk-in / cash sale).
+        if (!isProforma && customer != null) {
+            enforceCreditGate(customer, finalTotalAmount);
+        }
+
+        // 6. Deduct Stock — skipped for PROFORMA sales (non-binding, no goods
         // have moved yet). Custom/service lines are always skipped (no inventory).
         if (!isProforma) {
             for (SaleItem item : saleItems) {
@@ -1489,5 +1496,47 @@ public class SaleService {
             normalized = normalized.substring(0, 10);
         }
         return normalized;
+    }
+
+    /**
+     * Enforce the two customer-level credit gates before persisting a
+     * receivable sale:
+     *
+     * <ol>
+     *   <li><b>Credit hold</b> — a boolean flag on the customer that
+     *       pauses all new invoices regardless of amount. Set by
+     *       accounts staff after a bounced cheque, open dispute,
+     *       KYC lapse, etc.</li>
+     *   <li><b>Credit limit</b> — a rupee ceiling on total
+     *       outstanding receivable. If current outstanding + this
+     *       new sale would exceed the ceiling, the sale is refused.
+     *       creditLimit ≤ 0 is treated as "no ceiling".</li>
+     * </ol>
+     *
+     * Both gates throw {@link ApplicationException} with an actionable
+     * message the FE surfaces directly to the caller. There is
+     * intentionally no override at this layer — an OWNER who wants
+     * to bypass the gate must first clear the hold or raise the
+     * limit on the customer profile, which is an audited change.
+     */
+    private void enforceCreditGate(Customer customer, java.math.BigDecimal saleTotal) {
+        if (Boolean.TRUE.equals(customer.getCreditHold())) {
+            throw new com.desitech.vyaparsathi.common.exception.ApplicationException(
+                    "Cannot create invoice: customer '" + customer.getName() +
+                    "' is on credit hold. Clear the hold from their profile before invoicing.");
+        }
+        java.math.BigDecimal limit = customer.getCreditLimit();
+        if (limit == null || limit.signum() <= 0) {
+            return; // no ceiling configured
+        }
+        java.math.BigDecimal currentOutstanding = saleRepository.sumOutstandingByCustomerId(customer.getId());
+        if (currentOutstanding == null) currentOutstanding = java.math.BigDecimal.ZERO;
+        java.math.BigDecimal projected = currentOutstanding.add(saleTotal == null ? java.math.BigDecimal.ZERO : saleTotal);
+        if (projected.compareTo(limit) > 0) {
+            throw new com.desitech.vyaparsathi.common.exception.ApplicationException(
+                    "Credit-limit breach: customer '" + customer.getName() + "' has ₹" + currentOutstanding +
+                    " outstanding; this invoice for ₹" + saleTotal + " would push them past their ₹" + limit +
+                    " limit. Collect payment first, raise the limit on their profile, or split the invoice.");
+        }
     }
 }

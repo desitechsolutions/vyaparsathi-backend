@@ -466,6 +466,7 @@ public class StockService {
     private static final double ABC_A_CUMULATIVE_CUTOFF = 0.80; // A = variants covering first 80% of revenue
     private static final double ABC_B_CUMULATIVE_CUTOFF = 0.95; // A+B = 95%; rest = C
 
+    @Transactional(readOnly = true)
     public List<LowStockAlertDto> getLowStockAlerts() {
         // V79: also include variants that only set reorderPoint (no legacy
         // lowStockThreshold). See ItemVariantRepository.findAllForLowStockAlerting.

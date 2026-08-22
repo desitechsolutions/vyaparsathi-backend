@@ -49,65 +49,89 @@ public class BarcodeLabelService {
 
             PdfPTable table = new PdfPTable(COLS);
             table.setWidthPercentage(100);
-            Font nameFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9);
-            Font infoFont = FontFactory.getFont(FontFactory.HELVETICA, 8);
+            Font nameFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8.5f);
+            Font infoFont = FontFactory.getFont(FontFactory.HELVETICA, 6.5f, Color.DARK_GRAY);
+            Font mrpFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8.0f);
 
             int copies = Math.max(1, copiesPerVariant);
-            for (Long variantId : variantIds) {
-                ItemVariant v = itemVariantRepository.findById(variantId).orElse(null);
-                if (v == null) continue;
-                String label = v.getSku() + ":" + v.getId();
-                for (int c = 0; c < copies; c++) {
-                    PdfPCell cell = new PdfPCell();
-                    cell.setBorderColor(new Color(200, 200, 200));
-                    cell.setPadding(6);
-                    cell.setFixedHeight(90);
+            int renderedCount = 0;
+            if (variantIds != null) {
+                for (Long variantId : variantIds) {
+                    ItemVariant v = itemVariantRepository.findById(variantId).orElse(null);
+                    if (v == null) continue;
+                    String label = (v.getBarcode() != null && !v.getBarcode().isBlank())
+                            ? v.getBarcode()
+                            : (v.getSku() != null ? v.getSku() + ":" + v.getId() : String.valueOf(v.getId()));
 
-                    Barcode128 code = new Barcode128();
-                    code.setCode(label);
-                    code.setBarHeight(24f);
-                    code.setX(0.8f);
-                    Image qrImg = code.createImageWithBarcode(cb, null, null);
-                    qrImg.scaleToFit(120, 40);
+                    for (int c = 0; c < copies; c++) {
+                        PdfPCell cell = new PdfPCell();
+                        cell.setBorderColor(new Color(210, 210, 210));
+                        cell.setPadding(4);
+                        cell.setFixedHeight(95);
 
-                    PdfPTable inner = new PdfPTable(2);
-                    inner.setWidthPercentage(100);
-                    inner.setWidths(new float[]{35, 65});
-                    PdfPCell qrCell = new PdfPCell(qrImg);
-                    qrCell.setBorder(Rectangle.NO_BORDER);
-                    qrCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-                    inner.addCell(qrCell);
+                        // 1. Product Name (Top, Centered)
+                        String itemName = v.getItem() != null && v.getItem().getName() != null
+                                ? v.getItem().getName() : "Item";
+                        Paragraph namePara = new Paragraph(itemName, nameFont);
+                        namePara.setAlignment(Element.ALIGN_CENTER);
+                        namePara.setLeading(10f);
+                        namePara.setSpacingAfter(2f);
+                        cell.addElement(namePara);
 
-                    PdfPCell textCell = new PdfPCell();
-                    textCell.setBorder(Rectangle.NO_BORDER);
-                    textCell.setPaddingLeft(4);
-                    Paragraph name = new Paragraph(
-                            v.getItem() != null && v.getItem().getName() != null ? v.getItem().getName() : "Item",
-                            nameFont);
-                    name.setLeading(11f);
-                    textCell.addElement(name);
-                    textCell.addElement(new Paragraph("SKU: " + Optional.ofNullable(v.getSku()).orElse("-"), infoFont));
-                    if (v.getMrp() != null) {
-                        textCell.addElement(new Paragraph("MRP: ₹" + v.getMrp().toPlainString(), infoFont));
+                        // 2. Barcode128 (Middle, Centered)
+                        Barcode128 code = new Barcode128();
+                        code.setCode(label);
+                        code.setCodeType(Barcode128.CODE128);
+                        code.setBarHeight(22f);
+                        code.setX(0.7f);
+                        code.setSize(7f);
+                        code.setBaseline(8f);
+                        Image barcodeImg = code.createImageWithBarcode(cb, null, null);
+                        barcodeImg.setAlignment(Element.ALIGN_CENTER);
+                        barcodeImg.scaleToFit(145, 32);
+                        cell.addElement(barcodeImg);
+
+                        // 3. Footer (Bottom: SKU on left, MRP on right)
+                        PdfPTable footer = new PdfPTable(2);
+                        footer.setWidthPercentage(100);
+                        footer.setWidths(new float[]{60, 40});
+
+                        String skuText = v.getSku() != null ? v.getSku() : "-";
+                        PdfPCell skuCell = new PdfPCell(new Paragraph("SKU: " + skuText, infoFont));
+                        skuCell.setBorder(Rectangle.NO_BORDER);
+                        skuCell.setHorizontalAlignment(Element.ALIGN_LEFT);
+                        skuCell.setVerticalAlignment(Element.ALIGN_BOTTOM);
+                        footer.addCell(skuCell);
+
+                        String mrpText = v.getMrp() != null ? "MRP: Rs. " + v.getMrp().toPlainString() : "";
+                        PdfPCell mrpCell = new PdfPCell(new Paragraph(mrpText, mrpFont));
+                        mrpCell.setBorder(Rectangle.NO_BORDER);
+                        mrpCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                        mrpCell.setVerticalAlignment(Element.ALIGN_BOTTOM);
+                        footer.addCell(mrpCell);
+
+                        footer.setSpacingBefore(3f);
+                        cell.addElement(footer);
+
+                        table.addCell(cell);
+                        renderedCount++;
                     }
-                    if (v.getBarcode() != null && !v.getBarcode().isBlank()) {
-                        textCell.addElement(new Paragraph(v.getBarcode(), infoFont));
-                    }
-                    inner.addCell(textCell);
-
-                    cell.addElement(inner);
-                    table.addCell(cell);
                 }
             }
-            // Pad the final row so the grid closes cleanly.
-            int remainder = table.getRows().size() * COLS - (variantIds.size() * copies);
-            for (int i = 0; i < remainder; i++) {
-                PdfPCell blank = new PdfPCell();
-                blank.setBorder(Rectangle.NO_BORDER);
-                blank.setFixedHeight(90);
-                table.addCell(blank);
+
+            if (renderedCount == 0) {
+                doc.add(new Paragraph("No items to generate labels.", infoFont));
+            } else {
+                // Pad the final row so the grid completes and renders cleanly.
+                int remainder = (COLS - (renderedCount % COLS)) % COLS;
+                for (int i = 0; i < remainder; i++) {
+                    PdfPCell blank = new PdfPCell();
+                    blank.setBorder(Rectangle.NO_BORDER);
+                    blank.setFixedHeight(90);
+                    table.addCell(blank);
+                }
+                doc.add(table);
             }
-            doc.add(table);
             doc.close();
             return baos.toByteArray();
         } catch (Exception e) {

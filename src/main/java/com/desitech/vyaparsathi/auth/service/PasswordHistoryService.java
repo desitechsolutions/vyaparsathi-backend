@@ -62,13 +62,11 @@ public class PasswordHistoryService {
         row.setPasswordHash(passwordHash);
         row.setCreatedAt(LocalDateTime.now());
         historyRepository.save(row);
-        try {
-            historyRepository.trimHistoryBeyondWindow(userId, HISTORY_WINDOW);
-        } catch (Exception ex) {
-            // JPQL LIMIT support varies by Hibernate version; falling back to a
-            // best-effort trim keeps user password changes safe even if the
-            // pruning query fails.
-            log.debug("Password-history trim skipped for user {}: {}", userId, ex.getMessage());
+
+        List<PasswordHistory> allHistory = historyRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        if (allHistory.size() > HISTORY_WINDOW) {
+            List<PasswordHistory> toDelete = allHistory.subList(HISTORY_WINDOW, allHistory.size());
+            historyRepository.deleteAllInBatch(toDelete);
         }
     }
 }

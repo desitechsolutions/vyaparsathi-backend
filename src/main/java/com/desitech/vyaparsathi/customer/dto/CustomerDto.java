@@ -31,6 +31,7 @@ public class CustomerDto {
     private String state;
 
     /** 2-digit GSTN state code (e.g. "27" for Maharashtra). */
+    @Pattern(regexp = "^$|^\\d{2}$", message = "State code must be exactly 2 numeric digits (e.g. '27')")
     private String stateCode;
     private String postalCode;
     private String country;

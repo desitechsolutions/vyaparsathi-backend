@@ -66,10 +66,27 @@ public enum IndustryType {
      */
     public static IndustryType fromString(String s) {
         if (s == null || s.isBlank()) return GENERAL;
-        try {
-            return valueOf(s.trim().toUpperCase());
-        } catch (IllegalArgumentException e) {
-            return GENERAL;
+        String normalized = s.trim().toUpperCase();
+        switch (normalized) {
+            case "APPAREL":
+            case "GARMENTS":
+                return CLOTHING;
+            case "JEWELRY":
+                return JEWELLERY;
+            case "AUTOMOTIVE":
+            case "AUTO":
+                return AUTOMOBILE;
+            case "RETAIL":
+            case "OTHER":
+            case "OTHERS":
+            case "PHARMACY":
+                return GENERAL;
+            default:
+                try {
+                    return valueOf(normalized);
+                } catch (IllegalArgumentException e) {
+                    return GENERAL;
+                }
         }
     }
 }

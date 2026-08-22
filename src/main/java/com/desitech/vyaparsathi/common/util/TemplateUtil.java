@@ -22,10 +22,15 @@ public class TemplateUtil {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
             String content = reader.lines().collect(Collectors.joining("\n"));
 
-            // Replace all variables like ${name}, ${resetLink}, etc.
+            // Replace all variables like ${name}, {{name}}, {{ name }}, etc.
             if (variables != null) {
                 for (Map.Entry<String, String> entry : variables.entrySet()) {
-                    content = content.replace("${" + entry.getKey() + "}", entry.getValue() != null ? entry.getValue() : "");
+                    if (entry.getKey() != null) {
+                        String keyPattern = java.util.regex.Pattern.quote(entry.getKey());
+                        String value = entry.getValue() != null ? entry.getValue() : "";
+                        String regex = "(\\$\\{" + keyPattern + "\\}|\\{\\{\\s*" + keyPattern + "\\s*\\}\\})";
+                        content = content.replaceAll(regex, java.util.regex.Matcher.quoteReplacement(value));
+                    }
                 }
             }
 

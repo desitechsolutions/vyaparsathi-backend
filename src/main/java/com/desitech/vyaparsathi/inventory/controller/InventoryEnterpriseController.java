@@ -33,19 +33,25 @@ public class InventoryEnterpriseController {
     private final AlertSnoozeService snoozeService;
     private final SavedViewService savedViewService;
     private final BarcodeLabelService labelService;
+    private final LowStockAlertNotificationScheduler lowStockScheduler;
+    private final com.desitech.vyaparsathi.shop.repository.ShopRepository shopRepository;
 
     public InventoryEnterpriseController(ProductBundleService bundleService,
                                          UomConversionService uomService,
                                          SupplierRateCardService rateCardService,
                                          AlertSnoozeService snoozeService,
                                          SavedViewService savedViewService,
-                                         BarcodeLabelService labelService) {
+                                         BarcodeLabelService labelService,
+                                         LowStockAlertNotificationScheduler lowStockScheduler,
+                                         com.desitech.vyaparsathi.shop.repository.ShopRepository shopRepository) {
         this.bundleService = bundleService;
         this.uomService = uomService;
         this.rateCardService = rateCardService;
         this.snoozeService = snoozeService;
         this.savedViewService = savedViewService;
         this.labelService = labelService;
+        this.lowStockScheduler = lowStockScheduler;
+        this.shopRepository = shopRepository;
     }
 
     // ── Product bundles ────────────────────────────────────────────────
@@ -161,5 +167,29 @@ public class InventoryEnterpriseController {
         headers.setContentType(MediaType.APPLICATION_PDF);
         headers.set(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"labels.pdf\"");
         return new ResponseEntity<>(pdf, headers, HttpStatus.OK);
+    }
+
+    // ── Low-stock email digest on-demand trigger ───────────────────────
+
+    @PostMapping("/alerts/low-stock/test-email")
+    public ResponseEntity<Map<String, Object>> triggerTestLowStockEmail() {
+        try {
+            Long shopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+            if (shopId == null) {
+                return ResponseEntity.badRequest().body(Map.of("success", false, "message", "No shop context found"));
+            }
+            com.desitech.vyaparsathi.shop.entity.Shop shop = shopRepository.findById(shopId)
+                    .orElseThrow(() -> new IllegalArgumentException("Shop not found with id: " + shopId));
+            boolean sent = lowStockScheduler.notifyShop(shop);
+            return ResponseEntity.ok(Map.of(
+                    "success", sent,
+                    "message", sent ? "Low-stock alert email sent successfully to " + shop.getEmail() : "No low-stock items due for notification."
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Failed to send email: " + e.getMessage()
+            ));
+        }
     }
 }

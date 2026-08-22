@@ -100,11 +100,26 @@ public class CustomerService {
                 com.desitech.vyaparsathi.customer.enums.CustomerType.INDIVIDUAL);
         // ──────────────────────────────────────────────────────────────────
 
+        sanitizeStateCode(customer);
+
         customer.setShop(getCurrentShop());
 
         customer = customerRepository.save(customer);
         auditService.recordAction(customer.getId(), "CREATED", "Customer profile created: " + customer.getName(), null);
         return mapper.toDto(customer);
+    }
+
+    private void sanitizeStateCode(Customer customer) {
+        if (customer.getStateCode() != null) {
+            String sc = customer.getStateCode().trim();
+            if (sc.isEmpty()) {
+                customer.setStateCode(null);
+            } else if (sc.length() > 2) {
+                customer.setStateCode(sc.substring(0, 2));
+            } else {
+                customer.setStateCode(sc);
+            }
+        }
     }
 
     /**
@@ -139,6 +154,7 @@ public class CustomerService {
         Customer customer = customerRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Customer not found with id=" + id));
         mapper.updateEntityFromDto(dto, customer);
+        sanitizeStateCode(customer);
         customer = customerRepository.save(customer);
         auditService.recordAction(customer.getId(), "UPDATED", "Customer profile updated: " + customer.getName(), null);
         return mapper.toDto(customer);

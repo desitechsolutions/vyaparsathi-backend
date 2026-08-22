@@ -68,7 +68,10 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
      * rules can leave {@code lowStockThreshold} null and only configure the
      * new fields — this query keeps those variants in the alerts pool.
      */
-    @Query("SELECT iv FROM ItemVariant iv WHERE iv.active = true AND " +
+    @Query("SELECT iv FROM ItemVariant iv " +
+            "JOIN FETCH iv.item i " +
+            "LEFT JOIN FETCH iv.preferredSupplier ps " +
+            "WHERE iv.active = true AND " +
             "(iv.lowStockThreshold IS NOT NULL OR iv.reorderPoint IS NOT NULL)")
     List<ItemVariant> findAllForLowStockAlerting();
 

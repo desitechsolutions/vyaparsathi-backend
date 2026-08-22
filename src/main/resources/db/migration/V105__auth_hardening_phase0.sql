@@ -1,5 +1,5 @@
 -- =====================================================================
--- V106 — Auth Hardening (Phase 0)
+-- V105 — Auth Hardening (Phase 0)
 -- =====================================================================
 -- 1. password_reset_tokens: rename `token` -> `token_hash` (SHA-256 hex,
 --    64 chars). Existing rows are wiped: their raw UUIDs would never
@@ -12,13 +12,13 @@
 -- IF NOT EXISTS on ADD COLUMN).
 -- =====================================================================
 
-DROP PROCEDURE IF EXISTS v106_add_col;
-DROP PROCEDURE IF EXISTS v106_drop_col;
-DROP PROCEDURE IF EXISTS v106_add_index;
+DROP PROCEDURE IF EXISTS V105_add_col;
+DROP PROCEDURE IF EXISTS V105_drop_col;
+DROP PROCEDURE IF EXISTS V105_add_index;
 
 DELIMITER $$
 
-CREATE PROCEDURE v106_add_col(
+CREATE PROCEDURE V105_add_col(
     IN p_table  VARCHAR(64),
     IN p_column VARCHAR(64),
     IN p_ddl    VARCHAR(1024)
@@ -42,7 +42,7 @@ BEGIN
     END IF;
 END$$
 
-CREATE PROCEDURE v106_drop_col(
+CREATE PROCEDURE V105_drop_col(
     IN p_table  VARCHAR(64),
     IN p_column VARCHAR(64)
 )
@@ -61,7 +61,7 @@ BEGIN
     END IF;
 END$$
 
-CREATE PROCEDURE v106_add_index(
+CREATE PROCEDURE V105_add_index(
     IN p_table VARCHAR(64),
     IN p_index VARCHAR(64),
     IN p_cols  VARCHAR(256)
@@ -95,20 +95,20 @@ DELETE FROM password_reset_tokens WHERE 1 = 1;
 
 -- Add the new token_hash column (nullable temporarily so ADD COLUMN succeeds
 -- on tables that have never been populated, then made NOT NULL below).
-CALL v106_add_col(
+CALL V105_add_col(
     'password_reset_tokens',
     'token_hash',
     '`token_hash` VARCHAR(64) NULL AFTER `id`'
 );
 
 -- Drop the old plaintext token column if present.
-CALL v106_drop_col('password_reset_tokens', 'token');
+CALL V105_drop_col('password_reset_tokens', 'token');
 
 -- Enforce NOT NULL + UNIQUE now that no legacy rows survive.
 ALTER TABLE password_reset_tokens
     MODIFY COLUMN token_hash VARCHAR(64) NOT NULL;
 
-CALL v106_add_index(
+CALL V105_add_index(
     'password_reset_tokens',
     'uk_password_reset_tokens_token_hash',
     '`token_hash`'
@@ -117,43 +117,43 @@ CALL v106_add_index(
 -- ---------------------------------------------------------------------
 -- 2. users: lockout + email verification columns
 -- ---------------------------------------------------------------------
-CALL v106_add_col(
+CALL V105_add_col(
     'users',
     'failed_login_attempts',
     '`failed_login_attempts` INT NOT NULL DEFAULT 0'
 );
 
-CALL v106_add_col(
+CALL V105_add_col(
     'users',
     'locked_until',
     '`locked_until` DATETIME NULL'
 );
 
-CALL v106_add_col(
+CALL V105_add_col(
     'users',
     'email_verified',
     '`email_verified` BOOLEAN NOT NULL DEFAULT FALSE'
 );
 
-CALL v106_add_col(
+CALL V105_add_col(
     'users',
     'email_verification_token_hash',
     '`email_verification_token_hash` VARCHAR(64) NULL'
 );
 
-CALL v106_add_col(
+CALL V105_add_col(
     'users',
     'email_verification_expiry',
     '`email_verification_expiry` DATETIME NULL'
 );
 
-CALL v106_add_index(
+CALL V105_add_index(
     'users',
     'idx_users_locked_until',
     '`locked_until`'
 );
 
-CALL v106_add_index(
+CALL V105_add_index(
     'users',
     'idx_users_email_verification_token_hash',
     '`email_verification_token_hash`'
@@ -165,6 +165,6 @@ CALL v106_add_index(
 UPDATE users SET email_verified = TRUE WHERE email_verified = FALSE;
 
 -- Cleanup helper procedures.
-DROP PROCEDURE IF EXISTS v106_add_col;
-DROP PROCEDURE IF EXISTS v106_drop_col;
-DROP PROCEDURE IF EXISTS v106_add_index;
+DROP PROCEDURE IF EXISTS V105_add_col;
+DROP PROCEDURE IF EXISTS V105_drop_col;
+DROP PROCEDURE IF EXISTS V105_add_index;

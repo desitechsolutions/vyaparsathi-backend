@@ -1,5 +1,5 @@
 -- =====================================================================
--- V107 — Password Overhaul (Phase 1B)
+-- V106 — Password Overhaul (Phase 1B)
 -- =====================================================================
 -- 1. Rename users.pin_hash → users.password_hash (in preparation for
 --    real 8+ char passwords replacing the 4-char PIN).
@@ -9,11 +9,11 @@
 -- Idempotent via INFORMATION_SCHEMA-guarded stored procedures.
 -- =====================================================================
 
-DROP PROCEDURE IF EXISTS v107_rename_col;
+DROP PROCEDURE IF EXISTS v106_rename_col;
 
 DELIMITER $$
 
-CREATE PROCEDURE v107_rename_col(
+CREATE PROCEDURE v106_rename_col(
     IN p_table    VARCHAR(64),
     IN p_from     VARCHAR(64),
     IN p_to       VARCHAR(64),
@@ -46,7 +46,7 @@ DELIMITER ;
 -- ---------------------------------------------------------------------
 -- 1. Rename pin_hash → password_hash
 -- ---------------------------------------------------------------------
-CALL v107_rename_col('users', 'pin_hash', 'password_hash', 'VARCHAR(255) NOT NULL');
+CALL v106_rename_col('users', 'pin_hash', 'password_hash', 'VARCHAR(255) NOT NULL');
 
 -- ---------------------------------------------------------------------
 -- 2. password_history — last N password hashes per user
@@ -61,4 +61,4 @@ CREATE TABLE IF NOT EXISTS password_history (
     INDEX idx_password_history_user_created (user_id, created_at)
 );
 
-DROP PROCEDURE IF EXISTS v107_rename_col;
+DROP PROCEDURE IF EXISTS v106_rename_col;

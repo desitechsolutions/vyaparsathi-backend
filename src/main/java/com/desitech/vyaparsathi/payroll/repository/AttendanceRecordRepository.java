@@ -10,13 +10,19 @@ import java.util.List;
 
 @Repository
 public interface AttendanceRecordRepository extends JpaRepository<AttendanceRecord, Long> {
-    List<AttendanceRecord> findByEmployeeIdAndAttendanceDateBetweenOrderByAttendanceDateAsc(Long employeeId, LocalDate startDate, LocalDate endDate);
 
-    List<AttendanceRecord> findByEmployeeIdAndAttendanceDateAndAttendanceType(Long employeeId, LocalDate attendanceDate, AttendanceType attendanceType);
+    List<AttendanceRecord> findByEmployeeIdAndAttendanceDateBetweenOrderByAttendanceDateAsc(
+            Long employeeId, LocalDate startDate, LocalDate endDate);
 
-    long countByEmployeeIdAndAttendanceDateBetweenAndAttendanceType(Long employeeId, LocalDate startDate, LocalDate endDate, AttendanceType attendanceType);
+    List<AttendanceRecord> findByEmployeeIdAndAttendanceDateAndAttendanceType(
+            Long employeeId, LocalDate attendanceDate, AttendanceType attendanceType);
 
-    List<AttendanceRecord> findByShopIdAndAttendanceDateBetweenOrderByAttendanceDateAsc(Long shopId, LocalDate startDate, LocalDate endDate);
+    long countByEmployeeIdAndAttendanceDateBetweenAndAttendanceType(
+            Long employeeId, LocalDate startDate, LocalDate endDate, AttendanceType attendanceType);
 
-    long countByEmployeeIdAndAttendanceDateBetween(Long employeeId, LocalDate startDate, LocalDate endDate);
+    List<AttendanceRecord> findByShopIdAndAttendanceDateBetweenOrderByAttendanceDateAsc(
+            Long shopId, LocalDate startDate, LocalDate endDate);
+
+    long countByEmployeeIdAndAttendanceDateBetween(
+            Long employeeId, LocalDate startDate, LocalDate endDate);
 }

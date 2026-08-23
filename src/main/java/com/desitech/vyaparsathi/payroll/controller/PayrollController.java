@@ -524,7 +524,7 @@ public class PayrollController {
     @PreAuthorize("hasRole(\'EMPLOYEE\')")
     @GetMapping("/employee/form16/pdf")
     public ResponseEntity<byte[]> downloadForm16PDF(@RequestParam String financialYear) {
-        Long employeeId = 1L; // Mock - would use current user
+        Long employeeId = getCurrentEmployeeId();
         byte[] pdf = payrollService.generateForm16PDF(employeeId, financialYear);
         return ResponseEntity.ok()
                 .header("Content-Disposition", "attachment; filename=\"form16-" + financialYear + ".pdf\"")
@@ -546,5 +546,3 @@ public class PayrollController {
         return ResponseEntity.ok().build();
     }
 }
-
-    // --- LEAVE MANAGEMENT ENDPOINTS (P1 ENTERPRISE HARDENING) ---

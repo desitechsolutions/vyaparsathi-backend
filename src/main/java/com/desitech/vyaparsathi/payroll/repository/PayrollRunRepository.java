@@ -13,6 +13,7 @@ import java.util.Optional;
 
 @Repository
 public interface PayrollRunRepository extends JpaRepository<PayrollRun, Long> {
+
     boolean existsByShopIdAndPayrollMonthAndPayrollYear(Long shopId, String payrollMonth, Integer payrollYear);
 
     Optional<PayrollRun> findByShopIdAndPayrollMonthAndPayrollYear(Long shopId, String payrollMonth, Integer payrollYear);
@@ -21,9 +22,10 @@ public interface PayrollRunRepository extends JpaRepository<PayrollRun, Long> {
 
     Page<PayrollRun> findByShopIdAndStatus(Long shopId, PayrollRunStatus status, Pageable pageable);
 
-    List<PayrollRun> findByShopIdAndStatusAndPayrollYearAndPayrollMonth(Long shopId, PayrollRunStatus status, Integer payrollYear, String payrollMonth);
+    List<PayrollRun> findByShopIdAndStatusAndPayrollYearAndPayrollMonth(
+            Long shopId, PayrollRunStatus status, Integer payrollYear, String payrollMonth);
 
-    List<PayrollRun> findByStatusAndCreatedAtBefore(PayrollRunStatus status, LocalDateTime date);
+    List<PayrollRun> findByStatusAndCreatedAtBefore(PayrollRunStatus status, LocalDateTime dateTime);
 
     long countByShopIdAndStatus(Long shopId, PayrollRunStatus status);
 

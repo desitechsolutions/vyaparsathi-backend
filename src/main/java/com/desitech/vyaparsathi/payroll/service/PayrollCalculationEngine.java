@@ -121,12 +121,20 @@ public class PayrollCalculationEngine {
 
         for (SalaryComponent component : structure.getComponents()) {
             if (component.getComponentType() != ComponentType.EARNING) continue;
+            if (Boolean.FALSE.equals(component.getIsActive())) continue;
 
             BigDecimal amount = calculateComponentAmount(
                     component,
                     baseSalary,
                     attendance
             );
+
+            if (attendance.workingDays > 0) {
+                double payableDays = attendance.presentDays + attendance.paidLeaves;
+                BigDecimal factor = BigDecimal.valueOf(payableDays)
+                        .divide(BigDecimal.valueOf(attendance.workingDays), 4, RoundingMode.HALF_UP);
+                amount = amount.multiply(factor).setScale(2, RoundingMode.HALF_UP);
+            }
 
             earnings.add(new ComponentAmount(
                     component.getComponentName(),
@@ -154,6 +162,7 @@ public class PayrollCalculationEngine {
 
         for (SalaryComponent component : structure.getComponents()) {
             if (component.getComponentType() != ComponentType.DEDUCTION) continue;
+            if (Boolean.FALSE.equals(component.getIsActive())) continue;
 
             BigDecimal amount = calculateComponentAmount(
                     component,

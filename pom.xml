@@ -292,6 +292,16 @@
       <artifactId>caffeine</artifactId>
     </dependency>
 
+    <!-- Spring Retry for PayrollRetryService (@Retryable / @Backoff) -->
+    <dependency>
+      <groupId>org.springframework.retry</groupId>
+      <artifactId>spring-retry</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-aspects</artifactId>
+    </dependency>
+
   </dependencies>
 
   <build>

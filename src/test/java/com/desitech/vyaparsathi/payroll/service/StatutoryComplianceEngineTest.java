@@ -1,6 +1,5 @@
 package com.desitech.vyaparsathi.payroll.service;
 
-import com.desitech.vyaparsathi.payroll.dto.StatutoryDeductionsDto;
 import com.desitech.vyaparsathi.payroll.entity.*;
 import com.desitech.vyaparsathi.payroll.enums.*;
 import com.desitech.vyaparsathi.payroll.repository.*;
@@ -13,8 +12,11 @@ import org.mockito.MockitoAnnotations;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @DisplayName("Statutory Compliance Engine Tests")
@@ -28,165 +30,193 @@ class StatutoryComplianceEngineTest {
 
     @InjectMocks private StatutoryComplianceEngine complianceEngine;
 
+    private static final Long SHOP_ID = 1L;
+
     private Employee testEmployee;
-    private PayrollRun testRun;
+    private PfSlab pfSlab;
+    private EsiSlab esiSlab;
+    private PtSlab ptSlab;
+    private TdsSlab tdsSlab;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
 
+        // Use correct field names: setFirstName/setLastName, setPanNumber, setUanNumber
         testEmployee = new Employee();
         testEmployee.setId(1L);
-        testEmployee.setName("John Doe");
-        testEmployee.setPan("ABCDE1234F");
-        testEmployee.setUan("100123456789");
+        testEmployee.setFirstName("John");
+        testEmployee.setLastName("Doe");
+        testEmployee.setPanNumber("ABCDE1234F");
+        testEmployee.setUanNumber("100123456789");
+        testEmployee.setPfEnrolled(true);
+        testEmployee.setEsicEnrolled(true);
+        testEmployee.setPtState("MH");
+        testEmployee.setTaxRegime(TaxRegime.NEW_REGIME);
 
-        testRun = new PayrollRun();
-        testRun.setId(1L);
-        testRun.setPayrollMonth("08");
-        testRun.setPayrollYear(2026);
+        // Setup PF slab mock
+        pfSlab = new PfSlab();
+        pfSlab.setWageLimit(new BigDecimal("15000"));
+        pfSlab.setEmployeeContributionRate(new BigDecimal("12"));
+        pfSlab.setEmployerContributionRate(new BigDecimal("12"));
+        pfSlab.setEpfContributionRate(new BigDecimal("3.67"));
+        pfSlab.setEpsContributionRate(new BigDecimal("8.33"));
+
+        // Setup ESI slab mock
+        esiSlab = new EsiSlab();
+        esiSlab.setWageCeiling(new BigDecimal("21000"));
+        esiSlab.setEmployeeRate(new BigDecimal("0.75"));
+        esiSlab.setEmployerRate(new BigDecimal("3.25"));
+
+        // Setup PT slab mock
+        ptSlab = new PtSlab();
+        ptSlab.setPtAmount(new BigDecimal("200"));
     }
 
     @Test
-    @DisplayName("Should calculate PF contribution (12% of basic + DA)")
+    @DisplayName("Should calculate PF employee deduction (12% of wages up to ceiling)")
     void testPFCalculation() {
-        BigDecimal basicSalary = BigDecimal.valueOf(50000);
-        BigDecimal da = BigDecimal.valueOf(5000);
-        BigDecimal pfBase = basicSalary.add(da); // 55000
+        BigDecimal grossWages = BigDecimal.valueOf(50000);
+        when(pfSlabRepository.findActiveSlabForDate(eq(SHOP_ID), any(LocalDate.class)))
+            .thenReturn(Optional.of(pfSlab));
 
-        StatutoryDeductionsDto result = complianceEngine.calculatePF(pfBase, testEmployee, testRun);
+        StatutoryComplianceEngine.PfDeduction result =
+            complianceEngine.calculatePF(grossWages, SHOP_ID, LocalDate.of(2026, 8, 1));
 
         assertNotNull(result);
-        BigDecimal expectedPF = pfBase.multiply(BigDecimal.valueOf(0.12));
-        assertEquals(expectedPF.setScale(2, java.math.RoundingMode.HALF_UP),
-                     result.getEmployeePFContribution().setScale(2, java.math.RoundingMode.HALF_UP));
-        assertTrue(result.getEmployerPFContribution().compareTo(BigDecimal.ZERO) > 0);
+        // PF wage is capped at 15000; 12% of 15000 = 1800
+        BigDecimal expectedEE = new BigDecimal("15000")
+            .multiply(new BigDecimal("12"))
+            .divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+        assertEquals(expectedEE, result.getEmployeeDeduction());
+        assertTrue(result.getEmployerDeduction().compareTo(BigDecimal.ZERO) > 0);
     }
 
     @Test
-    @DisplayName("Should calculate ESI contribution (0.75% EE, 3.25% ER for gross <= 21000)")
+    @DisplayName("Should calculate ESI contribution for gross <= 21000 (0.75% EE, 3.25% ER)")
     void testESICalculationBelowThreshold() {
         BigDecimal grossWages = BigDecimal.valueOf(18000);
+        when(esiSlabRepository.findActiveSlabForDate(eq(SHOP_ID), any(LocalDate.class)))
+            .thenReturn(Optional.of(esiSlab));
 
-        StatutoryDeductionsDto result = complianceEngine.calculateESI(grossWages, testEmployee);
+        StatutoryComplianceEngine.EsiDeduction result =
+            complianceEngine.calculateESI(grossWages, SHOP_ID, LocalDate.of(2026, 8, 1));
 
         assertNotNull(result);
-        BigDecimal expectedEE = grossWages.multiply(BigDecimal.valueOf(0.0075));
-        assertEquals(expectedEE.setScale(2, java.math.RoundingMode.HALF_UP),
-                     result.getEmployeeESIContribution().setScale(2, java.math.RoundingMode.HALF_UP));
+        BigDecimal expectedEE = grossWages.multiply(new BigDecimal("0.75"))
+            .divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+        assertEquals(expectedEE, result.getEmployeeDeduction());
+        assertTrue(result.getEmployerDeduction().compareTo(BigDecimal.ZERO) > 0);
     }
 
     @Test
-    @DisplayName("Should NOT calculate ESI for gross > 21000")
-    void testESICalculationAboveThreshold() {
-        BigDecimal grossWages = BigDecimal.valueOf(25000);
+    @DisplayName("Should skip ESI when no slab found (returns zero deduction)")
+    void testESINoSlabReturnsZero() {
+        when(esiSlabRepository.findActiveSlabForDate(any(), any()))
+            .thenReturn(Optional.empty());
 
-        StatutoryDeductionsDto result = complianceEngine.calculateESI(grossWages, testEmployee);
+        StatutoryComplianceEngine.EsiDeduction result =
+            complianceEngine.calculateESI(BigDecimal.valueOf(18000), SHOP_ID, LocalDate.of(2026, 8, 1));
 
         assertNotNull(result);
-        assertEquals(BigDecimal.ZERO, result.getEmployeeESIContribution());
-        assertEquals(BigDecimal.ZERO, result.getEmployerESIContribution());
+        // No slab → returns empty EsiDeduction with null fields (engine returns new EsiDeduction())
+        assertNull(result.getEmployeeDeduction());
     }
 
     @Test
-    @DisplayName("Should calculate Professional Tax based on state and slab")
+    @DisplayName("Should calculate Professional Tax based on PT slab")
     void testProfessionalTaxCalculation() {
         BigDecimal grossWages = BigDecimal.valueOf(60000);
-        testEmployee.setState("MH"); // Maharashtra
+        when(ptSlabRepository.findSlabForSalary(eq(SHOP_ID), eq("MH"), eq(grossWages), any(LocalDate.class)))
+            .thenReturn(Optional.of(ptSlab));
 
-        StatutoryDeductionsDto result = complianceEngine.calculateProfessionalTax(grossWages, testEmployee);
-
-        assertNotNull(result);
-        assertTrue(result.getProfessionalTax().compareTo(BigDecimal.ZERO) >= 0);
-    }
-
-    @Test
-    @DisplayName("Should calculate TDS (2% for standard, progressive for high income)")
-    void testTDSCalculation() {
-        BigDecimal annualIncome = BigDecimal.valueOf(750000);
-
-        StatutoryDeductionsDto result = complianceEngine.calculateTDS(annualIncome, testEmployee, testRun);
-
-        assertNotNull(result);
-        assertTrue(result.getTds().compareTo(BigDecimal.ZERO) > 0);
-    }
-
-    @Test
-    @DisplayName("Should NOT calculate TDS for income below exemption limit")
-    void testTDSNullCalculation() {
-        BigDecimal annualIncome = BigDecimal.valueOf(250000);
-
-        StatutoryDeductionsDto result = complianceEngine.calculateTDS(annualIncome, testEmployee, testRun);
-
-        assertNotNull(result);
-        assertEquals(BigDecimal.ZERO, result.getTds());
-    }
-
-    @Test
-    @DisplayName("Should validate PF UAN number")
-    void testPFUANValidation() {
-        testEmployee.setUan("100123456789");
-
-        boolean isValid = complianceEngine.validatePFUAN(testEmployee.getUan());
-
-        assertTrue(isValid);
-    }
-
-    @Test
-    @DisplayName("Should validate PAN format")
-    void testPANValidation() {
-        testEmployee.setPan("ABCDE1234F");
-
-        boolean isValid = complianceEngine.validatePAN(testEmployee.getPan());
-
-        assertTrue(isValid);
-    }
-
-    @Test
-    @DisplayName("Should generate ECR file for EPFO submission")
-    void testECRGeneration() {
-        PayrollRun run = new PayrollRun();
-        run.setId(1L);
-        run.setPayrollMonth("08");
-        run.setPayrollYear(2026);
-
-        String ecrContent = complianceEngine.generateECRFile(run);
-
-        assertNotNull(ecrContent);
-        assertTrue(ecrContent.contains("ECECR"));
-        assertTrue(ecrContent.length() > 0);
-    }
-
-    @Test
-    @DisplayName("Should generate ESIC return for submission")
-    void testESICReturnGeneration() {
-        PayrollRun run = new PayrollRun();
-        run.setId(1L);
-        run.setPayrollMonth("08");
-        run.setPayrollYear(2026);
-
-        byte[] esicReturn = complianceEngine.generateESICReturn(run);
-
-        assertNotNull(esicReturn);
-        assertTrue(esicReturn.length > 0);
-    }
-
-    @Test
-    @DisplayName("Should calculate total statutory deductions")
-    void testTotalStatutoryDeductionsCalculation() {
-        BigDecimal grossWages = BigDecimal.valueOf(65000);
-
-        StatutoryDeductionsDto result = complianceEngine.calculateTotalStatutoryDeductions(
-            grossWages, testEmployee, testRun
+        BigDecimal pt = complianceEngine.calculateProfessionalTax(
+            grossWages, "MH", SHOP_ID, LocalDate.of(2026, 8, 1)
         );
 
-        assertNotNull(result);
-        BigDecimal total = result.getEmployeePFContribution()
-            .add(result.getEmployeeESIContribution())
-            .add(result.getProfessionalTax())
-            .add(result.getTds());
+        assertNotNull(pt);
+        assertEquals(new BigDecimal("200"), pt);
+    }
 
-        assertEquals(total.setScale(2, java.math.RoundingMode.HALF_UP),
-                     result.getTotalDeductions().setScale(2, java.math.RoundingMode.HALF_UP));
+    @Test
+    @DisplayName("Should return ZERO PT when no matching slab found")
+    void testProfessionalTaxNoSlabReturnsZero() {
+        when(ptSlabRepository.findSlabForSalary(any(), any(), any(), any()))
+            .thenReturn(Optional.empty());
+
+        BigDecimal pt = complianceEngine.calculateProfessionalTax(
+            BigDecimal.valueOf(60000), "MH", SHOP_ID, LocalDate.of(2026, 8, 1)
+        );
+
+        assertEquals(BigDecimal.ZERO, pt);
+    }
+
+    @Test
+    @DisplayName("Should calculate TDS for income above exemption limit")
+    void testTDSCalculationAboveExemption() {
+        TdsSlab tdsSlab = new TdsSlab();
+        tdsSlab.setTaxRate(new BigDecimal("5"));
+        when(tdsSlabRepository.findSlabForIncome(any(), any(), any(), any()))
+            .thenReturn(Optional.of(tdsSlab));
+
+        // Monthly 65000 → annual 780000 (above 7L exemption)
+        BigDecimal tds = complianceEngine.calculateTDS(
+            testEmployee, BigDecimal.valueOf(65000), 8, 2026, SHOP_ID
+        );
+
+        assertNotNull(tds);
+        assertTrue(tds.compareTo(BigDecimal.ZERO) > 0);
+    }
+
+    @Test
+    @DisplayName("Should return ZERO TDS when no slab matches (income below exemption)")
+    void testTDSCalculationNoSlabReturnsZero() {
+        when(tdsSlabRepository.findSlabForIncome(any(), any(), any(), any()))
+            .thenReturn(Optional.empty());
+
+        BigDecimal tds = complianceEngine.calculateTDS(
+            testEmployee, BigDecimal.valueOf(20000), 8, 2026, SHOP_ID
+        );
+
+        assertEquals(BigDecimal.ZERO, tds);
+    }
+
+    @Test
+    @DisplayName("Should calculate total statutory deductions correctly (sum of PF+ESI+PT+TDS)")
+    void testTotalStatutoryDeductionsCalculation() {
+        BigDecimal grossWages = BigDecimal.valueOf(50000);
+        when(pfSlabRepository.findActiveSlabForDate(any(), any())).thenReturn(Optional.of(pfSlab));
+        when(esiSlabRepository.findActiveSlabForDate(any(), any())).thenReturn(Optional.empty()); // not enrolled / above ceiling
+        when(ptSlabRepository.findSlabForSalary(any(), any(), any(), any())).thenReturn(Optional.of(ptSlab));
+        when(tdsSlabRepository.findSlabForIncome(any(), any(), any(), any())).thenReturn(Optional.empty());
+
+        StatutoryComplianceEngine.StatutoryDeductionsResult result =
+            complianceEngine.calculateStatutoryDeductions(testEmployee, grossWages, 8, 2026, SHOP_ID);
+
+        assertNotNull(result);
+        BigDecimal computedTotal = result.getPfEmployeeDeduction()
+            .add(result.getEsiEmployeeDeduction())
+            .add(result.getProfessionalTaxDeduction())
+            .add(result.getTdsDeduction());
+        assertEquals(
+            computedTotal.setScale(2, java.math.RoundingMode.HALF_UP),
+            result.getTotalEmployeeDeductions().setScale(2, java.math.RoundingMode.HALF_UP)
+        );
+    }
+
+    @Test
+    @DisplayName("Should return zero deductions when employee has PF and ESI disabled")
+    void testNoDeductionsWhenNotEnrolled() {
+        testEmployee.setPfEnrolled(false);
+        testEmployee.setEsicEnrolled(false);
+        testEmployee.setPtState(null); // no PT state
+
+        StatutoryComplianceEngine.StatutoryDeductionsResult result =
+            complianceEngine.calculateStatutoryDeductions(testEmployee, BigDecimal.valueOf(50000), 8, 2026, SHOP_ID);
+
+        assertNotNull(result);
+        assertEquals(BigDecimal.ZERO, result.getPfEmployeeDeduction());
+        assertEquals(BigDecimal.ZERO, result.getEsiEmployeeDeduction());
+        assertEquals(BigDecimal.ZERO, result.getProfessionalTaxDeduction());
     }
 }

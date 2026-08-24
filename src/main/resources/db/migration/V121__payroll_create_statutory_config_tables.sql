@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS statutory_config (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_shop_id (shop_id),
   KEY idx_shop_id (shop_id),
-  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+  FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- PF contribution slabs (configurable per shop)
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS pf_slabs (
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY idx_shop_date (shop_id, effective_from),
-  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+  FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ESI slabs (configurable per shop)
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS esi_slabs (
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY idx_shop_date (shop_id, effective_from),
-  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+  FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Professional Tax slabs (state-wise)
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS pt_slabs (
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY idx_shop_state_date (shop_id, pt_state, effective_from),
-  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+  FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- TDS slabs (annual income based)
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS tds_slabs (
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY idx_shop_regime_date (shop_id, tax_regime, effective_from),
-  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+  FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Banking transaction logs (for reconciliation)
@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS bank_transactions (
   KEY idx_shop_status (shop_id, status),
   KEY idx_payroll_run (payroll_run_id),
   KEY idx_employee (employee_id),
-  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+  FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE,
   FOREIGN KEY (payroll_run_id) REFERENCES payroll_runs(id) ON DELETE SET NULL,
   FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -122,19 +122,19 @@ CREATE TABLE IF NOT EXISTS compliance_submissions (
   notes TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY idx_shop_period (shop_id, filing_period),
-  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+  FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE,
   FOREIGN KEY (payroll_run_id) REFERENCES payroll_runs(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Insert default slabs (India FY 2024-25)
 INSERT INTO pf_slabs (shop_id, effective_from, wage_limit, employee_contribution_rate, employer_contribution_rate, epf_contribution_rate, eps_contribution_rate)
-SELECT id, '2024-04-01', 50000.00, 12.00, 12.00, 3.67, 8.33 FROM shops LIMIT 1;
+SELECT id, '2024-04-01', 50000.00, 12.00, 12.00, 3.67, 8.33 FROM shop LIMIT 1;
 
 INSERT INTO esi_slabs (shop_id, effective_from, wage_ceiling, employee_rate, employer_rate)
-SELECT id, '2024-04-01', 21000.00, 0.75, 3.25 FROM shops LIMIT 1;
+SELECT id, '2024-04-01', 21000.00, 0.75, 3.25 FROM shop LIMIT 1;
 
 INSERT INTO pt_slabs (shop_id, pt_state, effective_from, salary_from, salary_to, pt_amount)
-SELECT id, 'MH', '2024-04-01', 0.00, 10000.00, 0.00 FROM shops LIMIT 1;
+SELECT id, 'MH', '2024-04-01', 0.00, 10000.00, 0.00 FROM shop LIMIT 1;
 
 INSERT INTO tds_slabs (shop_id, tax_regime, effective_from, income_from, income_to, tax_rate)
-SELECT id, 'NEW_REGIME', '2024-04-01', 0.00, 300000.00, 0.00 FROM shops LIMIT 1;
+SELECT id, 'NEW_REGIME', '2024-04-01', 0.00, 300000.00, 0.00 FROM shop LIMIT 1;

@@ -1,6 +1,7 @@
 package com.desitech.vyaparsathi.payroll.entity;
 
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
+import com.desitech.vyaparsathi.payroll.config.AesEncryptedStringConverter;
 import com.desitech.vyaparsathi.payroll.enums.EmploymentStatus;
 import com.desitech.vyaparsathi.payroll.enums.EmploymentType;
 import com.desitech.vyaparsathi.payroll.enums.PaymentPreference;
@@ -14,7 +15,10 @@ import java.time.LocalDate;
 @Entity
 @Table(name = "employees", indexes = {
         @Index(name = "idx_shop_status", columnList = "shop_id,employment_status"),
-        @Index(name = "idx_shop_active", columnList = "shop_id,is_active")
+        @Index(name = "idx_shop_active", columnList = "shop_id,is_active"),
+        @Index(name = "idx_shop_pan", columnList = "shop_id,pan_number")
+}, uniqueConstraints = {
+        @UniqueConstraint(name = "uc_shop_pan", columnNames = {"shop_id", "pan_number"})
 })
 @Getter
 @Setter
@@ -41,7 +45,6 @@ public class Employee extends ShopAwareEntity {
     @Column(nullable = false, length = 20)
     private String phone;
 
-    @Enumerated(EnumType.STRING)
     @Column(columnDefinition = "ENUM('MALE','FEMALE','OTHER') DEFAULT 'MALE'")
     private String gender = "MALE";
 
@@ -92,10 +95,13 @@ public class Employee extends ShopAwareEntity {
     private PaymentPreference paymentPreference = PaymentPreference.BANK_TRANSFER;
 
     // Statutory & Tax KYC
-    @Column(length = 10, unique = true)
+    // PAN unique per shop (not globally) — multi-tenant safe
+    @Column(name = "pan_number", length = 10)
     private String panNumber;
 
-    @Column(length = 12)
+    // AES-256-GCM encrypted at rest (DPDP Act 2023 compliance)
+    @Convert(converter = AesEncryptedStringConverter.class)
+    @Column(name = "aadhaar_number", length = 512)
     private String aadhaarNumber;
 
     @Column(length = 12)

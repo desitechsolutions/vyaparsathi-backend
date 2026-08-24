@@ -73,6 +73,7 @@ public class PayrollService {
     // PDF, Accounting, Form16
     @Autowired private PayslipPDFGenerator pdfGenerator;
     @Autowired private PayrollAccountingBridge accountingBridge;
+    @Autowired private PayrollEventPublisher payrollEventPublisher;
     @Autowired(required = false) private TaxDeclarationRepository taxDeclarationRepository;
     @Autowired(required = false) private AdvanceRequestRepository advanceRequestRepository;
     @Autowired(required = false) private Form16DataRepository form16DataRepository;
@@ -397,7 +398,77 @@ public class PayrollService {
 
         staffLoanRepository.save(loan);
         auditHelper.log("STAFF_LOAN", "Loan Creation", loan.getId().toString(), employee.getFirstName() + " - " + dto.getLoanType());
+
+        // Auto-generate repayment schedule immediately after loan creation
+        generateLoanRepaymentSchedule(loan);
+
         return staffLoanMapper.toDto(loan);
+    }
+
+    /**
+     * Generates and persists the full EMI repayment schedule for a loan.
+     * Uses the standard EMI formula for interest-bearing loans.
+     * For zero-interest loans, divides principal equally across tenure.
+     */
+    private void generateLoanRepaymentSchedule(StaffLoan loan) {
+        BigDecimal principal = loan.getPrincipalAmount();
+        BigDecimal annualRate = loan.getInterestRateAnnual() != null ? loan.getInterestRateAnnual() : BigDecimal.ZERO;
+        int months = loan.getTenureMonths() != null && loan.getTenureMonths() > 0 ? loan.getTenureMonths() : 1;
+
+        // Parse recovery start month (format: "MM/YYYY" or "YYYY-MM")
+        java.time.LocalDate firstDueDate;
+        try {
+            String[] parts = loan.getRecoveryStartMonth().contains("/")
+                    ? loan.getRecoveryStartMonth().split("/")
+                    : loan.getRecoveryStartMonth().split("-");
+            int recoveryMonth = Integer.parseInt(parts[0].length() == 2 ? parts[0] : parts[1]);
+            int recoveryYear  = Integer.parseInt(parts[0].length() == 4 ? parts[0] : parts[1]);
+            firstDueDate = java.time.LocalDate.of(recoveryYear, recoveryMonth, 1).withDayOfMonth(1);
+        } catch (Exception e) {
+            firstDueDate = loan.getDisbursementDate().plusMonths(1).withDayOfMonth(1);
+        }
+
+        BigDecimal emiAmount;
+        BigDecimal monthlyRate;
+
+        if (annualRate.compareTo(BigDecimal.ZERO) == 0) {
+            // Zero-interest loan — equal principal installments
+            emiAmount = principal.divide(new BigDecimal(months), 2, java.math.RoundingMode.HALF_UP);
+            monthlyRate = BigDecimal.ZERO;
+        } else {
+            monthlyRate = annualRate.divide(new BigDecimal(1200), 8, java.math.RoundingMode.HALF_UP);
+            // EMI formula: P * r * (1+r)^n / ((1+r)^n - 1)
+            BigDecimal onePlusR = BigDecimal.ONE.add(monthlyRate);
+            BigDecimal onePlusRpowN = onePlusR.pow(months);
+            emiAmount = principal.multiply(monthlyRate).multiply(onePlusRpowN)
+                    .divide(onePlusRpowN.subtract(BigDecimal.ONE), 2, java.math.RoundingMode.HALF_UP);
+        }
+
+        BigDecimal remainingPrincipal = principal;
+
+        for (int i = 1; i <= months; i++) {
+            BigDecimal interestAmount = remainingPrincipal.multiply(monthlyRate)
+                    .setScale(2, java.math.RoundingMode.HALF_UP);
+            BigDecimal principalAmount = emiAmount.subtract(interestAmount);
+
+            // Last installment: clear any rounding residual
+            if (i == months) {
+                principalAmount = remainingPrincipal;
+                emiAmount = principalAmount.add(interestAmount);
+            }
+
+            StaffLoanRepayment repayment = new StaffLoanRepayment();
+            repayment.setLoan(loan);
+            repayment.setInstallmentNumber(i);
+            repayment.setDueDate(firstDueDate.plusMonths(i - 1));
+            repayment.setPrincipalAmount(principalAmount.max(BigDecimal.ZERO));
+            repayment.setInterestAmount(interestAmount);
+            repayment.setTotalEMI(emiAmount);
+            repayment.setPaymentStatus(com.desitech.vyaparsathi.payroll.enums.RepaymentStatus.PENDING);
+            staffLoanRepaymentRepository.save(repayment);
+
+            remainingPrincipal = remainingPrincipal.subtract(principalAmount).max(BigDecimal.ZERO);
+        }
     }
 
     public BigDecimal calculateLoanEMI(BigDecimal principal, BigDecimal annualRate, Integer months) {
@@ -484,7 +555,7 @@ public class PayrollService {
     }
 
     @Transactional
-    public PayrollRunDto approvePayrollRun(Long runId, Long userId) {
+    public PayrollRunDto approvePayrollRun(Long runId, Long approverId) {
         PayrollRun run = payrollRunRepository.findById(runId)
                 .orElseThrow(() -> new EntityNotFoundAppException("PayrollRun", runId));
 
@@ -492,8 +563,16 @@ public class PayrollService {
             throw new IllegalStateException("Only PENDING_APPROVAL payroll runs can be approved");
         }
 
+        // ── Maker-Checker Validation ────────────────────────────────────────
+        // The person who prepared the run cannot approve it (four-eyes principle)
+        if (run.getPreparedByUserId() != null && run.getPreparedByUserId().equals(approverId)) {
+            throw new IllegalStateException(
+                    "Maker-Checker violation: The preparer cannot approve their own payroll run. " +
+                    "A different authorized user must approve.");
+        }
+
         run.setStatus(PayrollRunStatus.APPROVED);
-        run.setApprovedByUserId(userId);
+        run.setApprovedByUserId(approverId);
         run.setApprovedAt(LocalDate.now().atStartOfDay());
         payrollRunRepository.save(run);
         changeLogService.append("PAYROLL_RUN", runId, ChangeLogOperation.UPDATE, run, "LOCAL_DEVICE");
@@ -501,7 +580,8 @@ public class PayrollService {
     }
 
     @Transactional
-    public PayrollRunDto disbursePayrollRun(Long runId, Long userId) {
+    public PayrollRunDto disbursePayrollRun(Long runId, Long disburserId) {
+        Long shopId = TenantContext.getCurrentShopId();
         PayrollRun run = payrollRunRepository.findById(runId)
                 .orElseThrow(() -> new EntityNotFoundAppException("PayrollRun", runId));
 
@@ -510,14 +590,27 @@ public class PayrollService {
         }
 
         run.setStatus(PayrollRunStatus.DISBURSED);
-        // setDisbursedByUserId field removed — no-op
         run.setDisbursedAt(LocalDate.now().atStartOfDay());
         payrollRunRepository.save(run);
         changeLogService.append("PAYROLL_RUN", runId, ChangeLogOperation.UPDATE, run, "LOCAL_DEVICE");
 
+        // ── Post to General Ledger (FIXED: was never wired before) ──────────
+        try {
+            accountingBridge.postPayrollToGeneralLedger(run, shopId, disburserId);
+        } catch (Exception e) {
+            // GL posting failure should NOT roll back the disbursal — log and alert
+            org.slf4j.LoggerFactory.getLogger(PayrollService.class)
+                    .error("GL posting failed for payroll run {} — requires manual reconciliation: {}",
+                            runId, e.getMessage());
+        }
+
+        // ── Publish event — triggers async payslip dispatch ─────────────────
+        // (FIXED: was missing — payslips were never emailed after disbursal)
+        payrollEventPublisher.onPayrollDisbursed(run, shopId);
+
         eventPublisher.publishEvent(new NotificationEvent(
                 this, "payment", "Payroll Disbursed",
-                "Payroll run " + run.getPayrollMonth() + "/" + run.getPayrollYear() + " disbursed",
+                "Payroll run " + run.getPayrollMonth() + "/" + run.getPayrollYear() + " disbursed successfully",
                 "admin@shop.com", "/payroll/runs", "high"
         ));
 
@@ -573,8 +666,12 @@ public class PayrollService {
         slip.setWorkingDays(calculateWorkingDays(attendance, run));
         slip.setPresentDays(BigDecimal.valueOf(calculatePresentDays(attendance))); // Convert int to BigDecimal
 
-        // Set monthly basic salary (placeholder - will be calculated from components)
-        slip.setMonthlyBaseSalary(BigDecimal.ZERO);
+        // Calculate monthly basic salary from salary structure components
+        BigDecimal monthlyBaseSalary = structure.getComponents().stream()
+                .filter(c -> c.getComponentType() == ComponentType.EARNING && c.getName().equalsIgnoreCase("BASIC"))
+                .map(SalaryComponent::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        slip.setMonthlyBaseSalary(monthlyBaseSalary);
         slip.setTotalCTC(slip.getMonthlyBaseSalary().add(slip.getGrossEarnings())); // CTC = Base + Gross
 
         payrollSlipRepository.save(slip);
@@ -615,6 +712,12 @@ public class PayrollService {
     public PayrollSlipDto updatePayrollSlip(Long slipId, PayrollSlipDto dto) {
         PayrollSlip slip = payrollSlipRepository.findById(slipId)
                 .orElseThrow(() -> new EntityNotFoundAppException("PayrollSlip", slipId));
+
+        // Verify shop ownership - prevent cross-shop access
+        Long currentShopId = TenantContext.getCurrentShopId();
+        if (!slip.getShop().getId().equals(currentShopId)) {
+            throw new IllegalArgumentException("Unauthorized: Payroll slip does not belong to current shop");
+        }
 
         slip.setGrossEarnings(dto.getGrossEarnings());
         slip.setNetSalary(dto.getNetSalary());
@@ -762,9 +865,18 @@ public class PayrollService {
     }
 
     @Transactional
-    public Object submitTaxDeclaration(Long employeeId, Object declarationDto) {
-        // Mock: would map DTO to entity
-        return essEngine.submitTaxDeclaration(employeeId, new TaxDeclaration());
+    public Object submitTaxDeclaration(Long employeeId, com.desitech.vyaparsathi.payroll.dto.TaxDeclarationDto declarationDto) {
+        if (declarationDto == null) {
+            throw new IllegalArgumentException("Tax declaration data is required");
+        }
+        TaxDeclaration taxDecl = new TaxDeclaration();
+        taxDecl.setEmployee(employeeRepository.findById(employeeId).orElseThrow(() -> new EntityNotFoundAppException("Employee", employeeId)));
+        taxDecl.setSection80C(declarationDto.getSection80C());
+        taxDecl.setSection80D(declarationDto.getSection80D());
+        taxDecl.setNPS(declarationDto.getNPS());
+        taxDecl.setTaxRegime(declarationDto.getTaxRegime());
+        taxDecl.setFinancialYear(declarationDto.getFinancialYear());
+        return essEngine.submitTaxDeclaration(employeeId, taxDecl);
     }
 
     @Transactional
@@ -793,8 +905,25 @@ public class PayrollService {
     }
 
     @Transactional
-    public Object updateEssPreferences(Long employeeId, Object preferencesDto) {
-        return essEngine.updateEssPreferences(employeeId, new EssPreferences());
+    public Object updateEssPreferences(Long employeeId, java.util.Map<String, Object> preferencesDto) {
+        if (preferencesDto == null || preferencesDto.isEmpty()) {
+            throw new IllegalArgumentException("Preferences data is required");
+        }
+        EssPreferences prefs = new EssPreferences();
+        prefs.setEmployee(employeeRepository.findById(employeeId).orElseThrow(() -> new EntityNotFoundAppException("Employee", employeeId)));
+        if (preferencesDto.containsKey("emailNotifications")) {
+            prefs.setEmailNotifications(Boolean.parseBoolean(preferencesDto.get("emailNotifications").toString()));
+        }
+        if (preferencesDto.containsKey("smsNotifications")) {
+            prefs.setSmsNotifications(Boolean.parseBoolean(preferencesDto.get("smsNotifications").toString()));
+        }
+        if (preferencesDto.containsKey("whatsappNotifications")) {
+            prefs.setWhatsappNotifications(Boolean.parseBoolean(preferencesDto.get("whatsappNotifications").toString()));
+        }
+        if (preferencesDto.containsKey("autoTaxCalculation")) {
+            prefs.setAutoTaxCalculation(Boolean.parseBoolean(preferencesDto.get("autoTaxCalculation").toString()));
+        }
+        return essEngine.updateEssPreferences(employeeId, prefs);
     }
 
     @Transactional
@@ -826,7 +955,7 @@ public class PayrollService {
     }
 
     @Transactional
-    public PayrollAccountingBridge.JournalEntry postPayrollToGL(Long runId) {
+    public com.desitech.vyaparsathi.payroll.entity.JournalEntryEntity postPayrollToGL(Long runId) {
         PayrollRun run = payrollRunRepository.findById(runId)
                 .orElseThrow(() -> new EntityNotFoundAppException("PayrollRun", runId));
         Long shopId = TenantContext.getCurrentShopId();
@@ -865,4 +994,15 @@ public class PayrollService {
             generateForm16ForEmployee(emp.getId(), financialYear);
         }
     }
+
+    // Slip ownership check for EMPLOYEE role — prevents cross-employee slip access
+    public PayrollSlipDto getPayrollSlipForEmployee(Long slipId, Long employeeId) {
+        PayrollSlip slip = payrollSlipRepository.findById(slipId)
+                .orElseThrow(() -> new EntityNotFoundAppException("PayrollSlip", slipId));
+        if (!slip.getEmployee().getId().equals(employeeId)) {
+            throw new SecurityException("Access denied: slip " + slipId + " does not belong to employee " + employeeId);
+        }
+        return payrollSlipMapper.toDto(slip);
+    }
 }
+

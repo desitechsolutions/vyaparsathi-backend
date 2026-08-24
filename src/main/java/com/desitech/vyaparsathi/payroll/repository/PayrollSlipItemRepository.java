@@ -8,7 +8,9 @@ import java.util.List;
 
 @Repository
 public interface PayrollSlipItemRepository extends JpaRepository<PayrollSlipItem, Long> {
-    List<PayrollSlipItem> findByPayrollSlipIdOrderBySequence(Long slipId);
+    List<PayrollSlipItem> findByPayrollSlipId(Long slipId);
+
+    List<PayrollSlipItem> findByPayrollSlipIdOrderById(Long slipId);
 
     List<PayrollSlipItem> findByPayrollSlipIdAndComponentCode(Long slipId, String componentCode);
 

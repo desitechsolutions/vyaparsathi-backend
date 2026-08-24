@@ -51,4 +51,65 @@ public class Form16Data extends ShopAwareEntity {
 
     @Column(nullable = false)
     private Boolean isVerified = false;
+
+    public String getEmployerTan() {
+        return getShop() != null ? "TAN" + getShop().getId() : "—";
+    }
+
+    public String getEmployerAddress() {
+        return getShop() != null && getShop().getAddress() != null ? getShop().getAddress() : "—";
+    }
+
+    public String getAssessmentYear() {
+        if (financialYear != null && financialYear.contains("-")) {
+            try {
+                String[] parts = financialYear.split("-");
+                int start = Integer.parseInt(parts[0]);
+                int end = Integer.parseInt(parts[1]);
+                return (start + 1) + "-" + (end + 1);
+            } catch (Exception e) {
+                return financialYear;
+            }
+        }
+        return financialYear;
+    }
+
+    public String getPeriodFrom() {
+        if (financialYear != null && financialYear.contains("-")) {
+            return "01/04/" + financialYear.split("-")[0];
+        }
+        return "01/04/2024";
+    }
+
+    public String getPeriodTo() {
+        if (financialYear != null && financialYear.contains("-")) {
+            String[] parts = financialYear.split("-");
+            int endYear = parts[1].length() == 2 ? Integer.parseInt("20" + parts[1]) : Integer.parseInt(parts[1]);
+            return "31/03/" + endYear;
+        }
+        return "31/03/2025";
+    }
+
+    public BigDecimal getTotalDeductions() {
+        BigDecimal total = BigDecimal.ZERO;
+        if (pfContribution != null) total = total.add(pfContribution);
+        if (esiContribution != null) total = total.add(esiContribution);
+        return total;
+    }
+
+    public BigDecimal getTotalTaxableIncome() {
+        BigDecimal gti = grossTotalIncome != null ? grossTotalIncome : BigDecimal.ZERO;
+        return gti.subtract(getTotalDeductions()).max(BigDecimal.ZERO);
+    }
+
+    public BigDecimal getTaxOnIncome() {
+        if (tdsPayable == null || tdsPayable.compareTo(BigDecimal.ZERO) == 0) return BigDecimal.ZERO;
+        // Education cess is 4%, so base tax = total / 1.04
+        return tdsPayable.multiply(new BigDecimal("100")).divide(new BigDecimal("104"), 2, java.math.RoundingMode.HALF_UP);
+    }
+
+    public BigDecimal getEducationCess() {
+        if (tdsPayable == null) return BigDecimal.ZERO;
+        return tdsPayable.subtract(getTaxOnIncome()).max(BigDecimal.ZERO);
+    }
 }

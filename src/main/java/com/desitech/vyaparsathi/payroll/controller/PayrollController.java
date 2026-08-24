@@ -6,8 +6,8 @@ import com.desitech.vyaparsathi.payroll.entity.BankTransaction;
 import com.desitech.vyaparsathi.payroll.entity.PayrollSlip;
 import com.desitech.vyaparsathi.payroll.enums.AttendanceType;
 import com.desitech.vyaparsathi.payroll.enums.EmploymentStatus;
-import com.desitech.vyaparsathi.payroll.service.BankingIntegrationService;
-import com.desitech.vyaparsathi.payroll.service.PayrollService;
+import com.desitech.vyaparsathi.payroll.scheduler.LeaveCarryForwardScheduler;
+import com.desitech.vyaparsathi.payroll.service.*;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -29,6 +29,10 @@ public class PayrollController {
 
     @Autowired
     private PayrollService payrollService;
+
+    @Autowired private StatutoryReturnService statutoryReturnService;
+    @Autowired private GratuityCalculatorService gratuityCalculatorService;
+    @Autowired private LeaveCarryForwardScheduler leaveCarryForwardScheduler;
 
     // --- STAFF ENDPOINTS ---
 
@@ -90,12 +94,13 @@ public class PayrollController {
     }
 
     /**
-     * Planned for Bulk Selection: Process multiple salaries at once.
+     * Bulk salary processing — wrapped in a single transaction.
+     * All-or-nothing: if any single salary fails, the entire batch is rolled back.
      */
     @PreAuthorize("hasRole('ADMIN') or hasRole('PAYROLL_ADMIN')")
     @PostMapping("/process/bulk")
+    @org.springframework.transaction.annotation.Transactional
     public ResponseEntity<List<PayrollResponseDto>> processBulkSalary(@Valid @RequestBody List<PayrollRequestDto> dtos) {
-        // You can implement this in your service using a loop over processSalary
         List<PayrollResponseDto> responses = dtos.stream()
                 .map(payrollService::processSalary)
                 .toList();
@@ -200,9 +205,9 @@ public class PayrollController {
     }
 
     @PreAuthorize("hasAnyRole(\'ADMIN\',\'PAYROLL_ADMIN\',\'MANAGER\',\'EMPLOYEE\')")
-    @GetMapping("/loans/{employeeId}/schedule")
-    public ResponseEntity<List<StaffLoanRepaymentDto>> getLoanSchedule(@PathVariable Long employeeId) {
-        return ResponseEntity.ok(payrollService.getLoanSchedule(employeeId));
+    @GetMapping("/loans/{loanId}/schedule")
+    public ResponseEntity<List<StaffLoanRepaymentDto>> getLoanSchedule(@PathVariable Long loanId) {
+        return ResponseEntity.ok(payrollService.getLoanSchedule(loanId));
     }
 
     // --- PHASE 2: PAYROLL RUN ENDPOINTS ---
@@ -233,20 +238,20 @@ public class PayrollController {
         return ResponseEntity.ok(payrollService.markPayrollRunAsProcessing(id));
     }
 
-    @PreAuthorize("hasRole(\'ADMIN\') or hasRole(\'PAYROLL_ADMIN\')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('PAYROLL_ADMIN')")
     @PostMapping("/runs/{id}/approve")
-    public ResponseEntity<PayrollRunDto> approvePayrollRun(
-            @PathVariable Long id,
-            @RequestParam Long userId) {
-        return ResponseEntity.ok(payrollService.approvePayrollRun(id, userId));
+    public ResponseEntity<PayrollRunDto> approvePayrollRun(@PathVariable Long id) {
+        // Extract approver from authenticated principal (not client-supplied param)
+        Long approverId = getAuthenticatedUserId();
+        return ResponseEntity.ok(payrollService.approvePayrollRun(id, approverId));
     }
 
-    @PreAuthorize("hasRole(\'ADMIN\') or hasRole(\'PAYROLL_ADMIN\')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('PAYROLL_ADMIN')")
     @PostMapping("/runs/{id}/disburse")
-    public ResponseEntity<PayrollRunDto> disbursePayrollRun(
-            @PathVariable Long id,
-            @RequestParam Long userId) {
-        return ResponseEntity.ok(payrollService.disbursePayrollRun(id, userId));
+    public ResponseEntity<PayrollRunDto> disbursePayrollRun(@PathVariable Long id) {
+        // Extract disburser from authenticated principal (not client-supplied param)
+        Long disburserId = getAuthenticatedUserId();
+        return ResponseEntity.ok(payrollService.disbursePayrollRun(id, disburserId));
     }
 
     // --- PHASE 2: PAYROLL SLIP ENDPOINTS ---
@@ -259,9 +264,17 @@ public class PayrollController {
         return ResponseEntity.ok(payrollService.listPayrollSlipsForRun(runId, pageable));
     }
 
-    @PreAuthorize("hasAnyRole(\'ADMIN\',\'PAYROLL_ADMIN\',\'MANAGER\',\'EMPLOYEE\')")
+    @PreAuthorize("hasAnyRole('ADMIN','PAYROLL_ADMIN','MANAGER','EMPLOYEE')")
     @GetMapping("/slips/{slipId}")
     public ResponseEntity<PayrollSlipDto> getPayrollSlip(@PathVariable Long slipId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        // If employee role, enforce ownership check inside the service
+        boolean isEmployee = auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_EMPLOYEE"));
+        if (isEmployee) {
+            Long employeeId = getCurrentEmployeeId();
+            return ResponseEntity.ok(payrollService.getPayrollSlipForEmployee(slipId, employeeId));
+        }
         return ResponseEntity.ok(payrollService.getPayrollSlip(slipId));
     }
 
@@ -391,7 +404,7 @@ public class PayrollController {
 
     @PreAuthorize("hasRole(\'EMPLOYEE\')")
     @PostMapping("/employee/tax-declaration")
-    public ResponseEntity<Object> submitTaxDeclaration(@Valid @RequestBody Object declaration) {
+    public ResponseEntity<Object> submitTaxDeclaration(@Valid @RequestBody com.desitech.vyaparsathi.payroll.dto.TaxDeclarationDto declaration) {
         Long employeeId = getCurrentEmployeeId();
         return ResponseEntity.ok(payrollService.submitTaxDeclaration(employeeId, declaration));
     }
@@ -442,9 +455,115 @@ public class PayrollController {
 
     @PreAuthorize("hasRole(\'EMPLOYEE\')")
     @PutMapping("/employee/ess-preferences")
-    public ResponseEntity<Object> updateEssPreferences(@Valid @RequestBody Object preferences) {
+    public ResponseEntity<Object> updateEssPreferences(@Valid @RequestBody java.util.Map<String, Object> preferences) {
         Long employeeId = getCurrentEmployeeId();
         return ResponseEntity.ok(payrollService.updateEssPreferences(employeeId, preferences));
+    }
+
+    // --- STATUTORY RETURN ENDPOINTS ---
+
+    @PreAuthorize("hasAnyRole('ADMIN','PAYROLL_ADMIN')")
+    @GetMapping("/statutory/esic-return/{runId}")
+    public ResponseEntity<byte[]> downloadESICReturn(@PathVariable Long runId) {
+        byte[] excelBytes = statutoryReturnService.generateESICMonthlyReturn(runId);
+        return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=ESIC_Monthly_Return_Run" + runId + ".xlsx")
+                .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                .body(excelBytes);
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','PAYROLL_ADMIN')")
+    @GetMapping("/statutory/24q-tds")
+    public ResponseEntity<byte[]> download24QTDSReturn(
+            @RequestParam String financialYear,
+            @RequestParam Integer quarter) {
+        Long shopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        byte[] csvBytes = statutoryReturnService.generate24QTDSReturn(shopId, financialYear, quarter);
+        return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=24Q_TDS_Q" + quarter + "_" + financialYear + ".csv")
+                .header("Content-Type", "text/csv; charset=UTF-8")
+                .body(csvBytes);
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','PAYROLL_ADMIN')")
+    @GetMapping("/statutory/lwf-return")
+    public ResponseEntity<byte[]> downloadLWFReturn(
+            @RequestParam Integer month,
+            @RequestParam Integer year,
+            @RequestParam String state) {
+        Long shopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        byte[] csvBytes = statutoryReturnService.generateLWFReturn(shopId, month, year, state);
+        return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=LWF_" + state + "_" + month + "_" + year + ".csv")
+                .header("Content-Type", "text/csv; charset=UTF-8")
+                .body(csvBytes);
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','PAYROLL_ADMIN')")
+    @GetMapping("/runs/{runId}/dispatch-stats")
+    public ResponseEntity<Object> getDispatchStats(@PathVariable Long runId) {
+        return ResponseEntity.ok(payrollService.getDispatchStats(runId));
+    }
+
+    // --- GRATUITY ENDPOINTS ---
+
+    @PreAuthorize("hasAnyRole('ADMIN','PAYROLL_ADMIN','HR')")
+    @GetMapping("/employees/{employeeId}/gratuity")
+    public ResponseEntity<Object> calculateGratuity(
+            @PathVariable Long employeeId,
+            @RequestParam(required = false) String asOnDate) {
+        java.time.LocalDate date = asOnDate != null
+                ? java.time.LocalDate.parse(asOnDate)
+                : java.time.LocalDate.now();
+        return ResponseEntity.ok(gratuityCalculatorService.calculateGratuity(employeeId, date));
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','PAYROLL_ADMIN','HR')")
+    @GetMapping("/gratuity/bulk")
+    public ResponseEntity<Object> calculateBulkGratuity(
+            @RequestParam(required = false) String asOnDate) {
+        Long shopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        java.time.LocalDate date = asOnDate != null
+                ? java.time.LocalDate.parse(asOnDate)
+                : java.time.LocalDate.now();
+        return ResponseEntity.ok(gratuityCalculatorService.calculateBulkGratuity(shopId, date));
+    }
+
+    // --- LEAVE CARRY-FORWARD ADMIN TRIGGER ---
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping("/leave/carry-forward")
+    public ResponseEntity<String> triggerLeaveCarryForward(
+            @RequestParam Integer fromYear) {
+        Long shopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        leaveCarryForwardScheduler.runCarryForwardForShop(shopId, fromYear);
+        return ResponseEntity.ok("Leave carry-forward from " + fromYear + " to " + (fromYear + 1) + " completed.");
+    }
+
+    // Get authenticated user ID from security context
+    private Long getAuthenticatedUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new IllegalStateException("User not authenticated");
+        }
+        try {
+            Object principal = auth.getPrincipal();
+            if (principal instanceof java.util.Map) {
+                Object userId = ((java.util.Map<?, ?>) principal).get("userId");
+                if (userId != null) return Long.valueOf(userId.toString());
+                // Also try sub (JWT subject)
+                Object sub = ((java.util.Map<?, ?>) principal).get("sub");
+                if (sub != null) return Long.valueOf(sub.toString());
+            }
+            // Fallback: parse from username if numeric
+            String username = auth.getName();
+            if (username != null && username.matches("\\d+")) {
+                return Long.valueOf(username);
+            }
+        } catch (Exception e) {
+            // Fall through
+        }
+        throw new IllegalStateException("Cannot extract user ID from authentication: " + auth.getName());
     }
 
     // Get authenticated employee ID from security context
@@ -494,6 +613,42 @@ public class PayrollController {
             @RequestParam Long leaveTypeId) {
         Long employeeId = getCurrentEmployeeId();
         return new ResponseEntity<>(leaveManagementService.applyLeave(employeeId, fromDate, toDate, leaveTypeId, ""), HttpStatus.CREATED);
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','PAYROLL_ADMIN','MANAGER')")
+    @GetMapping("/leave-applications")
+    public ResponseEntity<List<com.desitech.vyaparsathi.payroll.dto.LeaveApplicationDto>> listAllLeaveApplications(
+            @RequestParam(required = false, defaultValue = "PENDING") String status) {
+        return ResponseEntity.ok(leaveManagementService.listLeaveApplicationsByStatus(status));
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','PAYROLL_ADMIN','MANAGER')")
+    @PostMapping("/leave-applications/{id}/approve")
+    public ResponseEntity<com.desitech.vyaparsathi.payroll.dto.LeaveApplicationDto> approveLeaveApplication(
+            @PathVariable Long id) {
+        Long approverId = getAuthenticatedUserId();
+        return ResponseEntity.ok(leaveManagementService.approveLeaveApplication(id, approverId));
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','PAYROLL_ADMIN','MANAGER')")
+    @PostMapping("/leave-applications/{id}/reject")
+    public ResponseEntity<com.desitech.vyaparsathi.payroll.dto.LeaveApplicationDto> rejectLeaveApplication(
+            @PathVariable Long id,
+            @RequestParam(required = false) String reason) {
+        return ResponseEntity.ok(leaveManagementService.rejectLeaveApplication(id, reason));
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','PAYROLL_ADMIN','MANAGER','EMPLOYEE')")
+    @GetMapping("/leave-balance")
+    public ResponseEntity<com.desitech.vyaparsathi.payroll.dto.LeaveBalanceDto> getLeaveBalance(
+            @RequestParam(required = false) Long employeeId,
+            @RequestParam(required = false) Long leaveTypeId) {
+        // If no employeeId provided, use current user's employee record
+        Long empId = employeeId;
+        if (empId == null) {
+            empId = getCurrentEmployeeId();
+        }
+        return ResponseEntity.ok(leaveManagementService.getLeaveBalance(empId, leaveTypeId));
     }
 
     // --- HOLIDAY CALENDAR ENDPOINTS (P1) ---

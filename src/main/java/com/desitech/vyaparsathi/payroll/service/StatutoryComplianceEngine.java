@@ -18,6 +18,7 @@ public class StatutoryComplianceEngine {
     @Autowired private PtSlabRepository ptSlabRepository;
     @Autowired private TdsSlabRepository tdsSlabRepository;
     @Autowired private StatutoryConfigRepository configRepository;
+    @Autowired private TaxDeclarationRepository taxDeclarationRepository;
 
     public StatutoryDeductionsResult calculateStatutoryDeductions(
             Employee employee,
@@ -100,15 +101,82 @@ public class StatutoryComplianceEngine {
     }
 
     public BigDecimal calculateTDS(Employee employee, BigDecimal monthlyGross, int month, int year, Long shopId) {
-        // Simple: annual income estimate * TDS rate
+        // ── Step 1: Annual income estimate ──────────────────────────────────
         BigDecimal annualEstimate = monthlyGross.multiply(new BigDecimal(12));
+        BigDecimal taxableIncome = annualEstimate;
 
-        TdsSlab slab = tdsSlabRepository.findSlabForIncome(shopId, employee.getTaxRegime(), annualEstimate, LocalDate.of(year, month, 1)).orElse(null);
+        String regime = employee.getTaxRegime() != null ? employee.getTaxRegime().name() : "NEW_REGIME";
+
+        // ── Step 2: Standard Deduction (Sec 16) ─────────────────────────────
+        // New Regime: ₹75,000 | Old Regime: ₹50,000
+        BigDecimal standardDeduction = "NEW_REGIME".equals(regime)
+                ? new BigDecimal("75000")
+                : new BigDecimal("50000");
+        taxableIncome = taxableIncome.subtract(standardDeduction);
+
+        // ── Step 3: Chapter VI-A deductions (Old Regime only) ───────────────
+        // Under New Regime, most deductions are not available
+        if ("OLD_REGIME".equals(regime)) {
+            try {
+                String fy = year + "-" + (year + 1 - 2000);
+                var declaration = taxDeclarationRepository
+                        .findByEmployeeIdAndFinancialYear(employee.getId(), fy).orElse(null);
+                if (declaration != null) {
+                    // 80C — capped at ₹1,50,000
+                    BigDecimal section80c = BigDecimal.ZERO
+                            .add(nvlBD(declaration.getLifeInsurancePremium()))
+                            .add(nvlBD(declaration.getEducationExpenses()))
+                            .add(nvlBD(declaration.getHomeLoanPrincipal()))
+                            .add(nvlBD(declaration.getOther80cDeductions()))
+                            .min(new BigDecimal("150000"));
+                    taxableIncome = taxableIncome.subtract(section80c);
+
+                    // 80D — Medical Insurance (capped ₹25,000 individual, ₹50,000 senior)
+                    BigDecimal section80d = nvlBD(declaration.getMedicalInsurancePremium())
+                            .min(new BigDecimal("50000"));
+                    taxableIncome = taxableIncome.subtract(section80d);
+
+                    // 80CCD(1B) — NPS contribution (additional ₹50,000 deduction)
+                    BigDecimal nps = nvlBD(declaration.getNpsContribution()).min(new BigDecimal("50000"));
+                    taxableIncome = taxableIncome.subtract(nps);
+
+                    // 24(b) — Home Loan Interest (capped ₹2,00,000)
+                    BigDecimal homeLoanInterest = nvlBD(declaration.getHomeLoanInterest())
+                            .min(new BigDecimal("200000"));
+                    taxableIncome = taxableIncome.subtract(homeLoanInterest);
+                }
+            } catch (Exception e) {
+                // Declaration lookup failed — proceed without deductions
+            }
+        } else {
+            // New Regime: only NPS employer contribution (Sec 80CCD(2)) and a few exemptions
+            // Standard deduction already applied above
+        }
+
+        // Ensure taxable income is not negative
+        if (taxableIncome.compareTo(BigDecimal.ZERO) < 0) taxableIncome = BigDecimal.ZERO;
+
+        // ── Step 4: Section 87A Rebate (New Regime: ≤ ₹7L → zero tax) ──────
+        if ("NEW_REGIME".equals(regime) && taxableIncome.compareTo(new BigDecimal("700000")) <= 0) {
+            return BigDecimal.ZERO; // Full rebate — no TDS
+        }
+
+        // ── Step 5: Apply TDS slab to taxable income ────────────────────────
+        TdsSlab slab = tdsSlabRepository.findSlabForIncome(shopId, employee.getTaxRegime(),
+                taxableIncome, LocalDate.of(year, month, 1)).orElse(null);
         if (slab == null) return BigDecimal.ZERO;
 
-        return annualEstimate.multiply(slab.getTaxRate())
-                .divide(new BigDecimal(100 * 12), 2, RoundingMode.HALF_UP);
+        BigDecimal annualTax = taxableIncome.multiply(slab.getTaxRate())
+                .divide(new BigDecimal(100), 2, RoundingMode.HALF_UP);
+
+        // Add 4% Health & Education Cess
+        annualTax = annualTax.multiply(new BigDecimal("1.04")).setScale(2, RoundingMode.HALF_UP);
+
+        // Monthly TDS = annual tax / 12
+        return annualTax.divide(new BigDecimal(12), 2, RoundingMode.HALF_UP);
     }
+
+    private BigDecimal nvlBD(BigDecimal v) { return v != null ? v : BigDecimal.ZERO; }
 
     // Result DTOs
     public static class StatutoryDeductionsResult {

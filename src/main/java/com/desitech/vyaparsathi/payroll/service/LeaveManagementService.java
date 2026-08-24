@@ -42,6 +42,11 @@ public class LeaveManagementService {
         leaveType.setIsProrated(dto.getIsProrated());
         leaveType.setIsActive(dto.getIsActive());
 
+        // Set shop from context
+        Shop shop = new Shop();
+        shop.setId(shopId);
+        leaveType.setShop(shop);
+
         leaveTypeRepository.save(leaveType);
         dto.setId(leaveType.getId());
         return dto;
@@ -123,11 +128,12 @@ public class LeaveManagementService {
         LeaveApplication application = leaveApplicationRepository.findById(applicationId)
                 .orElseThrow(() -> new EntityNotFoundAppException("LeaveApplication", applicationId));
 
-        Employee approver = employeeRepository.findById(approverId)
-                .orElseThrow(() -> new EntityNotFoundAppException("Employee", approverId));
+        // approverId is userId; for now just set approval without looking up full Employee
+        // TODO: Implement Employee.findByUserId mapping if needed
+        Long shopId = TenantContext.getCurrentShopId();
 
         application.setStatus("APPROVED");
-        application.setApprover(approver);
+        application.setApprovedAt(java.time.LocalDateTime.now());
         leaveApplicationRepository.save(application);
 
         // Deduct from leave balance
@@ -156,6 +162,58 @@ public class LeaveManagementService {
         return toDto(application);
     }
 
+    public LeaveBalanceDto getLeaveBalance(Long employeeId, Long leaveTypeId) {
+        Integer currentYear = java.time.LocalDate.now().getYear();
+
+        if (leaveTypeId != null) {
+            // Get balance for specific leave type
+            LeaveBalance balance = leaveBalanceRepository.findByEmployeeIdAndLeaveTypeIdAndYear(employeeId, leaveTypeId, currentYear)
+                    .orElse(null);
+
+            if (balance == null) {
+                // Return zero balance if not found
+                return LeaveBalanceDto.builder()
+                        .employeeId(employeeId)
+                        .leaveTypeId(leaveTypeId)
+                        .year(currentYear)
+                        .allocated(BigDecimal.ZERO)
+                        .used(BigDecimal.ZERO)
+                        .closingBalance(BigDecimal.ZERO)
+                        .build();
+            }
+
+            return LeaveBalanceDto.builder()
+                    .id(balance.getId())
+                    .employeeId(employeeId)
+                    .leaveTypeId(balance.getLeaveType().getId())
+                    .leaveTypeName(balance.getLeaveType().getName())
+                    .year(currentYear)
+                    .openingBalance(balance.getOpeningBalance())
+                    .allocated(balance.getAllocated())
+                    .used(balance.getUsed())
+                    .carriedForward(balance.getCarriedForward())
+                    .closingBalance(balance.getClosingBalance())
+                    .build();
+        } else {
+            // Return aggregated balance for all leave types
+            List<LeaveBalance> allBalances = leaveBalanceRepository.findByEmployeeIdAndYear(employeeId, currentYear);
+            BigDecimal totalAllocated = allBalances.stream()
+                    .map(LeaveBalance::getAllocated)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal totalUsed = allBalances.stream()
+                    .map(LeaveBalance::getUsed)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            return LeaveBalanceDto.builder()
+                    .employeeId(employeeId)
+                    .year(currentYear)
+                    .allocated(totalAllocated)
+                    .used(totalUsed)
+                    .closingBalance(totalAllocated.subtract(totalUsed))
+                    .build();
+        }
+    }
+
     public LeaveBalanceDto getEmployeeLeaveBalance(Long employeeId, Integer year) {
         LeaveBalance balance = leaveBalanceRepository.findByEmployeeIdAndLeaveTypeIdAndYear(employeeId, 1L, year)
                 .orElseThrow(() -> new EntityNotFoundAppException("LeaveBalance", null));
@@ -172,6 +230,14 @@ public class LeaveManagementService {
                 .carriedForward(balance.getCarriedForward())
                 .closingBalance(balance.getClosingBalance())
                 .build();
+    }
+
+    public List<LeaveApplicationDto> listLeaveApplicationsByStatus(String status) {
+        Long shopId = TenantContext.getCurrentShopId();
+        return leaveApplicationRepository.findByShopIdAndStatusOrderByIdDesc(shopId, status)
+                .stream()
+                .map(this::toDto)
+                .collect(Collectors.toList());
     }
 
     private LeaveApplicationDto toDto(LeaveApplication application) {

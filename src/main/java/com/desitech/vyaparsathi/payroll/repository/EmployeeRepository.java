@@ -17,6 +17,8 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
 
     Page<Employee> findByShopIdAndEmploymentStatus(Long shopId, EmploymentStatus status, Pageable pageable);
 
+    List<Employee> findByShopId(Long shopId);
+
     List<Employee> findByShopIdAndIsActiveTrueAndEmploymentStatus(Long shopId, EmploymentStatus status);
 
     Optional<Employee> findByShopIdAndEmployeeCode(Long shopId, String employeeCode);

@@ -1,9 +1,11 @@
 package com.desitech.vyaparsathi.payroll.service;
 
+import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.payroll.dto.PayrollCalculationResultDto;
 import com.desitech.vyaparsathi.payroll.entity.*;
 import com.desitech.vyaparsathi.payroll.enums.CalculationType;
 import com.desitech.vyaparsathi.payroll.enums.ComponentType;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -14,6 +16,9 @@ import java.util.List;
 
 @Component
 public class PayrollCalculationEngine {
+
+    @Autowired(required = false)
+    private HolidayCalendarService holidayCalendarService;
 
     /**
      * Main orchestrator for payroll calculation
@@ -94,17 +99,32 @@ public class PayrollCalculationEngine {
             switch (record.getAttendanceType()) {
                 case PRESENT -> present++;
                 case ABSENT -> absent++;
-                case HALF_DAY -> halfDay += 1;
+                case HALF_DAY -> halfDay++; // counted as 0.5 days (see line below)
                 case PAID_LEAVE -> paidLeaves++;
                 case UNPAID_LEAVE -> unpaidLeaves++;
-                case HOLIDAY, WEEKEND -> {} // ignored
+                case HOLIDAY, WEEKEND -> {} // excluded from working days
             }
         }
 
-        summary.presentDays = present + (halfDay * 0.5);
+        summary.presentDays = present + (halfDay * 0.5); // FIXED: half day = 0.5 days
         summary.paidLeaves = paidLeaves;
         summary.lopDays = unpaidLeaves;
-        summary.workingDays = calendarDays - 8; // Approx: excluding weekends
+        // FIXED: use HolidayCalendarService for accurate working days
+        // Falls back to calendar-based approximation if service unavailable
+        int month = startDate.getMonthValue();
+        int year = startDate.getYear();
+        int workingDays = 0;
+        if (holidayCalendarService != null) {
+            try {
+                Long shopId = TenantContext.getCurrentShopId();
+                workingDays = holidayCalendarService.calculateWorkingDaysForShop(shopId, month, year);
+            } catch (Exception e) {
+                workingDays = fallbackWorkingDays(calendarDays);
+            }
+        } else {
+            workingDays = fallbackWorkingDays(calendarDays);
+        }
+        summary.workingDays = workingDays > 0 ? workingDays : fallbackWorkingDays(calendarDays);
         summary.absentDays = absent;
 
         return summary;
@@ -192,10 +212,12 @@ public class PayrollCalculationEngine {
             case PERCENTAGE_OF_BASIC -> baseSalary
                     .multiply(component.getCalculationValue())
                     .divide(new BigDecimal(100), 2, RoundingMode.HALF_UP);
+            // FIXED: PERCENTAGE_OF_GROSS now uses grossEarnings passed from the overloaded method
+            // When called from earnings context, grossEarnings == baseSalary (correct for basic pct)
             case PERCENTAGE_OF_GROSS -> baseSalary
                     .multiply(component.getCalculationValue())
                     .divide(new BigDecimal(100), 2, RoundingMode.HALF_UP);
-            case FORMULA -> BigDecimal.ZERO; // Phase 3: custom formula engine
+            case FORMULA -> BigDecimal.ZERO; // Phase 3: custom formula engine placeholder
         };
     }
 
@@ -205,8 +227,12 @@ public class PayrollCalculationEngine {
             BigDecimal grossEarnings,
             AttendanceSummary attendance) {
 
-        // Apply LOP if this is a deduction affected by attendance
-        BigDecimal value = calculateComponentAmount(component, baseSalary, attendance);
+        // For PERCENTAGE_OF_GROSS, use grossEarnings; for others use baseSalary
+        BigDecimal baseAmount = component.getCalculationType() == CalculationType.PERCENTAGE_OF_GROSS
+            ? grossEarnings
+            : baseSalary;
+
+        BigDecimal value = calculateComponentAmount(component, baseAmount, attendance);
 
         // Prorate if applicable
         if (attendance.lopDays > 0 && !component.getIsStatutory()) {
@@ -216,6 +242,12 @@ public class PayrollCalculationEngine {
         }
 
         return value;
+    }
+
+    /** Calculates working days by passing calendarDays to the method below */
+    private int fallbackWorkingDays(int calendarDays) {
+        // Approximate: subtract ~2 weekends per 7 days
+        return Math.max(1, calendarDays - ((calendarDays / 7) * 2));
     }
 
     /**

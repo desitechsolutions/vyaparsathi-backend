@@ -16,6 +16,8 @@ public interface StaffLoanRepository extends JpaRepository<StaffLoan, Long> {
 
     List<StaffLoan> findByEmployeeId(Long employeeId);
 
+    Page<StaffLoan> findByEmployeeIdOrderByDisbursementDateDesc(Long employeeId, Pageable pageable);
+
     List<StaffLoan> findByEmployeeIdAndStatus(Long employeeId, LoanStatus status);
 
     Page<StaffLoan> findByShopIdAndStatus(Long shopId, LoanStatus status, Pageable pageable);

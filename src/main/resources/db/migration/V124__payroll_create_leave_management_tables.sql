@@ -11,11 +11,9 @@ CREATE TABLE IF NOT EXISTS leave_types (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
-    UNIQUE KEY uk_shop_name (shop_id, name),
-    CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci,
-    ENGINE=InnoDB
-) COMMENT='Master leave type definitions (Annual, Sick, Casual, etc.)';
+    FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_shop_name (shop_id, name)
+) ENGINE=InnoDB CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT='Master leave type definitions (Annual, Sick, Casual, etc.)';
 
 CREATE TABLE IF NOT EXISTS leave_balances (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -30,14 +28,12 @@ CREATE TABLE IF NOT EXISTS leave_balances (
     closing_balance DECIMAL(10,2) DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+    FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
     FOREIGN KEY (leave_type_id) REFERENCES leave_types(id) ON DELETE CASCADE,
     UNIQUE KEY uk_employee_type_year (employee_id, leave_type_id, year),
-    INDEX idx_shop_employee (shop_id, employee_id),
-    CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci,
-    ENGINE=InnoDB
-) COMMENT='Leave balance tracking per employee per year';
+    INDEX idx_shop_employee (shop_id, employee_id)
+) ENGINE=InnoDB CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT='Leave balance tracking per employee per year';
 
 CREATE TABLE IF NOT EXISTS leave_applications (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -53,12 +49,10 @@ CREATE TABLE IF NOT EXISTS leave_applications (
     approval_comments TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE,
+    FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
     FOREIGN KEY (leave_type_id) REFERENCES leave_types(id) ON DELETE CASCADE,
     FOREIGN KEY (approver_id) REFERENCES employees(id) ON DELETE SET NULL,
     INDEX idx_shop_employee_status (shop_id, employee_id, status),
-    INDEX idx_dates (from_date, to_date),
-    CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci,
-    ENGINE=InnoDB
-) COMMENT='Leave application requests with approval workflow';
+    INDEX idx_dates (from_date, to_date)
+) ENGINE=InnoDB CHARSET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT='Leave application requests with approval workflow';

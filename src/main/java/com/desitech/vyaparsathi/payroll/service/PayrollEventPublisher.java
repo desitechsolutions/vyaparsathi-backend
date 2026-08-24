@@ -14,7 +14,7 @@ public class PayrollEventPublisher {
 
     @Autowired private ApplicationEventPublisher eventPublisher;
     @Autowired private PayslipDispatchService dispatchService;
-    @Autowired private PayrollService payrollService;
+    @Autowired @org.springframework.context.annotation.Lazy private PayrollService payrollService;
 
     @Value("${gl.posting.enabled:true}")
     private boolean glPostingEnabled;

@@ -25,5 +25,14 @@ public interface PayrollSlipRepository extends JpaRepository<PayrollSlip, Long> 
 
     long countByPayrollRunIdAndPayoutStatus(Long runId, PayoutStatus payoutStatus);
 
+    long countByPayrollRunId(Long runId);
+
     List<PayrollSlip> findByCreatedAtBetweenAndShopId(LocalDateTime startDate, LocalDateTime endDate, Long shopId);
+
+    // Used by StatutoryReturnService for 24Q TDS return — joins to PayrollRun for year/month
+    @org.springframework.data.jpa.repository.Query(
+            "SELECT s FROM PayrollSlip s WHERE s.employee.id = :employeeId " +
+            "AND s.payrollRun.payrollYear = :year AND s.payrollRun.payrollMonth = :month")
+    List<PayrollSlip> findByEmployeeIdAndPayrollYearAndPayrollMonth(
+            Long employeeId, Integer year, Integer month);
 }

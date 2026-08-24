@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS tax_declarations (
   
   KEY idx_employee_fy (employee_id, financial_year),
   FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+  FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Salary Advance Requests (Employee -> Admin)
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS advance_requests (
   KEY idx_employee_status (employee_id, status),
   KEY idx_shop_status (shop_id, status),
   FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+  FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Payslip Dispatch Log (tracking email/WhatsApp delivery)
@@ -127,5 +127,5 @@ CREATE TABLE IF NOT EXISTS form16_data (
   
   KEY idx_employee_fy (employee_id, financial_year),
   FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-  FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+  FOREIGN KEY (shop_id) REFERENCES shop(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

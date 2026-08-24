@@ -22,4 +22,6 @@ public interface LeaveApplicationRepository extends JpaRepository<LeaveApplicati
     long countByEmployeeIdAndStatus(Long employeeId, String status);
 
     Page<LeaveApplication> findByEmployeeId(Long employeeId, Pageable pageable);
+
+    List<LeaveApplication> findByShopIdAndStatusOrderByIdDesc(Long shopId, String status);
 }

@@ -302,6 +302,41 @@
       <artifactId>spring-aspects</artifactId>
     </dependency>
 
+    <!-- ─── Enterprise Payroll Phase 2 Dependencies ──────────────────────── -->
+
+    <!-- OpenPDF (iText fork) — real PDF generation for payslips and Form 16 -->
+    <dependency>
+      <groupId>com.github.librepdf</groupId>
+      <artifactId>openpdf</artifactId>
+      <version>1.3.30</version>
+    </dependency>
+
+    <!-- ZXing — QR code generation for payslip digital verification -->
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>core</artifactId>
+      <version>3.5.3</version>
+    </dependency>
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>javase</artifactId>
+      <version>3.5.3</version>
+    </dependency>
+
+    <!-- Apache POI OOXML — Excel file generation for ESIC monthly return -->
+    <dependency>
+      <groupId>org.apache.poi</groupId>
+      <artifactId>poi-ooxml</artifactId>
+      <version>5.2.5</version>
+    </dependency>
+
+    <!-- Bouncy Castle — AES-256-GCM support for PII encryption -->
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcprov-jdk18on</artifactId>
+      <version>1.77</version>
+    </dependency>
+
   </dependencies>
 
   <build>

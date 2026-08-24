@@ -123,4 +123,24 @@ public class HolidayCalendarService {
 
         return totalDays - weekendCount - holidayCount;
     }
+
+    /**
+     * Convenience method for PayrollCalculationEngine — resolves calendar by shopId automatically.
+     * Falls back to weekend-only calculation if no holiday calendar is configured for the year.
+     */
+    public Integer calculateWorkingDaysForShop(Long shopId, Integer month, Integer year) {
+        HolidayCalendar calendar = holidayCalendarRepository.findByShopIdAndYear(shopId, year).orElse(null);
+        if (calendar == null) {
+            // No calendar configured — use weekend-only calculation
+            java.time.YearMonth ym = java.time.YearMonth.of(year, month);
+            int totalDays = ym.lengthOfMonth();
+            int weekends = 0;
+            for (int d = 1; d <= totalDays; d++) {
+                java.time.DayOfWeek dow = java.time.LocalDate.of(year, month, d).getDayOfWeek();
+                if (dow == java.time.DayOfWeek.SATURDAY || dow == java.time.DayOfWeek.SUNDAY) weekends++;
+            }
+            return totalDays - weekends;
+        }
+        return calculateWorkingDays(calendar.getId(), month, year);
+    }
 }

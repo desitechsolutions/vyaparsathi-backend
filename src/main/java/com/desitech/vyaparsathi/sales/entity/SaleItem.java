@@ -1,6 +1,8 @@
 package com.desitech.vyaparsathi.sales.entity;
 
-import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
+import com.desitech.vyaparsathi.common.entities.AuditableFinancialEntity;
+import com.desitech.vyaparsathi.gst.enums.GstnUqc;
+import com.desitech.vyaparsathi.gst.enums.LineType;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.sales.enums.GSTType;
 import com.fasterxml.jackson.annotation.JsonBackReference;
@@ -16,7 +18,7 @@ import java.math.BigDecimal;
 @Setter
 @NoArgsConstructor
 @Table(name = "sale_item")
-public class SaleItem extends ShopAwareEntity {
+public class SaleItem extends AuditableFinancialEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "sale_id", nullable = false)
@@ -74,6 +76,43 @@ public class SaleItem extends ShopAwareEntity {
 
     @Column(name = "discount", precision = 12, scale = 2)
     private BigDecimal discount = BigDecimal.ZERO;
+
+    /**
+     * GST Compensation Cess rate (%) for cess-liable goods.
+     * Applicable to: tobacco products, pan masala, aerated drinks, coal,
+     * luxury/mid-size cars. Zero for the vast majority of supplies.
+     * Used in calculation: cessAmt = taxableValue × cessRate / 100.
+     */
+    @Column(name = "cess_rate", nullable = false, precision = 5, scale = 2)
+    private BigDecimal cessRate = BigDecimal.ZERO;
+
+    /**
+     * Computed cess amount for this line = taxableValue × cessRate / 100.
+     * Included in GSTR-1 HSN Summary Table 12 column {@code csamt},
+     * GSTR-3B Section 3.1(a), and e-invoice item payload.
+     */
+    @Column(name = "cess_amt", nullable = false, precision = 12, scale = 2)
+    private BigDecimal cessAmt = BigDecimal.ZERO;
+
+    /**
+     * Classifies this line as physical goods or a service.
+     * Drives HSN-vs-SAC treatment in GSTR-1 Table 12 and UQC reporting.
+     * Propagated from {@link ItemVariant#getLineType()} at line creation;
+     * overridable for custom (non-catalog) lines.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "line_type", nullable = false, length = 10)
+    private LineType lineType = LineType.GOODS;
+
+    /**
+     * GSTN Unit Quantity Code for the HSN Summary Table 12.
+     * Propagated from {@link ItemVariant#getUqc()} at line creation.
+     * Must be a valid value from the {@link GstnUqc} master list, or {@code "OTH"}.
+     * For service lines ({@link LineType#SERVICES}) this is written as {@code "NA"}
+     * in the GSTN filing payload — see {@link GstnUqc#gstnCodeForService()}.
+     */
+    @Column(name = "uqc", nullable = false, length = 10)
+    private String uqc = GstnUqc.OTH.getCode();
 
     @Column(name = "returned_qty", precision = 10, scale = 2)
     private BigDecimal returnedQty = BigDecimal.ZERO;
@@ -164,6 +203,34 @@ public class SaleItem extends ShopAwareEntity {
 
     public String getCustomUnit() { return customUnit; }
     public void setCustomUnit(String customUnit) { this.customUnit = customUnit; }
+
+    public BigDecimal getCessRate() { return cessRate; }
+    public void setCessRate(BigDecimal cessRate) {
+        this.cessRate = cessRate != null ? cessRate : BigDecimal.ZERO;
+    }
+
+    public BigDecimal getCessAmt() { return cessAmt; }
+    public void setCessAmt(BigDecimal cessAmt) {
+        this.cessAmt = cessAmt != null ? cessAmt : BigDecimal.ZERO;
+    }
+
+    public LineType getLineType() { return lineType; }
+    public void setLineType(LineType lineType) {
+        this.lineType = lineType != null ? lineType : LineType.GOODS;
+    }
+
+    public String getUqc() { return uqc; }
+    public void setUqc(String uqc) {
+        this.uqc = (uqc != null && !uqc.isBlank()) ? uqc.trim().toUpperCase() : GstnUqc.OTH.getCode();
+    }
+
+    /**
+     * Returns the UQC as it must appear in GSTN filing payloads.
+     * For service lines GSTN mandates {@code "NA"} regardless of the stored value.
+     */
+    public String getGstnUqc() {
+        return lineType == LineType.SERVICES ? GstnUqc.gstnCodeForService() : uqc;
+    }
 
     /**
      * Convenience: {@code true} when this line references a catalog {@link ItemVariant},

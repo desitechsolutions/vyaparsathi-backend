@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.inventory.service;
 
+import com.desitech.vyaparsathi.common.annotations.CheckSubscriptionLimit;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.common.exception.DuplicateItemException;
@@ -67,6 +68,7 @@ public class ItemService {
         return dto;
     }
 
+    @CheckSubscriptionLimit("ITEMS")
     @Transactional
     public ItemDto createItem(ItemDto itemDto) {
         if (itemRepository.existsByNameAndBrandNameAndShopId(
@@ -86,6 +88,7 @@ public class ItemService {
         return mapper.toDto(item);
     }
 
+    @CheckSubscriptionLimit("ITEMS")
     @Transactional
     public List<ItemDto> createItems(List<ItemDto> items) {
         items.forEach(itemDto -> {

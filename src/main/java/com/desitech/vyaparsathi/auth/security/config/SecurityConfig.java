@@ -74,7 +74,12 @@ public class SecurityConfig {
                                 // Razorpay server-to-server webhook — must be public (no JWT)
                                 "/api/webhooks/**",
                                 // Public platform info and public endpoints
-                                "/api/v1/public/**"
+                                "/api/v1/public/**",
+                                // Offline queue health check for connectivity probing
+                                "/api/sales/offline-queue/health",
+                                // Public pricing — must be accessible to unauthenticated users
+                                // (landing page, public pricing page, guest checkout flow)
+                                "/api/pricing/active"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

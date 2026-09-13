@@ -216,6 +216,13 @@ public class StockService {
             throw new BusinessValidationException("Quantity to deduct must be positive.");
         }
 
+        // Acquire a pessimistic write lock on the ItemVariant row before reading stock.
+        // This serialises concurrent deductions: Tx B blocks here until Tx A commits.
+        // When Tx B finally reads the SUM it sees Tx A's committed DEDUCT movement,
+        // preventing two concurrent offline sales from overselling the same product.
+        itemVariantRepository.findByIdForUpdate(itemVariantId)
+                .orElseThrow(() -> new EntityNotFoundAppException("Item Variant", itemVariantId));
+
         BigDecimal currentStock = getCurrentStock(itemVariantId);
         // Subtract active reservations so a soft-hold shields the sellable pool.
         BigDecimal reserved = reservedFor(itemVariantId);

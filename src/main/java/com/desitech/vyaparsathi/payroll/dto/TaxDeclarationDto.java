@@ -17,4 +17,17 @@ public class TaxDeclarationDto {
     private BigDecimal educationExpenses;
     private BigDecimal npsContribution;
     private BigDecimal totalTaxableIncome;
+
+    // Convenience getters for ITR section fields (aliases)
+    public BigDecimal getSection80C() {
+        return this.lifeInsurancePremium;
+    }
+
+    public BigDecimal getSection80D() {
+        return this.medicalInsurancePremium;
+    }
+
+    public BigDecimal getNPS() {
+        return this.npsContribution;
+    }
 }

@@ -1,7 +1,10 @@
 package com.desitech.vyaparsathi.purchases.service;
 
 import com.desitech.vyaparsathi.common.annotations.LogAudit;
+import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.util.TenantUtils;
+import com.desitech.vyaparsathi.compliance.exception.LockedPeriodException;
+import com.desitech.vyaparsathi.compliance.service.PeriodLockService;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
 import com.desitech.vyaparsathi.inventory.repository.ItemVariantRepository;
 import com.desitech.vyaparsathi.inventory.service.StockService;
@@ -42,25 +45,33 @@ public class PurchaseInvoiceService {
     private final StockService stockService;
     private final SupplierLedgerService ledgerService;
     private final ReceivingRepository receivingRepo;
+    private final PeriodLockService periodLockService;
 
     public PurchaseInvoiceService(PurchaseInvoiceRepository purchaseRepo,
                                   SupplierRepository supplierRepo,
                                   ItemVariantRepository variantRepo,
                                   StockService stockService,
                                   SupplierLedgerService ledgerService,
-                                  ReceivingRepository receivingRepo) {
+                                  ReceivingRepository receivingRepo,
+                                  PeriodLockService periodLockService) {
         this.purchaseRepo = purchaseRepo;
         this.supplierRepo = supplierRepo;
         this.variantRepo = variantRepo;
         this.stockService = stockService;
         this.ledgerService = ledgerService;
         this.receivingRepo = receivingRepo;
+        this.periodLockService = periodLockService;
     }
 
     @Transactional
     @LogAudit(action = "CREATE_PURCHASE_INVOICE", entity = "PURCHASE_INVOICE")
     public PurchaseInvoiceDto createPurchaseInvoice(PurchaseCreateDto createDto) {
         Long shopId = TenantUtils.getCurrentShopId();
+        LocalDate purchaseDate = createDto.getPurchaseDate() != null ? createDto.getPurchaseDate() : LocalDate.now();
+        if (periodLockService.isPeriodLocked(TenantContext.getCurrentShopId(), purchaseDate)) {
+            throw new LockedPeriodException(
+                    String.format("%02d-%d", purchaseDate.getMonthValue(), purchaseDate.getYear()));
+        }
         Supplier supplier = supplierRepo.findById(createDto.getSupplierId())
                 .orElseThrow(() -> new IllegalArgumentException("Supplier not found with ID: " + createDto.getSupplierId()));
 

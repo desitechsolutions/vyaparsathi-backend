@@ -10,6 +10,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,12 +21,17 @@ public interface PaymentService {
     Page<PaymentDto> getPaymentsBySource(PaymentSourceType sourceType, Long sourceId, Pageable pageable);
     Page<PaymentDto> getPaymentsBySupplier(Long supplierId, Pageable pageable);
     Page<PaymentDto> getPaymentsByCustomer(Long customerId, Pageable pageable);
+    Page<PaymentDto> getAllPayments(Pageable pageable);
+    Page<PaymentDto> searchPayments(String search, Pageable pageable);
     Optional<PaymentDto> getPayment(Long id);
 
     BigDecimal calculateDueAmount(Long sourceId, PaymentSourceType sourceType, BigDecimal totalAmount);
     PaymentDto recordDuePayment(PaymentReceivedRequest paymentReceivedRequest);
 
     Map<Long, BigDecimal> getTotalPaidBySaleIds(Set<Long> saleIds);
+
+    // ← ADDED: Get total payments by payment date range
+    BigDecimal getTotalPaymentsByDateRange(LocalDateTime start, LocalDateTime end);
 
     void bulkPayment(BulkPaymentRequest request);
     BigDecimal getCustomerAdvanceBalance(Long customerId);

@@ -1,0 +1,30 @@
+-- V128: Create offline_sales_queue table for offline-first sales and synchronization
+
+CREATE TABLE IF NOT EXISTS offline_sales_queue (
+    id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
+    shop_id                 BIGINT NOT NULL,
+    user_id                 VARCHAR(100) NOT NULL,
+    client_txn_id           VARCHAR(100) NOT NULL,
+    device_id               VARCHAR(100) NOT NULL,
+    status                  VARCHAR(30) NOT NULL,
+    offline_sale_no         VARCHAR(100) DEFAULT NULL,
+    request_payload_json    LONGTEXT NOT NULL,
+    sale_id                 BIGINT DEFAULT NULL,
+    invoice_number          VARCHAR(100) DEFAULT NULL,
+    invoice_signed_url      VARCHAR(1000) DEFAULT NULL,
+    error_code              VARCHAR(100) DEFAULT NULL,
+    error_message           VARCHAR(1000) DEFAULT NULL,
+    retry_count             INT NOT NULL DEFAULT 0,
+    synced_at               DATETIME DEFAULT NULL,
+    metadata_json           LONGTEXT DEFAULT NULL,
+    created_by              BIGINT DEFAULT NULL,
+    updated_by              BIGINT DEFAULT NULL,
+    created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT uk_offline_sales_queue_shop_client_txn UNIQUE (shop_id, client_txn_id),
+    INDEX idx_offline_sales_shop_status (shop_id, status),
+    INDEX idx_offline_sales_user_status (user_id, status),
+    INDEX idx_offline_sales_device_id (device_id),
+    INDEX idx_offline_sales_created_at (created_at),
+    INDEX idx_offline_sales_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

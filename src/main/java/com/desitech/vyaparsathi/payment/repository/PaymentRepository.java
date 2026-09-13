@@ -52,6 +52,17 @@ public interface PaymentRepository extends BaseRepository<Payment, Long> {
             Long supplierId, Long shopId, java.time.LocalDateTime date);
 
     /**
+     * Search payments by transaction ID or reference.
+     * NOTE: Payment entity uses customerId (Long) — no customer JOIN available.
+     */
+    @Query("SELECT p FROM Payment p " +
+            "WHERE (LOWER(p.transactionId) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "OR LOWER(p.reference) LIKE LOWER(CONCAT('%', :search, '%')) " +
+            "OR LOWER(p.notes) LIKE LOWER(CONCAT('%', :search, '%'))) " +
+            "ORDER BY p.paymentDate DESC")
+    Page<Payment> searchPayments(@Param("search") String search, Pageable pageable);
+
+    /**
      * Aggregate payment volume by method for a shop's sale-side payments in a range.
      * Returns rows of {@code [PaymentMethod, sumAmount, txnCount]}.
      * Filters to {@link PaymentSourceType#SALE} — supplier/refund payments are excluded.
@@ -64,6 +75,14 @@ public interface PaymentRepository extends BaseRepository<Payment, Long> {
             "GROUP BY p.paymentMethod")
     List<Object[]> sumSalePaymentsByMethodForShop(
             @Param("shopId") Long shopId,
+            @Param("start") java.time.LocalDateTime start,
+            @Param("end") java.time.LocalDateTime end
+    );
+
+    // ← ADDED: Get total payments by payment date range (not sale date)
+    @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payment p " +
+            "WHERE p.paymentDate >= :start AND p.paymentDate <= :end")
+    BigDecimal sumPaymentsByPaymentDateRange(
             @Param("start") java.time.LocalDateTime start,
             @Param("end") java.time.LocalDateTime end
     );

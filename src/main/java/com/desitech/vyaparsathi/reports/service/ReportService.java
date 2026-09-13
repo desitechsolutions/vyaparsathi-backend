@@ -82,7 +82,8 @@ public class ReportService {
         assert from != null;
         LocalDateTime start = from.atStartOfDay();
         LocalDateTime end = to.atTime(23, 59, 59);
-        return saleRepository.findByDateBetween(start, end);
+        Long shopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        return saleRepository.findAllByShopIdAndDateBetween(shopId, start, end);
     }
 
     private List<Expense> getExpensesByDateRange(LocalDate from, LocalDate to) {
@@ -330,7 +331,7 @@ public class ReportService {
 
         Map<Integer, List<SaleItem>> itemsByGstRate = sales.stream()
                 .flatMap(s -> s.getSaleItems().stream())
-                .collect(Collectors.groupingBy(si -> si.getGstType() != null ? si.getGstType().getRate() : 0));
+                .collect(Collectors.groupingBy(si -> si.getGstType() != null ? si.getGstType().getRateAsInt() : 0));
 
         return itemsByGstRate.entrySet().stream()
                 .map(entry -> {
@@ -548,22 +549,14 @@ public class ReportService {
 
     public PaymentsSummaryDto getPaymentsSummary(LocalDate fromDate, LocalDate toDate) {
         validateDateRange(fromDate, toDate);
-        List<Sale> sales = getSalesByDateRange(fromDate, toDate);
 
-        // Bulk fetch all payments once
-        Set<Long> saleIds = sales.stream()
-                .map(Sale::getId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
+        // ← FIXED: Query payments by PAYMENT DATE, not sale date
+        LocalDateTime start = (fromDate != null) ? fromDate.atStartOfDay() : LocalDateTime.now().toLocalDate().atStartOfDay();
+        LocalDateTime end = (toDate != null) ? toDate.atTime(23, 59, 59) : LocalDateTime.now().toLocalDate().atTime(23, 59, 59);
 
-        Map<Long, BigDecimal> paidBySale = paymentService.getTotalPaidBySaleIds(saleIds);
+        BigDecimal totalPayments = paymentService.getTotalPaymentsByDateRange(start, end);
 
-        BigDecimal totalPayments = paidBySale.values().stream().reduce(ZERO, BigDecimal::add);
-        int paymentCount = paidBySale.values().stream()
-                .mapToInt(paid -> paid.compareTo(ZERO) > 0 ? 1 : 0) // rough count - adjust if needed
-                .sum();
-
-        return new PaymentsSummaryDto(totalPayments, paymentCount);
+        return new PaymentsSummaryDto(totalPayments, 0);
     }
 
     /**
@@ -578,7 +571,8 @@ public class ReportService {
         LocalDate d = date != null ? date : LocalDate.now();
         LocalDateTime start = d.atStartOfDay();
         LocalDateTime end = d.atTime(23, 59, 59, 999_999_999);
-        List<Sale> sales = saleRepository.findByDateBetween(start, end);
+        Long shopIdForZReport = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        List<Sale> sales = saleRepository.findAllByShopIdAndDateBetween(shopIdForZReport, start, end);
 
         long salesCount = 0;
         long cancelledCount = 0;

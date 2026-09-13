@@ -4,6 +4,7 @@ import com.desitech.vyaparsathi.subscriptions.enums.Tier;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -18,10 +19,28 @@ public class PricingPlanConfig {
     @Enumerated(EnumType.STRING)
     private Tier tier;
 
+    @Version
+    private Long version;
+
     private String displayName;
     private Double monthlyPrice;
     private Double yearlyPrice;
     private Integer discountPercentage; // e.g., 20 for "20% off"
+
+    // ── Time-bound promotional pricing (super admin configurable) ───────────
+    private Double promoPriceMonthly;
+    private Double promoPriceYearly;
+    private String promoLabel;
+    private LocalDateTime promoStartsAt;
+    private LocalDateTime promoEndsAt;
+
+    // ── Durable Razorpay Plan-ID cache — replaces the old in-memory cache so
+    //    a restart no longer creates duplicate Razorpay Plan objects for an
+    //    unchanged price point. Populated/read only by RazorpaySubscriptionService.
+    private String razorpayPlanIdMonthly;
+    private String razorpayPlanIdYearly;
+    private Double razorpayPlanPriceMonthly;
+    private Double razorpayPlanPriceYearly;
 
     private Boolean isPopular; // For the "Most Loved" badge
 
@@ -79,9 +98,61 @@ public class PricingPlanConfig {
     public Boolean getCanProcessSale() { return canProcessSale; }
     public void setCanProcessSale(Boolean canProcessSale) { this.canProcessSale = canProcessSale; }
 
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
+
+    public Double getPromoPriceMonthly() { return promoPriceMonthly; }
+    public void setPromoPriceMonthly(Double promoPriceMonthly) { this.promoPriceMonthly = promoPriceMonthly; }
+
+    public Double getPromoPriceYearly() { return promoPriceYearly; }
+    public void setPromoPriceYearly(Double promoPriceYearly) { this.promoPriceYearly = promoPriceYearly; }
+
+    public String getPromoLabel() { return promoLabel; }
+    public void setPromoLabel(String promoLabel) { this.promoLabel = promoLabel; }
+
+    public LocalDateTime getPromoStartsAt() { return promoStartsAt; }
+    public void setPromoStartsAt(LocalDateTime promoStartsAt) { this.promoStartsAt = promoStartsAt; }
+
+    public LocalDateTime getPromoEndsAt() { return promoEndsAt; }
+    public void setPromoEndsAt(LocalDateTime promoEndsAt) { this.promoEndsAt = promoEndsAt; }
+
+    public String getRazorpayPlanIdMonthly() { return razorpayPlanIdMonthly; }
+    public void setRazorpayPlanIdMonthly(String razorpayPlanIdMonthly) { this.razorpayPlanIdMonthly = razorpayPlanIdMonthly; }
+
+    public String getRazorpayPlanIdYearly() { return razorpayPlanIdYearly; }
+    public void setRazorpayPlanIdYearly(String razorpayPlanIdYearly) { this.razorpayPlanIdYearly = razorpayPlanIdYearly; }
+
+    public Double getRazorpayPlanPriceMonthly() { return razorpayPlanPriceMonthly; }
+    public void setRazorpayPlanPriceMonthly(Double razorpayPlanPriceMonthly) { this.razorpayPlanPriceMonthly = razorpayPlanPriceMonthly; }
+
+    public Double getRazorpayPlanPriceYearly() { return razorpayPlanPriceYearly; }
+    public void setRazorpayPlanPriceYearly(Double razorpayPlanPriceYearly) { this.razorpayPlanPriceYearly = razorpayPlanPriceYearly; }
+
     // Helper for pro-rata math
     public Double getDailyRate(boolean isYearly) {
         return isYearly ? (yearlyPrice / 365.0) : (monthlyPrice / 30.0);
+    }
+
+    /**
+     * Resolves the price actually charged for a billing cycle: the promo price
+     * if one is configured and {@code now} falls within its window, else the
+     * base price. Single source of truth shared by Razorpay charge amount
+     * resolution (via {@code RazorpayPricingService}) and admin-panel display.
+     */
+    public Double resolveEffectivePrice(boolean isYearly, LocalDateTime now) {
+        Double basePrice = isYearly ? yearlyPrice : monthlyPrice;
+        Double promoPrice = isYearly ? promoPriceYearly : promoPriceMonthly;
+
+        if (promoPrice == null) {
+            return basePrice;
+        }
+        if (promoStartsAt != null && now.isBefore(promoStartsAt)) {
+            return basePrice;
+        }
+        if (promoEndsAt != null && !now.isBefore(promoEndsAt)) {
+            return basePrice;
+        }
+        return promoPrice;
     }
 
     public void addFeature(String feature) {

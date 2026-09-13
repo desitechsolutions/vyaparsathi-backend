@@ -1,6 +1,8 @@
 package com.desitech.vyaparsathi.gst.service;
 
 import com.desitech.vyaparsathi.customer.entity.Customer;
+import com.desitech.vyaparsathi.gst.dto.JurisdictionResolveRequest;
+import com.desitech.vyaparsathi.gst.dto.JurisdictionResolveResponse;
 import com.desitech.vyaparsathi.gst.model.IndianState;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.supplier.entity.Supplier;
@@ -83,6 +85,57 @@ public class GstJurisdictionService {
         return isUnionTerritory(shopStateCode)
             ? IntraTaxRegime.CGST_UTGST
             : IntraTaxRegime.CGST_SGST;
+    }
+
+    // ── Server-authoritative jurisdiction resolution (CA-8) ─────────────────
+
+    /**
+     * Resolves whether a transaction is intra-state or inter-state using a
+     * priority chain:
+     * <ol>
+     *   <li>Explicit {@code posStateCode} from the request (highest priority)</li>
+     *   <li>Explicit {@code counterpartyStateCode} from the request</li>
+     *   <li>First two digits of {@code counterpartyGstin}</li>
+     *   <li>Shop state code derived from the provided {@code shopStateCode}</li>
+     * </ol>
+     *
+     * Falls back to intra-state when neither party can be resolved (safe default —
+     * matches the behaviour in {@link #isIntraState(String, String)}).
+     *
+     * @param shopStateCode  the shop's 2-digit state code (resolved by caller via
+     *                       {@link #resolveStateCode(Shop)} before the API call)
+     * @param request        client-supplied jurisdiction hints
+     * @return server-authoritative jurisdiction response with resolved codes, names,
+     *         and UT flag
+     */
+    public JurisdictionResolveResponse resolveJurisdiction(String shopStateCode,
+                                                           JurisdictionResolveRequest request) {
+        // Effective Place-of-Supply code: prefer explicit POS, else fall back to shop code
+        String effectivePosCode = isPresent(request.getPosStateCode())
+                ? normalize(request.getPosStateCode())
+                : (isPresent(shopStateCode) ? normalize(shopStateCode) : null);
+
+        // Counterparty code: prefer explicit code, else try GSTIN prefix
+        String counterpartyCode = null;
+        if (isPresent(request.getCounterpartyStateCode())) {
+            counterpartyCode = normalize(request.getCounterpartyStateCode());
+        } else {
+            Optional<String> fromGstin = codeFromGstin(request.getCounterpartyGstin());
+            if (fromGstin.isPresent()) counterpartyCode = fromGstin.get();
+        }
+
+        boolean intra = isIntraState(effectivePosCode, counterpartyCode);
+        boolean shopUT = effectivePosCode != null && isUnionTerritory(effectivePosCode);
+
+        // Resolve display name for counterparty state
+        String resolvedCode = counterpartyCode;
+        String resolvedName = resolvedCode != null
+                ? IndianState.byCode(resolvedCode).map(IndianState::getDisplayName).orElse(null)
+                : null;
+
+        return intra
+                ? JurisdictionResolveResponse.intraState(resolvedCode, resolvedName, shopUT)
+                : JurisdictionResolveResponse.interState(resolvedCode, resolvedName);
     }
 
     // ── helpers ─────────────────────────────────────────────────

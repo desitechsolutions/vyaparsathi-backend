@@ -96,14 +96,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
                 try {
                     Long shopId = TenantContext.getCurrentShopId();
-                    logger.info("shop id from tenant context : {}",shopId);
-
-
                     if (shopId != null) {
                         attributes.put("shopId", shopId);
                         logger.debug("WS Handshake captured shopId {}", shopId);
                     }
-
                 } catch (Exception e) {
                     logger.error("Handshake shop capture failed", e);
                 }

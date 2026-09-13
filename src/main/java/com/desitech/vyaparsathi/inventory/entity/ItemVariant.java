@@ -3,6 +3,8 @@ package com.desitech.vyaparsathi.inventory.entity;
 import com.desitech.vyaparsathi.common.entities.BaseEntity;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.common.jpa.JsonMapConverter;
+import com.desitech.vyaparsathi.gst.enums.GstnUqc;
+import com.desitech.vyaparsathi.gst.enums.LineType;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import lombok.*;
@@ -32,6 +34,28 @@ public class ItemVariant extends ShopAwareEntity {
 
     @Column(name = "gst_rate", nullable = true)
     private Integer gstRate;
+
+    /**
+     * Default GSTN Unit Quantity Code for all sale/purchase lines created from this variant.
+     * Propagated to {@code SaleItem.uqc} and {@code PurchaseInvoiceItem.uqc} at line creation.
+     * Must be a valid value from the {@link GstnUqc} master list, or {@code "OTH"}.
+     *
+     * <p>Update this field when onboarding new SKUs — a bulk SQL update by HSN chapter
+     * (e.g. Chapter 61-63 apparel → NOS, Chapter 69 ceramics → NOS, Chapter 27 fuels → LTR)
+     * is the recommended data-hygiene approach post-migration.
+     */
+    @Column(name = "uqc", nullable = false, length = 10)
+    private String uqc = GstnUqc.OTH.getCode();
+
+    /**
+     * Whether this item is a physical good or a service.
+     * Propagated to {@code SaleItem.lineType} at line creation.
+     * Existing catalog items are GOODS by default; service-type variants
+     * (labour, consultation, freight) must be explicitly set to SERVICES.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "line_type", nullable = false, length = 10)
+    private LineType lineType = LineType.GOODS;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "gst_category", nullable = false, length = 30)
@@ -307,6 +331,16 @@ public class ItemVariant extends ShopAwareEntity {
     // this entity so grep-based tooling can find them).
     public com.desitech.vyaparsathi.gst.enums.GSTCategory getGstCategory() { return gstCategory; }
     public void setGstCategory(com.desitech.vyaparsathi.gst.enums.GSTCategory gstCategory) { this.gstCategory = gstCategory; }
+
+    public String getUqc() { return uqc; }
+    public void setUqc(String uqc) {
+        this.uqc = (uqc != null && !uqc.isBlank()) ? uqc.trim().toUpperCase() : GstnUqc.OTH.getCode();
+    }
+
+    public LineType getLineType() { return lineType; }
+    public void setLineType(LineType lineType) {
+        this.lineType = lineType != null ? lineType : LineType.GOODS;
+    }
 
     /**
      * Soft-delete flag. Set to false via {@code ItemService.deleteItemVariant}

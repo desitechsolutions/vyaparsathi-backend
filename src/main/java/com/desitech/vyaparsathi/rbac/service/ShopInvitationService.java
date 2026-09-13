@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.rbac.service;
 
 import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.model.Role;
+import com.desitech.vyaparsathi.common.annotations.CheckSubscriptionLimit;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
 import com.desitech.vyaparsathi.auth.service.PasswordHistoryService;
 import com.desitech.vyaparsathi.common.util.TemplateUtil;
@@ -72,6 +73,7 @@ public class ShopInvitationService {
      * Creates an invitation and emails it. Returns the raw token only
      * (never persisted). Called by the shop-invitation controller.
      */
+    @CheckSubscriptionLimit("STAFF")
     @Transactional
     public String createInvitation(Long shopId, String email, String phone, String roleName,
                                    String message, User inviter) {

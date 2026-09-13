@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 /**
  * Bridges VyaparSathi's {@link PricingPlanConfig} (keyed by {@link Tier} enum)
@@ -50,9 +51,8 @@ public class RazorpayPricingService {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Pricing plan configuration not found for tier: " + tier));
 
-        Double price = "YEARLY".equalsIgnoreCase(billingCycle)
-                ? config.getYearlyPrice()
-                : config.getMonthlyPrice();
+        boolean isYearly = "YEARLY".equalsIgnoreCase(billingCycle);
+        Double price = config.resolveEffectivePrice(isYearly, LocalDateTime.now());
 
         if (price == null || price <= 0) {
             throw new IllegalArgumentException(

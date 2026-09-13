@@ -50,7 +50,8 @@ public class AnalyticsCacheConfig {
                 CACHE_GROSS_MARGIN,
                 CACHE_SEASONAL_TRENDS,
                 CACHE_TOP_ITEMS,
-                CACHE_CHURN
+                CACHE_CHURN,
+                "userDetails"
         ));
         return mgr;
     }

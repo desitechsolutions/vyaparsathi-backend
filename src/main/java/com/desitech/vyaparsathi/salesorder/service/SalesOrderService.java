@@ -445,7 +445,7 @@ public class SalesOrderService {
             item.setGstRate(gstRate);
 
             if (Boolean.TRUE.equals(so.getIsGstRequired()) && gstRate > 0) {
-                item.setGstType(GSTType.fromRate(gstRate));
+                item.setGstType(GSTType.fromRateOrDefault(gstRate));
                 BigDecimal totalTax = taxable.multiply(BigDecimal.valueOf(gstRate))
                         .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
                 if (intraState) {

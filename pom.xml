@@ -360,6 +360,8 @@
         <configuration>
           <source>${java.version}</source>
           <target>${java.version}</target>
+          <!-- Disable incremental compilation to prevent MapStruct MapperImpl "error reading" race condition -->
+          <useIncrementalCompilation>false</useIncrementalCompilation>
           <annotationProcessorPaths>
             <path>
               <groupId>org.projectlombok</groupId>

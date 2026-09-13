@@ -18,7 +18,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.json.JSONObject;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -68,6 +72,7 @@ public class RazorpayWebhookService {
     private final RazorpayPaymentLogRepository paymentLogRepository;
     private final SubscriptionRepository coreSubscriptionRepository;
     private final ShopRepository shopRepository;
+    private final PlatformTransactionManager transactionManager;
 
     // ═══════════════════════════════════════════════════════════════
     //  ENTRY POINT
@@ -132,19 +137,48 @@ public class RazorpayWebhookService {
         });
 
         // ── 4. Dispatch ───────────────────────────────────────────────────────
+        // On failure we must NOT return true — Razorpay only retries on a non-2xx
+        // response, so silently ACKing a failed event means the retry never happens
+        // and the subscription state permanently diverges from Razorpay's.
         try {
             dispatchEvent(eventType, payload);
             eventRecord.setStatus("PROCESSED");
             eventRecord.setProcessedAt(LocalDateTime.now());
+            eventRecord.setErrorMessage(null);
+            webhookEventRepository.save(eventRecord);
+            return true;
         } catch (Exception e) {
             log.error("[WEBHOOK] Event {} ({}) processing failed: {}", eventType, eventId, e.getMessage(), e);
-            eventRecord.setStatus("FAILED");
-            eventRecord.setErrorMessage(e.getMessage());
-        } finally {
-            webhookEventRepository.save(eventRecord);
+            // Roll back any partial entity writes made inside dispatchEvent — the FAILED
+            // audit row itself is recorded separately in its own REQUIRES_NEW transaction
+            // below so it survives this rollback.
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+            recordFailureInNewTransaction(eventId, eventType, rawPayload, e.getMessage());
+            return false;
         }
+    }
 
-        return true;
+    /**
+     * Persists the FAILED audit record in its own {@code REQUIRES_NEW} transaction so
+     * it is committed even though the caller marks the outer transaction rollback-only.
+     */
+    private void recordFailureInNewTransaction(String eventId, String eventType, String rawPayload, String errorMessage) {
+        TransactionTemplate tpl = new TransactionTemplate(transactionManager);
+        tpl.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        tpl.executeWithoutResult(status -> {
+            RazorpayWebhookEvent rec = webhookEventRepository.findByEventId(eventId).orElseGet(() -> RazorpayWebhookEvent.builder()
+                    .eventId(eventId)
+                    .eventType(eventType)
+                    .payload(rawPayload)
+                    .status("RECEIVED")
+                    .signatureVerified(true)
+                    .attempts(0)
+                    .build());
+            rec.setAttempts((rec.getAttempts() == null ? 0 : rec.getAttempts()) + 1);
+            rec.setStatus("FAILED");
+            rec.setErrorMessage(errorMessage);
+            webhookEventRepository.save(rec);
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -204,11 +238,18 @@ public class RazorpayWebhookService {
 
         String rzpSubId = sub.optString("id");
         subscriptionOrderRepository.findByRazorpaySubscriptionId(rzpSubId).ifPresent(order -> {
+            // A retried/duplicate delivery of this event must not extend the access
+            // window a second time — only extend on the transition into ACTIVE.
+            boolean alreadyActive = "ACTIVE".equalsIgnoreCase(order.getStatus());
             order.setStatus("ACTIVE");
             order.setMandateStatus("ACTIVE");
             applySubscriptionTimestamps(order, sub);
             subscriptionOrderRepository.save(order);
-            activateCoreSubscription(order);
+            if (!alreadyActive) {
+                activateCoreSubscription(order);
+            } else {
+                log.info("[WEBHOOK] subscription.activated re-delivery for subId={} — already ACTIVE, skipping duplicate extension", rzpSubId);
+            }
             log.info("[WEBHOOK] subscription.activated for subId={}, shopId={}", rzpSubId, order.getShopId());
         });
     }
@@ -235,12 +276,17 @@ public class RazorpayWebhookService {
             applySubscriptionTimestamps(order, sub);
             subscriptionOrderRepository.save(order);
 
-            // Persist payment log (idempotent)
+            // Persist payment log (idempotent) and only extend access for a genuinely
+            // new charge — a retried delivery of an already-logged payment must not
+            // extend the subscription window a second time.
+            boolean isNewCharge = true;
             if (payBlock != null) {
                 JSONObject pay = payBlock.optJSONObject("entity");
                 if (pay != null) {
                     String payId = pay.optString("id");
-                    if (paymentLogRepository.findByRazorpayPaymentId(payId).isEmpty()) {
+                    boolean alreadyLogged = paymentLogRepository.findByRazorpayPaymentId(payId).isPresent();
+                    isNewCharge = !alreadyLogged;
+                    if (!alreadyLogged) {
                         long amountPaise = pay.optLong("amount", 0L);
                         RazorpayPaymentLog logEntry = RazorpayPaymentLog.builder()
                                 .shopId(order.getShopId())
@@ -261,8 +307,12 @@ public class RazorpayWebhookService {
                 }
             }
 
-            // Extend the core subscription access window
-            activateCoreSubscription(order);
+            // Extend the core subscription access window (only for a new charge)
+            if (isNewCharge) {
+                activateCoreSubscription(order);
+            } else {
+                log.info("[WEBHOOK] subscription.charged re-delivery for subId={} — payment already logged, skipping duplicate extension", rzpSubId);
+            }
             log.info("[WEBHOOK] subscription.charged for subId={}, shopId={}", rzpSubId, order.getShopId());
         });
     }

@@ -62,4 +62,24 @@ public class DebitNoteItem extends ShopAwareEntity {
 
     @Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalAmount;
+
+    // ─── V132 GST Phase 1 additions ──────────────────────────────────────────
+
+    /** Compensation cess rate (%) on this debit-note line. Zero for non-cess goods. */
+    @Column(name = "cess_rate", nullable = false, precision = 5, scale = 2)
+    private BigDecimal cessRate = BigDecimal.ZERO;
+
+    /** Cess amount = taxableValue × cessRate / 100. */
+    @Column(name = "cess_amt", nullable = false, precision = 12, scale = 2)
+    private BigDecimal cessAmt = BigDecimal.ZERO;
+
+    public BigDecimal getCessRate() { return cessRate; }
+    public void setCessRate(BigDecimal cessRate) {
+        this.cessRate = cessRate != null ? cessRate : BigDecimal.ZERO;
+    }
+
+    public BigDecimal getCessAmt() { return cessAmt; }
+    public void setCessAmt(BigDecimal cessAmt) {
+        this.cessAmt = cessAmt != null ? cessAmt : BigDecimal.ZERO;
+    }
 }

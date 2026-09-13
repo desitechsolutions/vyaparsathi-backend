@@ -5,13 +5,27 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
+/**
+ * Update Expense DTO (Enterprise)
+ *
+ * Allows updating expense fields (only allowed in DRAFT status)
+ */
 @Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class UpdateExpenseDto {
+    // ── Legacy fields ────────────────────────────────────────────────
     @NotBlank(message = "Expense type cannot be blank")
     private String type;
     @NotNull(message = "Amount cannot be null")
@@ -21,15 +35,15 @@ public class UpdateExpenseDto {
     private LocalDateTime date;
     private String notes;
 
-    public String getType() { return type; }
-    public void setType(String type) { this.type = type; }
-
-    public BigDecimal getAmount() { return amount; }
-    public void setAmount(BigDecimal amount) { this.amount = amount; }
-
-    public LocalDateTime getDate() { return date; }
-    public void setDate(LocalDateTime date) { this.date = date; }
-
-    public String getNotes() { return notes; }
-    public void setNotes(String notes) { this.notes = notes; }
+    // ── Enterprise fields ────────────────────────────────────────────
+    private Long expenseCategoryId;
+    private String vendorName;
+    private Long vendorId;
+    private LocalDate expenseDate;
+    private String paymentMethod;
+    private String currency;
+    private String description;
+    private String costCenter;
+    private List<String> tags;
+    private Long receiptId;
 }

@@ -7,6 +7,7 @@ import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.entity.RefreshToken;
 import com.desitech.vyaparsathi.auth.model.Role;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
+import com.desitech.vyaparsathi.auth.security.CustomUserDetailsService;
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
 import com.desitech.vyaparsathi.common.annotations.LogAudit;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
@@ -67,6 +68,9 @@ public class AuthService {
 
     @Autowired
     private PasswordHistoryService passwordHistoryService;
+
+    @Autowired
+    private CustomUserDetailsService customUserDetailsService;
 
     /**
      * When true, users with unverified emails are blocked at login with a
@@ -318,6 +322,7 @@ public class AuthService {
         user.setLastPasswordChangeAt(LocalDateTime.now());
         userRepository.save(user);
         passwordHistoryService.recordHash(user.getId(), newHash);
+        customUserDetailsService.evictUserCache(username);
     }
 
     /**
@@ -446,6 +451,7 @@ public class AuthService {
             user.setLockedUntil(null);
             userRepository.save(user);
             passwordHistoryService.recordHash(user.getId(), newHash);
+            customUserDetailsService.evictUserCache(user.getUsername());
 
             resetTokenService.markTokenAsUsed(token);
 

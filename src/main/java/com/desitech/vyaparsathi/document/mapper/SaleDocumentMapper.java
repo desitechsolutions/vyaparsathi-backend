@@ -72,7 +72,8 @@ public class SaleDocumentMapper {
         d.setPlaceOfSupplyStateCode(posCode);
         // SupplyType — user-selected value on the sale wins; fall back to
         // derivation (intra vs inter) from PoS + shop state.
-        SupplyType persisted = SupplyType.fromString(sale.getSupplyType());
+        // getSupplyType() now returns the typed enum directly (Sale.supplyType uses @Enumerated)
+        SupplyType persisted = sale.getSupplyType();
         d.setSupplyType(persisted != null ? persisted : deriveSupplyType(sale));
 
         // Parties

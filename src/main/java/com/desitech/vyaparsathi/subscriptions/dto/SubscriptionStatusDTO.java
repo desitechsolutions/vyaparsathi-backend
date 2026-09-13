@@ -27,4 +27,12 @@ public class SubscriptionStatusDTO {
     private Integer maxSalesPerMonth;
     // Sales completed this calendar month (excludes DRAFT rows).
     private long salesUsedThisMonth;
+    // Item catalogue quota. `null` = unlimited.
+    private Integer maxItems;
+    // Total items currently in the shop's catalogue.
+    private long itemsUsed;
+    // Staff user quota. `null` = unlimited.
+    private Integer maxStaffUsers;
+    // Active staff members currently in the shop.
+    private long staffUsed;
 }

@@ -1,6 +1,6 @@
 package com.desitech.vyaparsathi.purchases.entity;
 
-import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
+import com.desitech.vyaparsathi.common.entities.AuditableFinancialEntity;
 import com.desitech.vyaparsathi.receiving.entity.Receiving;
 import com.desitech.vyaparsathi.supplier.entity.Supplier;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
@@ -19,7 +19,7 @@ import java.util.List;
 @Getter
 @Setter
 @NoArgsConstructor
-public class PurchaseInvoice extends ShopAwareEntity {
+public class PurchaseInvoice extends AuditableFinancialEntity {
 
     @Column(name = "purchase_invoice_no", nullable = false, length = 50)
     private String purchaseInvoiceNo;
@@ -100,6 +100,10 @@ public class PurchaseInvoice extends ShopAwareEntity {
     @Column(name = "itc_eligibility", length = 30, nullable = false)
     private String itcEligibility = "INPUTS";
 
+    /** GSTR-2B match status populated during reconciliation (V136). */
+    @Column(name = "gstr2b_match_status", length = 30)
+    private String gstr2bMatchStatus;
+
     @OneToMany(mappedBy = "purchaseInvoice", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference
     private List<PurchaseInvoiceItem> items = new ArrayList<>();
@@ -164,6 +168,9 @@ public class PurchaseInvoice extends ShopAwareEntity {
     public Boolean getIsItcEligible() { return isItcEligible; }
     public void setIsItcEligible(Boolean isItcEligible) { this.isItcEligible = isItcEligible == null || isItcEligible; }
     public boolean isItcEligible() { return isItcEligible == null || isItcEligible; }
+
+    public String getGstr2bMatchStatus() { return gstr2bMatchStatus; }
+    public void setGstr2bMatchStatus(String gstr2bMatchStatus) { this.gstr2bMatchStatus = gstr2bMatchStatus; }
 
     public String getItcEligibility() { return itcEligibility; }
     public void setItcEligibility(String itcEligibility) { this.itcEligibility = itcEligibility; }

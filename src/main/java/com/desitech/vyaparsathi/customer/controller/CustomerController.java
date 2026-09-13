@@ -5,6 +5,7 @@ import com.desitech.vyaparsathi.accounting.repository.CreditNoteRepository;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.customer.dto.*;
+import com.desitech.vyaparsathi.customer.entity.Customer;
 import com.desitech.vyaparsathi.customer.entity.CustomerAudit;
 import com.desitech.vyaparsathi.customer.service.*;
 import com.desitech.vyaparsathi.delivery.entity.Delivery;
@@ -347,8 +348,17 @@ public class CustomerController {
         LocalDateTime endDt = to != null ? to.atTime(23, 59, 59) : null;
         byte[] pdf = statementPdfService.generateStatementPdf(id, startDt, endDt);
 
+        String safeName = "Customer";
+        try {
+            Customer c = customerService.getCustomerById(id);
+            if (c != null && c.getName() != null && !c.getName().isBlank()) {
+                safeName = c.getName().replaceAll("[^a-zA-Z0-9]", "_").replaceAll("_+", "_").replaceAll("^_|_$", "");
+            }
+        } catch (Exception ignored) {}
+        String filename = safeName + "_Statement.pdf";
+
         return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"customer_statement_" + id + ".pdf\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .contentType(MediaType.APPLICATION_PDF)
                 .body(pdf);
     }

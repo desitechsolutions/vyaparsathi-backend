@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "leave_applications")
@@ -51,4 +52,7 @@ public class LeaveApplication extends ShopAwareEntity {
 
     @Column(columnDefinition = "TEXT")
     private String approvalComments;
+
+    @Column(name = "approved_at")
+    private LocalDateTime approvedAt;
 }

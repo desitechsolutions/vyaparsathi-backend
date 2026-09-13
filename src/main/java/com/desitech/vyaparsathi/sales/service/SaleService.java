@@ -8,6 +8,8 @@ import com.desitech.vyaparsathi.audit.helper.AuditHelper;
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
 import com.desitech.vyaparsathi.changelog.service.ChangeLogService;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
+import com.desitech.vyaparsathi.compliance.exception.LockedPeriodException;
+import com.desitech.vyaparsathi.compliance.service.PeriodLockService;
 import com.desitech.vyaparsathi.common.exception.BusinessValidationException;
 import com.desitech.vyaparsathi.common.exception.EntityNotFoundAppException;
 import com.desitech.vyaparsathi.common.exception.InsufficientStockException;
@@ -29,6 +31,7 @@ import com.desitech.vyaparsathi.payment.dto.PaymentDto;
 import com.desitech.vyaparsathi.payment.enums.PaymentMethod;
 import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
 import com.desitech.vyaparsathi.payment.service.PaymentService;
+import com.desitech.vyaparsathi.common.enums.SupplyType;
 import com.desitech.vyaparsathi.sales.enums.GSTType;
 import com.desitech.vyaparsathi.sales.dto.SaleDto;
 import com.desitech.vyaparsathi.sales.dto.SaleDueDto;
@@ -118,6 +121,17 @@ public class SaleService {
     @Autowired
     private com.desitech.vyaparsathi.gst.service.GstJurisdictionService gstJurisdictionService;
 
+    @Autowired
+    private PeriodLockService periodLockService;
+
+    private void checkPeriodLock(LocalDate transactionDate) {
+        if (transactionDate != null &&
+                periodLockService.isPeriodLocked(TenantContext.getCurrentShopId(), transactionDate)) {
+            throw new LockedPeriodException(
+                    String.format("%02d-%d", transactionDate.getMonthValue(), transactionDate.getYear()));
+        }
+    }
+
     @Transactional
     @LogAudit(action = "CREATE_SALE", entity = "SALE")
     @CheckSubscriptionLimit("SALES")
@@ -139,6 +153,7 @@ public class SaleService {
             }
         }
 
+        checkPeriodLock(dto.getDate() != null ? dto.getDate().toLocalDate() : LocalDate.now());
         subscriptionService.validateSaleProcessingEntitlement(TenantContext.getCurrentShopId());
 
         // 1. Fetch Context (Shop and Customer)
@@ -168,6 +183,35 @@ public class SaleService {
             validateHsnPresent(dto);
         }
 
+        // ── Pre-loop: read bill-level adjustments and resolve jurisdiction ONCE ──────
+        // All lines on one invoice share the same shop/customer jurisdiction. Resolving
+        // per-line was redundant; moving it here also enables proportional discount
+        // allocation before GST is computed (Section 15(3)(b) CGST Act).
+        BigDecimal invoiceDisc = (dto.getInvoiceDiscount() != null && dto.getInvoiceDiscount().compareTo(ZERO) > 0)
+                ? dto.getInvoiceDiscount() : ZERO;
+        BigDecimal shippingCharges = ZERO;
+        BigDecimal otherCharges = (dto.getOtherCharges() != null && dto.getOtherCharges().compareTo(ZERO) > 0)
+                ? dto.getOtherCharges() : ZERO;
+        // Include shippingCharges in total only when collected by the shop (SHOP = store pays/bills)
+        if (dto.getDelivery() != null
+                && com.desitech.vyaparsathi.delivery.enums.DeliveryPaidBy.SHOP
+                        .equals(dto.getDelivery().getDeliveryPaidBy())) {
+            shippingCharges = (dto.getShippingCharges() != null) ? dto.getShippingCharges() : ZERO;
+        }
+        String shopCode     = gstJurisdictionService.resolveStateCode(shop).orElse(null);
+        String customerCode = gstJurisdictionService.resolveStateCode(customer).orElse(null);
+        boolean sameState   = gstJurisdictionService.isIntraState(shopCode, customerCode);
+        boolean isUT        = shopCode != null && gstJurisdictionService.isUnionTerritory(shopCode);
+
+        // ── Pass 1: build SaleItems and collect raw (pre-invoice-discount) taxable values ─
+        // The bill-level invoice discount is NOT subtracted here; per-line discounts are.
+        // This preserves the raw taxable per line so the next step can allocate
+        // the invoice discount proportionally (Section 15(3)(b)).
+        record ItemBuildState(SaleItem item, BigDecimal rawTaxable, GSTType gstType) {}
+        List<ItemBuildState> buildStates   = new ArrayList<>();
+        List<BigDecimal>     rawTaxables   = new ArrayList<>();
+        BigDecimal           totalRawTaxable = ZERO;
+
         for (SaleItemDto itemDto : dto.getItems()) {
             // Catalog line: item_variant_id present → look up variant + check stock.
             // Custom line (free-text service / one-off): item_variant_id null → skip stock, use DTO-provided GST rate.
@@ -196,67 +240,76 @@ public class SaleService {
             saleItem.setQty(itemDto.getQty());
             saleItem.setUnitPrice(itemDto.getUnitPrice());
             saleItem.setDiscount(itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
-            // Optional batch/expiry — used by FMCG / food / any perishable inventory.
             saleItem.setBatchNumber(itemDto.getBatchNumber());
             saleItem.setExpiryDate(itemDto.getExpiryDate());
-            // Optional per-line salesperson attribution (V71 column).
             if (itemDto.getSalespersonId() != null) saleItem.setSalespersonId(itemDto.getSalespersonId());
 
-            // Calculate taxable value: (Qty * Price) - Discount
-            BigDecimal itemTaxableValue = itemDto.getQty()
-                    .multiply(itemDto.getUnitPrice())
-                    .subtract(itemDto.getDiscount() != null ? itemDto.getDiscount() : BigDecimal.ZERO);
-
-            saleItem.setTaxableValue(itemTaxableValue);
-            totalTaxableValue = totalTaxableValue.add(itemTaxableValue);
+            BigDecimal rawTaxable = com.desitech.vyaparsathi.gst.util.GstTaxCalculator.taxableValue(
+                    itemDto.getQty(), itemDto.getUnitPrice(),
+                    itemDto.getDiscount() != null ? itemDto.getDiscount() : ZERO);
 
             Integer effectiveGstRate = itemVariant != null
                     ? itemVariant.getGstRate()
                     : (itemDto.getGstRate() > 0 ? itemDto.getGstRate() : null);
+            GSTType gstType = (gstApplicable && effectiveGstRate != null)
+                    ? GSTType.fromRateOrDefault(effectiveGstRate) : GSTType.GST_0;
+            saleItem.setGstType(gstType);
 
-            if (gstApplicable && effectiveGstRate != null) {
-                GSTType gstType = GSTType.fromRate(effectiveGstRate);
-                BigDecimal rate = BigDecimal.valueOf(gstType.getRate());
-                BigDecimal gstAmount = itemTaxableValue.multiply(rate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-
-                saleItem.setGstType(gstType);
-                // Route through the jurisdiction service — resolves stateCode (with
-                // fallbacks to state name and GSTIN prefix), then compares codes.
-                // Walk-in customers (no code) default to intra-state per service policy.
-                String shopCode = gstJurisdictionService.resolveStateCode(shop).orElse(null);
-                String customerCode = gstJurisdictionService.resolveStateCode(customer).orElse(null);
-                boolean sameState = gstJurisdictionService.isIntraState(shopCode, customerCode);
-
-                if (sameState) {
-                    BigDecimal half = gstAmount.divide(BigDecimal.valueOf(2), RoundingMode.HALF_UP);
-                    saleItem.setCgstAmt(half);
-                    // UT shops split the intra-state half into UTGST; regular states use SGST.
-                    // Only one of {sgstAmt, utgstAmt} is non-zero per line — this preserves
-                    // downstream ledger math that sums {cgst + sgst + utgst + igst}.
-                    if (gstJurisdictionService.getIntraTaxRegime(shopCode)
-                            == com.desitech.vyaparsathi.gst.service.GstJurisdictionService.IntraTaxRegime.CGST_UTGST) {
-                        saleItem.setUtgstAmt(half);
-                        saleItem.setSgstAmt(BigDecimal.ZERO);
-                    } else {
-                        saleItem.setSgstAmt(half);
-                        saleItem.setUtgstAmt(BigDecimal.ZERO);
-                    }
-                    saleItem.setIgstAmt(BigDecimal.ZERO);
-                } else {
-                    saleItem.setIgstAmt(gstAmount);
-                    saleItem.setCgstAmt(BigDecimal.ZERO);
-                    saleItem.setSgstAmt(BigDecimal.ZERO);
-                    saleItem.setUtgstAmt(BigDecimal.ZERO);
-                }
-                totalGSTAmount = totalGSTAmount.add(gstAmount);
-            } else {
-                saleItem.setGstType(GSTType.GST_0);
-                saleItem.setCgstAmt(BigDecimal.ZERO);
-                saleItem.setSgstAmt(BigDecimal.ZERO);
-                saleItem.setIgstAmt(BigDecimal.ZERO);
-                saleItem.setUtgstAmt(BigDecimal.ZERO);
-            }
+            buildStates.add(new ItemBuildState(saleItem, rawTaxable, gstType));
+            rawTaxables.add(rawTaxable);
+            totalRawTaxable = totalRawTaxable.add(rawTaxable);
             saleItems.add(saleItem);
+        }
+
+        // ── Section 15(3)(b): proportional bill-level discount allocation ──────────
+        // Discount reduces each line's taxable value in proportion to its share of
+        // totalRawTaxable, BEFORE GST is computed. FLOOR + last-line residual ensures
+        // sum(allocated) == invoiceDisc exactly with no floating-point drift.
+        List<BigDecimal> propDiscounts =
+                com.desitech.vyaparsathi.gst.util.GstTaxCalculator.allocateDiscount(rawTaxables, invoiceDisc);
+
+        // ── Pass 2: apply discount per line + compute GST via GstTaxCalculator ──────
+        // GstTaxCalculator.computeLineGst() applies the FLOOR half-complement split for
+        // CGST/SGST, eliminating the odd-paise error from the previous HALF_UP halving.
+        for (int i = 0; i < buildStates.size(); i++) {
+            ItemBuildState s = buildStates.get(i);
+            BigDecimal reducedTaxable = s.rawTaxable().subtract(propDiscounts.get(i)).max(ZERO);
+            s.item().setTaxableValue(reducedTaxable);
+            totalTaxableValue = totalTaxableValue.add(reducedTaxable);
+
+            if (gstApplicable && s.gstType().getRate().signum() > 0) {
+                com.desitech.vyaparsathi.gst.util.GstTaxCalculator.LineGst lg =
+                        com.desitech.vyaparsathi.gst.util.GstTaxCalculator.computeLineGst(
+                                reducedTaxable, s.gstType(), s.item().getCessRate(), sameState, isUT);
+                s.item().setCgstAmt(lg.cgst());
+                s.item().setSgstAmt(lg.sgst());
+                s.item().setUtgstAmt(lg.utgst());
+                s.item().setIgstAmt(lg.igst());
+                s.item().setCessAmt(lg.cess());
+                totalGSTAmount = totalGSTAmount.add(lg.totalGst());
+            } else {
+                s.item().setCgstAmt(ZERO); s.item().setSgstAmt(ZERO);
+                s.item().setIgstAmt(ZERO); s.item().setUtgstAmt(ZERO); s.item().setCessAmt(ZERO);
+            }
+        }
+
+        // ── Composite supply charge GST (CA-7, Section 8(a) CGST Act) ────────────
+        // Shipping and other charges are part of the composite supply and must be taxed
+        // at the principal supply rate (highest rate among invoice lines).
+        BigDecimal chargePrincipal = shippingCharges.add(otherCharges);
+        BigDecimal compositeChargeGST = ZERO;
+        com.desitech.vyaparsathi.gst.util.GstTaxCalculator.LineGst chargeLineGst = null;
+        if (gstApplicable && chargePrincipal.compareTo(ZERO) > 0 && !buildStates.isEmpty()) {
+            GSTType compositeRate = buildStates.stream()
+                    .map(ItemBuildState::gstType)
+                    .filter(t -> t != null && t.getRate().signum() > 0)
+                    .max(java.util.Comparator.comparing(GSTType::getRate))
+                    .orElse(GSTType.GST_0);
+            if (compositeRate.getRate().signum() > 0) {
+                chargeLineGst = com.desitech.vyaparsathi.gst.util.GstTaxCalculator.computeLineGst(
+                        chargePrincipal, compositeRate, BigDecimal.ZERO, sameState, isUT);
+                compositeChargeGST = chargeLineGst.totalGst();
+            }
         }
 
         com.desitech.vyaparsathi.sales.enums.SaleType saleType = parsedType;
@@ -269,28 +322,14 @@ public class SaleService {
         String numberPrefix = numberPrefixFor(saleType, shop);
         String invoiceNo = invoiceNumberService.nextInvoiceNumber(shop.getId(), numberPrefix, saleDate);
 
-        // 4. Calculate Final Totals with Bill-Level Adjustments (Issue 2 Fix)
-        BigDecimal totalBeforeRoundOff = totalTaxableValue.add(totalGSTAmount);
-
-        // Read bill-level (invoice-level) discount — distinct from per-item discounts
-        BigDecimal invoiceDisc = (dto.getInvoiceDiscount() != null && dto.getInvoiceDiscount().compareTo(ZERO) > 0)
-                ? dto.getInvoiceDiscount() : ZERO;
-        // ShippingCharges: only include in grand total if collected by the store
-        // (deliveryPaidBy="STORE"). If paid directly to courier, keep informational only.
-        BigDecimal shippingCharges = ZERO;
-        BigDecimal otherCharges = (dto.getOtherCharges() != null && dto.getOtherCharges().compareTo(ZERO) > 0)
-                ? dto.getOtherCharges() : ZERO;
-        // Include shippingCharges in total only when collected by the shop (SHOP = store pays/bills)
-        if (dto.getDelivery() != null
-                && com.desitech.vyaparsathi.delivery.enums.DeliveryPaidBy.SHOP
-                        .equals(dto.getDelivery().getDeliveryPaidBy())) {
-            shippingCharges = (dto.getShippingCharges() != null) ? dto.getShippingCharges() : ZERO;
-        }
-
-        BigDecimal grandTotal = totalBeforeRoundOff
-                .subtract(invoiceDisc)
-                .add(shippingCharges)
-                .add(otherCharges)
+        // 4. Calculate Final Totals
+        // invoiceDisc is already baked into per-line taxable values via proportional
+        // allocation — do NOT subtract it again here.
+        // Grand total = reduced item totals + item GST + charge principal + charge GST.
+        BigDecimal grandTotal = totalTaxableValue
+                .add(totalGSTAmount)
+                .add(chargePrincipal)
+                .add(compositeChargeGST)
                 .max(ZERO);
         BigDecimal finalTotalAmount = grandTotal.setScale(0, RoundingMode.HALF_UP);
         BigDecimal roundOff = finalTotalAmount.subtract(grandTotal);
@@ -318,10 +357,16 @@ public class SaleService {
         sale.setCustomer(customer);
         sale.setTotalAmount(finalTotalAmount);
         sale.setRoundOff(roundOff);
-        // Issue 2 Fix: Persist bill-level charges on the Sale entity
         sale.setInvoiceDiscount(invoiceDisc);
         sale.setShippingCharges(shippingCharges);
         sale.setOtherCharges(otherCharges);
+        // Composite supply charge GST breakdown (CA-7) — null-safe when no charges billed
+        if (chargeLineGst != null) {
+            sale.setCompositeChargeCgst(chargeLineGst.cgst());
+            sale.setCompositeChargeSgst(chargeLineGst.sgst());
+            sale.setCompositeChargeIgst(chargeLineGst.igst());
+            sale.setCompositeChargeUtgst(chargeLineGst.utgst());
+        }
         sale.setSyncedFlag(false);
         sale.setSaleItems(saleItems);
         saleItems.forEach(si -> si.setSale(sale));
@@ -331,7 +376,7 @@ public class SaleService {
         // V99 statutory fields — freeze at doc creation time. PoS is nullable;
         // the SaleDocumentMapper falls back to customer/shop state when empty.
         sale.setPlaceOfSupply(dto.getPlaceOfSupply());
-        sale.setSupplyType(dto.getSupplyType());
+        sale.setSupplyType(SupplyType.fromString(dto.getSupplyType()));
         sale.setBillToPartySnapshot(dto.getBillToAddress());
         sale.setShipToPartySnapshot(dto.getShipToAddress());
         sale.setConsigneePartySnapshot(dto.getConsigneeAddress());
@@ -416,6 +461,8 @@ public class SaleService {
     public void processSaleReturn(SaleReturnDto returnDto) {
         Sale sale = saleRepository.findById(returnDto.getSaleId())
                 .orElseThrow(() -> new EntityNotFoundAppException("Sale", returnDto.getSaleId()));
+
+        checkPeriodLock(sale.getDate() != null ? sale.getDate().toLocalDate() : LocalDate.now());
 
         // Only completed sales (or partially-returned rows getting further returns) may be returned.
         if (sale.getStatus() != SaleStatus.COMPLETED && sale.getStatus() != SaleStatus.PARTIALLY_RETURNED) {
@@ -565,6 +612,7 @@ public class SaleService {
         BigDecimal totalPaid = ZERO;
         Sale sale = saleRepository.findById(saleId)
                 .orElseThrow(() -> new EntityNotFoundAppException("Sale", saleId));
+        checkPeriodLock(sale.getDate() != null ? sale.getDate().toLocalDate() : LocalDate.now());
 
         // Idempotency / correctness: cancelling an already-terminal sale must be a
         // no-op-or-error, never re-restock inventory and re-post the ledger reversal.
@@ -833,7 +881,8 @@ public class SaleService {
             endDate = endDate.with(LocalTime.MAX);
         }
 
-        List<Sale> sales = saleRepository.findByDateBetween(startDate, endDate);
+        List<Sale> sales = saleRepository.findAllByShopIdAndDateBetween(
+                TenantContext.getCurrentShopId(), startDate, endDate);
 
         // Bulk fetch all payments for these sales
         Set<Long> saleIds = sales.stream()
@@ -1008,7 +1057,7 @@ public class SaleService {
                     ? iv.getGstRate()
                     : (itemDto.getGstRate() > 0 ? itemDto.getGstRate() : null);
             if (effectiveGstRate != null && effectiveGstRate > 0) {
-                saleItem.setGstType(GSTType.fromRate(effectiveGstRate));
+                saleItem.setGstType(GSTType.fromRateOrDefault(effectiveGstRate));
             } else {
                 saleItem.setGstType(GSTType.GST_0);
             }
@@ -1033,7 +1082,7 @@ public class SaleService {
         // Allow updates to statutory fields on the update path too. Null-safe —
         // callers that don't touch them (POS retry, minor edits) skip via getter.
         if (dto.getPlaceOfSupply()   != null) sale.setPlaceOfSupply(dto.getPlaceOfSupply());
-        if (dto.getSupplyType()      != null) sale.setSupplyType(dto.getSupplyType());
+        if (dto.getSupplyType()      != null) sale.setSupplyType(SupplyType.fromString(dto.getSupplyType()));
         if (dto.getBillToAddress()   != null) sale.setBillToPartySnapshot(dto.getBillToAddress());
         if (dto.getShipToAddress()   != null) sale.setShipToPartySnapshot(dto.getShipToAddress());
         if (dto.getConsigneeAddress()!= null) sale.setConsigneePartySnapshot(dto.getConsigneeAddress());
@@ -1062,6 +1111,7 @@ public class SaleService {
     @CheckSubscriptionLimit("SALES")
     public SaleDto completeDraft(SaleDto dto) {
         subscriptionService.validateSaleProcessingEntitlement(TenantContext.getCurrentShopId());
+        checkPeriodLock(LocalDate.now());
 
         if (dto.getId() == null) {
             throw new BusinessValidationException("Sale ID is required to complete a draft");
@@ -1160,9 +1210,9 @@ public class SaleService {
                     : (itemDto.getGstRate() > 0 ? itemDto.getGstRate() : null);
 
             if (gstApplicable && effectiveGstRate != null) {
-                GSTType gstType = GSTType.fromRate(effectiveGstRate);
+                GSTType gstType = GSTType.fromRateOrDefault(effectiveGstRate);
                 BigDecimal gstAmount = taxableValue
-                        .multiply(BigDecimal.valueOf(gstType.getRate()))
+                        .multiply(gstType.getRate())
                         .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
 
                 saleItem.setGstType(gstType);
@@ -1449,7 +1499,7 @@ public class SaleService {
             s.setQty(si.getQty());
             s.setUnitPrice(si.getUnitPrice());
             s.setDiscount(si.getDiscount() != null ? si.getDiscount() : ZERO);
-            if (si.getGstType() != null) s.setGstRate(si.getGstType().getRate());
+            if (si.getGstType() != null) s.setGstRate(si.getGstType().getRateAsInt());
             if (si.getItemVariant() == null) {
                 s.setCustomItemName(si.getCustomItemName());
                 s.setCustomDescription(si.getCustomDescription());

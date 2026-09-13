@@ -7,6 +7,7 @@ import com.desitech.vyaparsathi.payroll.dto.LeaveBalanceDto;
 import com.desitech.vyaparsathi.payroll.dto.LeaveTypeDto;
 import com.desitech.vyaparsathi.payroll.entity.*;
 import com.desitech.vyaparsathi.payroll.repository.*;
+import com.desitech.vyaparsathi.shop.entity.Shop;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

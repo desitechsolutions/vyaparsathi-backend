@@ -208,23 +208,49 @@ public class CustomerStatementBuilder {
             s.lines.add(line);
             s.totalCredits = s.totalCredits.add(line.credit);
         }
-        // Manual ledger entries — kept for backward compat with the
-        // free-form journal that some shops still use.
+        // ─── CustomerLedger entries ────────────────────────────────────
+        // CustomerLedgerService uses an INVERTED DEBIT/CREDIT convention:
+        //   CREDIT type = receivable increases (customer owes more)
+        //   DEBIT  type = receivable decreases (customer owes less)
+        //
+        // Category A: system-generated entries that duplicate saleRepo/paymentRepo data.
+        // Including these would double-count every sale and payment. Skip them entirely.
+        // Prefixes: "Sale #" (SaleService), "Cancelled Sale #" (SaleService),
+        //           "Payment for " (PaymentServiceImpl), "Bulk Payment [" (PaymentServiceImpl),
+        //           "Due Payment for Sale #" (PaymentServiceImpl).
+        //
+        // Category B + manual: ledger-only entries with no repo equivalent
+        // ("Sales Return (Debt Cancel)", "Refund ", manual adjustments).
+        // Keep these but invert direction to match standard statement convention:
+        //   CL DEBIT  → statement CREDIT (reduces what customer owes)
+        //   CL CREDIT → statement DEBIT  (increases what customer owes)
         for (CustomerLedger le : ledger) {
             LocalDateTime le_date = le.getCreatedAt();
             if (le_date == null) continue;
             if (startDate != null && le_date.isBefore(startDate)) continue;
             if (endDate != null && le_date.isAfter(endDate)) continue;
+
+            String leDesc = le.getDescription();
+            String desc = leDesc != null ? leDesc : "";
+            if (desc.startsWith("Sale #")
+                    || desc.startsWith("Cancelled Sale #")
+                    || desc.startsWith("Payment for ")
+                    || desc.startsWith("Bulk Payment [")
+                    || desc.startsWith("Due Payment for Sale #")) continue;
+
             StatementLine line = new StatementLine();
             line.date = le_date.toLocalDate();
-            boolean debit = le.getType() == CustomerLedgerType.DEBIT;
-            line.type = debit ? "LEDGER_DEBIT" : "LEDGER_CREDIT";
+            // Invert: CL DEBIT → statement credit; CL CREDIT → statement debit
+            boolean statementCredit = le.getType() == CustomerLedgerType.DEBIT;
+            line.type = statementCredit ? "LEDGER_CREDIT" : "LEDGER_DEBIT";
             line.reference = "";
-            line.description = le.getDescription() != null ? le.getDescription() : "Manual ledger entry";
+            line.description = desc.isEmpty() ? "Manual ledger entry" : desc;
             BigDecimal amt = nz(le.getAmount());
-            line.debit = debit ? amt : BigDecimal.ZERO;
-            line.credit = debit ? BigDecimal.ZERO : amt;
+            line.debit  = statementCredit ? BigDecimal.ZERO : amt;
+            line.credit = statementCredit ? amt : BigDecimal.ZERO;
             s.lines.add(line);
+            if (statementCredit) s.totalCredits  = s.totalCredits.add(amt);
+            else                  s.totalInvoiced = s.totalInvoiced.add(amt);
         }
 
         // ─── Chronological sort + running balance ──────────────────────

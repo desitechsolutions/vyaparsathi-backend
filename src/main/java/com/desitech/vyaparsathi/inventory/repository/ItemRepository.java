@@ -56,4 +56,6 @@ public interface ItemRepository extends BaseRepository<Item, Long> {
     Page<Item> searchAll(@Param("q") String q,
                          @Param("categoryId") Long categoryId,
                          Pageable pageable);
+
+    long countByShopId(Long shopId);
 }

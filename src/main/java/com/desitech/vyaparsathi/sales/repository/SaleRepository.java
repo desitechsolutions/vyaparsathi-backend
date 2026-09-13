@@ -20,10 +20,6 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     @Query("SELECT s FROM Sale s JOIN FETCH s.customer WHERE s.customer.id = :customerId")
     List<Sale> findAllByCustomerId(@Param("customerId") Long customerId);
     @EntityGraph(attributePaths = {"saleItems", "customer"}, type = EntityGraph.EntityGraphType.LOAD)
-    @Query("SELECT s FROM Sale s WHERE (:startDate IS NULL OR s.date >= :startDate) AND (:endDate IS NULL OR s.date <= :endDate) ORDER BY s.date DESC")
-    List<Sale> findByDateBetween(@Param("startDate") LocalDateTime start, @Param("endDate") LocalDateTime end);
-
-    @EntityGraph(attributePaths = {"saleItems", "customer"}, type = EntityGraph.EntityGraphType.LOAD)
     List<Sale> findAll();
 
     @EntityGraph(attributePaths = {"saleItems", "customer"}, type = EntityGraph.EntityGraphType.LOAD)
@@ -34,9 +30,6 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
      * This is used by the AnalyticsService to predict customer churn.
      */
     Optional<Sale> findTopByCustomerIdOrderByDateDesc(Long customerId);
-
-    @Query("SELECT s.customer.id, MAX(s.date), SUM(s.totalAmount) FROM Sale s GROUP BY s.customer.id")
-    List<Object[]> getCustomerPurchaseSummaries();
 
     @Query("SELECT s.customer.id, MAX(s.date), SUM(s.totalAmount) FROM Sale s WHERE s.shop.id = :shopId GROUP BY s.customer.id")
     List<Object[]> getCustomerPurchaseSummariesByShop(@Param("shopId") Long shopId);

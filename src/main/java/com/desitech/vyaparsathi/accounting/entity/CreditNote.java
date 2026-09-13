@@ -1,8 +1,9 @@
 package com.desitech.vyaparsathi.accounting.entity;
 
 import com.desitech.vyaparsathi.accounting.enums.CreditNoteStatus;
-import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
+import com.desitech.vyaparsathi.common.entities.AuditableFinancialEntity;
 import com.desitech.vyaparsathi.customer.entity.Customer;
+import com.desitech.vyaparsathi.gst.enums.NoteType;
 import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
@@ -20,7 +21,7 @@ import java.util.List;
 @Getter
 @Setter
 @NoArgsConstructor
-public class CreditNote extends ShopAwareEntity {
+public class CreditNote extends AuditableFinancialEntity {
 
     @Column(name = "credit_note_no", nullable = false, length = 50)
     private String creditNoteNo;
@@ -64,6 +65,41 @@ public class CreditNote extends ShopAwareEntity {
 
     @Column(name = "notes", length = 500)
     private String notes;
+
+    // ─── V132 GST Phase 1 fields ──────────────────────────────────────────────
+
+    /**
+     * Free-text snapshot of the original invoice number at creation time.
+     * Written to GSTR-1 CDNR / CDNUR {@code "inum"} field.
+     * <p>
+     * This field is the <em>authoritative</em> reference for GST filing — it must
+     * survive even if the linked {@link Sale} row is deleted or {@code sale_id}
+     * is nullified by a cascade. Populated by {@code CreditNoteService} from
+     * {@code sale.getInvoiceNo()} at creation; <strong>never update after that</strong>.
+     */
+    @Column(name = "reference_invoice_number", length = 50)
+    private String referenceInvoiceNumber;
+
+    /**
+     * GSTR-1 table routing for this credit note.
+     * <ul>
+     *   <li>{@link NoteType#CDNR} — customer has a GSTIN; goes to GSTR-1 Table 9.</li>
+     *   <li>{@link NoteType#CDNUR} — unregistered B2C customer; goes to GSTR-1 Table 10.</li>
+     * </ul>
+     * Set at creation from the customer's GSTIN via
+     * {@link NoteType#fromCustomerGstin(String)}. Immutable once set.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "note_type", nullable = false, length = 10)
+    private NoteType noteType = NoteType.CDNR;
+
+    /**
+     * Aggregated compensation cess on this credit note.
+     * Populated from the sum of {@link CreditNoteItem#getCessAmt()}.
+     * Reported in GSTR-1 CDNR/CDNUR {@code "csamt"} field.
+     */
+    @Column(name = "cess_amount", nullable = false, precision = 12, scale = 2)
+    private BigDecimal cessAmount = BigDecimal.ZERO;
 
     // ─── V101 enterprise fields ─────────────────────────────────────
     /** Enum-tagged reason code (§34 CGST). Paired with the free-text
@@ -151,5 +187,28 @@ public class CreditNote extends ShopAwareEntity {
     public void addItem(CreditNoteItem item) {
         item.setCreditNote(this);
         this.items.add(item);
+    }
+
+    public String getReferenceInvoiceNumber() { return referenceInvoiceNumber; }
+    /** Set once at creation from sale.getInvoiceNo(). Do not call after first persist. */
+    public void setReferenceInvoiceNumber(String referenceInvoiceNumber) {
+        this.referenceInvoiceNumber = referenceInvoiceNumber;
+    }
+
+    public NoteType getNoteType() { return noteType; }
+    public void setNoteType(NoteType noteType) {
+        this.noteType = noteType != null ? noteType : NoteType.CDNR;
+    }
+
+    public BigDecimal getCessAmount() { return cessAmount; }
+    public void setCessAmount(BigDecimal cessAmount) {
+        this.cessAmount = cessAmount != null ? cessAmount : BigDecimal.ZERO;
+    }
+
+    /** Recomputes cessAmount from all line items. Call after modifying items collection. */
+    public void recomputeCessAmount() {
+        this.cessAmount = items.stream()
+                .map(item -> item.getCessAmt() != null ? item.getCessAmt() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 }

@@ -2,7 +2,9 @@ package com.desitech.vyaparsathi.inventory.repository;
 
 import com.desitech.vyaparsathi.common.repository.BaseRepository;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -15,6 +17,18 @@ import java.util.Optional;
 public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long> {
 
     Optional<ItemVariant> findBySku(String sku);
+
+    /**
+     * Acquires a pessimistic write lock (SELECT … FOR UPDATE) on the ItemVariant row.
+     * Used by StockService.deductStock() to serialise concurrent stock operations:
+     * Tx B cannot proceed past this call until Tx A commits, at which point Tx B reads
+     * the post-commit stock total and detects insufficient stock correctly.
+     * Without this lock two concurrent deductions can both pass the stock check
+     * and together deduct more than the available quantity (oversell).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT v FROM ItemVariant v WHERE v.id = :id")
+    Optional<ItemVariant> findByIdForUpdate(@Param("id") Long id);
 
     /** POS barcode / QR scanner lookup — finds the variant matching the scanned barcode. */
     Optional<ItemVariant> findByBarcode(String barcode);

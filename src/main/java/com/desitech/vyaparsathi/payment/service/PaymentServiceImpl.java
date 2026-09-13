@@ -230,6 +230,19 @@ public class PaymentServiceImpl implements PaymentService {
         Page<Payment> payments = paymentRepository.findByCustomerId(customerId, pageable);
         return payments.map(this::enrichPaymentDto);
     }
+
+    @Override
+    public Page<PaymentDto> getAllPayments(Pageable pageable) {
+        Page<Payment> payments = paymentRepository.findAll(pageable);
+        return payments.map(this::enrichPaymentDto);
+    }
+
+    @Override
+    public Page<PaymentDto> searchPayments(String search, Pageable pageable) {
+        Page<Payment> payments = paymentRepository.searchPayments(search, pageable);
+        return payments.map(this::enrichPaymentDto);
+    }
+
     @Override
     public Optional<PaymentDto> getPayment(Long id) {
         return paymentRepository.findById(id)
@@ -476,8 +489,13 @@ public class PaymentServiceImpl implements PaymentService {
 
         if (payment.getSourceType() == PaymentSourceType.SALE) {
             saleRepository.findById(payment.getSourceId())
-                    .map(Sale::getInvoiceNo)
-                    .ifPresent(dto::setInvoiceNumber);
+                    .ifPresent(sale -> {
+                        dto.setInvoiceNumber(sale.getInvoiceNo());
+                        // ← ADDED: Enrich customer name from sale
+                        if (sale.getCustomer() != null) {
+                            dto.setCustomerName(sale.getCustomer().getName());
+                        }
+                    });
         }
 
         return dto;
@@ -506,6 +524,11 @@ public class PaymentServiceImpl implements PaymentService {
         saleIds.forEach(id -> paidMap.putIfAbsent(id, ZERO));
 
         return paidMap;
+    }
+
+    @Override
+    public BigDecimal getTotalPaymentsByDateRange(LocalDateTime start, LocalDateTime end) {
+        return paymentRepository.sumPaymentsByPaymentDateRange(start, end);
     }
 
     @Override

@@ -3,6 +3,8 @@ package com.desitech.vyaparsathi.common.aspect;
 import com.desitech.vyaparsathi.common.annotations.CheckSubscriptionLimit;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.FeatureRestrictedException;
+import com.desitech.vyaparsathi.inventory.repository.ItemRepository;
+import com.desitech.vyaparsathi.rbac.repository.UserShopMembershipRepository;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
 import com.desitech.vyaparsathi.subscriptions.entity.PricingPlanConfig;
 import com.desitech.vyaparsathi.subscriptions.entity.Subscription;
@@ -26,6 +28,8 @@ public class SubscriptionLimitAspect {
     private final SubscriptionRepository subRepo;
     private final PricingPlanRepository planRepo;
     private final SaleRepository saleRepo;
+    private final ItemRepository itemRepo;
+    private final UserShopMembershipRepository membershipRepo;
 
     @Before("@annotation(limitAnnotation)")
     public void validateSubscriptionLimit(CheckSubscriptionLimit limitAnnotation) {
@@ -84,6 +88,36 @@ public class SubscriptionLimitAspect {
                             "CAN_PROCESS_SALE",
                             String.format("Monthly limit reached! Your %s plan allows %d sales/month. Please upgrade to continue.",
                                     effectiveTier, config.getMaxSalesPerMonth()),
+                            canStartTrial,
+                            14
+                    );
+                }
+            }
+        }
+
+        if ("ITEMS".equals(limitType)) {
+            if (config.getMaxItems() != null && config.getMaxItems() > 0) {
+                long currentItemCount = itemRepo.countByShopId(shopId);
+                if (currentItemCount >= config.getMaxItems()) {
+                    throw new FeatureRestrictedException(
+                            "MAX_ITEMS",
+                            String.format("Item limit reached! Your %s plan allows %d items. Please upgrade to add more.",
+                                    effectiveTier, config.getMaxItems()),
+                            canStartTrial,
+                            14
+                    );
+                }
+            }
+        }
+
+        if ("STAFF".equals(limitType)) {
+            if (config.getMaxStaffUsers() != null && config.getMaxStaffUsers() > 0) {
+                long currentStaffCount = membershipRepo.countByShopIdAndActiveTrue(shopId);
+                if (currentStaffCount >= config.getMaxStaffUsers()) {
+                    throw new FeatureRestrictedException(
+                            "MAX_STAFF_USERS",
+                            String.format("Staff limit reached! Your %s plan allows %d staff members. Please upgrade to add more.",
+                                    effectiveTier, config.getMaxStaffUsers()),
                             canStartTrial,
                             14
                     );

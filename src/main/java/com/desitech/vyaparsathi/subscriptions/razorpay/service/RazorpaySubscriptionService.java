@@ -18,6 +18,8 @@ import com.desitech.vyaparsathi.subscriptions.razorpay.repository.RazorpayCustom
 import com.desitech.vyaparsathi.subscriptions.razorpay.repository.RazorpayPaymentLogRepository;
 import com.desitech.vyaparsathi.subscriptions.razorpay.repository.RazorpaySubscriptionOrderRepository;
 import com.desitech.vyaparsathi.subscriptions.razorpay.util.RazorpaySignatureUtil;
+import com.desitech.vyaparsathi.subscriptions.entity.PricingPlanConfig;
+import com.desitech.vyaparsathi.subscriptions.repository.PricingPlanRepository;
 import com.desitech.vyaparsathi.subscriptions.repository.SubscriptionPayRepository;
 import com.desitech.vyaparsathi.subscriptions.repository.SubscriptionRepository;
 import com.razorpay.Customer;
@@ -33,9 +35,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Set;
 
 /**
  * Core service for Razorpay AutoPay subscription management in VyaparSathi.
@@ -54,6 +55,10 @@ public class RazorpaySubscriptionService {
     private final SubscriptionPayRepository subscriptionPayRepository;
     private final RazorpayPricingService pricingService;
     private final ShopRepository shopRepository;
+    private final PricingPlanRepository pricingPlanRepository;
+
+    private static final Set<String> ACTIVE_ORDER_STATUSES =
+            Set.of("CREATED", "AUTHENTICATED", "ACTIVE", "PENDING", "PAUSED");
 
     private int getTierRank(String planCode) {
         if (planCode == null) return 0;
@@ -139,41 +144,68 @@ public class RazorpaySubscriptionService {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  PLAN — in-memory cache
+    //  PLAN — DB-backed cache on PricingPlanConfig (durable across restarts)
     // ═══════════════════════════════════════════════════════════════
 
-    private final Map<String, String> rzpPlanCache = new ConcurrentHashMap<>();
-
-    private String getOrCreateRazorpayPlanId(String planCode, String billingCycle, BigDecimal amountInr) {
+    /**
+     * Reuses the Razorpay {@code Plan} cached on the tier's {@link PricingPlanConfig}
+     * row if it still matches the amount being charged, otherwise creates a new
+     * Razorpay {@code Plan} and persists it as the new cache entry.
+     *
+     * <p>Locked with {@code PESSIMISTIC_WRITE} so two concurrent checkouts for a
+     * brand-new price point can't both create a duplicate Razorpay {@code Plan}.
+     * A later admin price change (which bumps the config, invalidating the stale
+     * cached price) is picked up automatically — no separate cache-eviction step
+     * needed, since the comparison is against the currently-stored price.
+     *
+     * <p>Always called from within {@link #createSubscriptionOrder}'s existing
+     * transaction, so the pessimistic lock rides that transaction's connection.
+     */
+    private String getOrCreateRazorpayPlanId(Tier tier, String billingCycle, BigDecimal amountInr) {
+        boolean isYearly = "YEARLY".equalsIgnoreCase(billingCycle);
         long amountPaise = amountInr.multiply(BigDecimal.valueOf(100)).longValue();
-        String cacheKey = planCode + "_" + billingCycle + "_" + amountPaise;
 
-        if (rzpPlanCache.containsKey(cacheKey)) {
-            log.info("[RAZORPAY] Reusing cached Razorpay Plan ID for key: {}", cacheKey);
-            return rzpPlanCache.get(cacheKey);
+        PricingPlanConfig config = pricingPlanRepository.findByIdForUpdate(tier)
+                .orElseThrow(() -> new SubscriptionException("Pricing plan configuration not found for tier: " + tier));
+
+        String cachedPlanId = isYearly ? config.getRazorpayPlanIdYearly() : config.getRazorpayPlanIdMonthly();
+        Double cachedPrice = isYearly ? config.getRazorpayPlanPriceYearly() : config.getRazorpayPlanPriceMonthly();
+
+        if (cachedPlanId != null && cachedPrice != null
+                && BigDecimal.valueOf(cachedPrice).setScale(2).compareTo(amountInr.setScale(2)) == 0) {
+            log.info("[RAZORPAY] Reusing cached Razorpay Plan ID {} for tier={}, cycle={}", cachedPlanId, tier, billingCycle);
+            return cachedPlanId;
         }
 
         try {
             JSONObject planReq = new JSONObject();
-            planReq.put("period",   "MONTHLY".equalsIgnoreCase(billingCycle) ? "monthly" : "yearly");
+            planReq.put("period",   isYearly ? "yearly" : "monthly");
             planReq.put("interval", 1);
 
             JSONObject item = new JSONObject();
-            item.put("name",        "VyaparSathi " + planCode + " (" + billingCycle + ")");
+            item.put("name",        "VyaparSathi " + tier + " (" + billingCycle + ")");
             item.put("amount",      amountPaise);
             item.put("currency",    razorpayConfig.getCurrency());
-            item.put("description", "VyaparSathi " + planCode + " plan (" + billingCycle + ")");
+            item.put("description", "VyaparSathi " + tier + " plan (" + billingCycle + ")");
             planReq.put("item", item);
 
             Plan plan   = razorpayClient.plans.create(planReq);
             String planId = plan.get("id");
 
-            rzpPlanCache.put(cacheKey, planId);
-            log.info("[RAZORPAY] Created Razorpay Plan ID: {} for key: {}", planId, cacheKey);
+            if (isYearly) {
+                config.setRazorpayPlanIdYearly(planId);
+                config.setRazorpayPlanPriceYearly(amountInr.doubleValue());
+            } else {
+                config.setRazorpayPlanIdMonthly(planId);
+                config.setRazorpayPlanPriceMonthly(amountInr.doubleValue());
+            }
+            pricingPlanRepository.saveAndFlush(config);
+
+            log.info("[RAZORPAY] Created Razorpay Plan ID: {} for tier={}, cycle={}, amount={}", planId, tier, billingCycle, amountInr);
             return planId;
 
         } catch (RazorpayException e) {
-            log.error("[RAZORPAY] Plan creation error for key={}: {}", cacheKey, e.getMessage());
+            log.error("[RAZORPAY] Plan creation error for tier={}, cycle={}: {}", tier, billingCycle, e.getMessage());
             throw new SubscriptionException("Razorpay plan creation failed: " + e.getMessage());
         }
     }
@@ -195,33 +227,34 @@ public class RazorpaySubscriptionService {
         }
 
         // ── Duplicate subscription & Tier Downgrade guard ────────────────────
-        if (subscriptionOrderRepository.hasActiveSubscriptionForShop(shopId)) {
-            Optional<RazorpaySubscriptionOrder> existingOpt =
-                    subscriptionOrderRepository.findTopByShopIdOrderByCreatedAtDesc(shopId);
-            if (existingOpt.isPresent()) {
-                RazorpaySubscriptionOrder existing = existingOpt.get();
-                String currentPlan = existing.getPlanCode() != null ? existing.getPlanCode() : "FREE";
-                int currentRank = getTierRank(currentPlan);
-                int targetRank = getTierRank(planCode);
+        // Locked so two concurrent checkout submissions can't both pass this guard
+        // before either commits — same lock already used by pause/resume/cancel.
+        Optional<RazorpaySubscriptionOrder> existingOpt =
+                subscriptionOrderRepository.findTopByShopIdOrderByCreatedAtDescForUpdate(shopId);
+        if (existingOpt.isPresent() && ACTIVE_ORDER_STATUSES.contains(
+                existingOpt.get().getStatus() != null ? existingOpt.get().getStatus().toUpperCase() : "")) {
+            RazorpaySubscriptionOrder existing = existingOpt.get();
+            String currentPlan = existing.getPlanCode() != null ? existing.getPlanCode() : "FREE";
+            int currentRank = getTierRank(currentPlan);
+            int targetRank = getTierRank(planCode);
 
-                if (existing.getPlanCode().equalsIgnoreCase(planCode)
-                        && existing.getBillingCycle().equalsIgnoreCase(billingCycle)) {
-                    // Same plan+cycle — idempotent re-fetch
-                    log.info("[RAZORPAY] Idempotent re-fetch for shopId={}, subId={}",
-                            shopId, existing.getRazorpaySubscriptionId());
-                    BigDecimal price = pricingService.getPrice(existing.getPlanCode(), existing.getBillingCycle());
-                    return buildCheckoutResponse(existing, price);
-                }
+            if (existing.getPlanCode().equalsIgnoreCase(planCode)
+                    && existing.getBillingCycle().equalsIgnoreCase(billingCycle)) {
+                // Same plan+cycle — idempotent re-fetch
+                log.info("[RAZORPAY] Idempotent re-fetch for shopId={}, subId={}",
+                        shopId, existing.getRazorpaySubscriptionId());
+                BigDecimal price = pricingService.getPrice(existing.getPlanCode(), existing.getBillingCycle());
+                return buildCheckoutResponse(existing, price);
+            }
 
-                if (targetRank < currentRank) {
-                    throw new SubscriptionException(
-                            "Active mandate exists. Cancel your current plan before switching to a lower tier.");
-                }
+            if (targetRank < currentRank) {
+                throw new SubscriptionException(
+                        "Active mandate exists. Cancel your current plan before switching to a lower tier.");
+            }
 
-                if (existing.getPlanCode().equalsIgnoreCase(planCode)) {
-                    throw new SubscriptionException(
-                            "An active subscription already exists for the " + planCode + " plan.");
-                }
+            if (existing.getPlanCode().equalsIgnoreCase(planCode)) {
+                throw new SubscriptionException(
+                        "An active subscription already exists for the " + planCode + " plan.");
             }
         }
 
@@ -233,7 +266,7 @@ public class RazorpaySubscriptionService {
                 shopId, request.getCustomerEmail(), request.getCustomerContact());
 
         // ── Razorpay Plan ─────────────────────────────────────────────────────
-        String razorpayPlanId = getOrCreateRazorpayPlanId(planCode, billingCycle, amountInr);
+        String razorpayPlanId = getOrCreateRazorpayPlanId(Tier.valueOf(planCode), billingCycle, amountInr);
 
         // ── Razorpay Subscription ─────────────────────────────────────────────
         try {
@@ -322,6 +355,16 @@ public class RazorpaySubscriptionService {
                 .findByRazorpaySubscriptionId(subscriptionId)
                 .orElseThrow(() -> new SubscriptionException(
                         "Subscription order not found: " + subscriptionId));
+
+        // ── Ownership guard ───────────────────────────────────────────────────
+        // The payment/subscription id + signature are handed to the browser during
+        // checkout, so a caller must never be able to activate their own shop using
+        // a checkout artifact that belongs to a different shop's order.
+        if (!order.getShopId().equals(shopId)) {
+            log.warn("[RAZORPAY] Checkout ownership mismatch: callerShopId={} does not own order for subId={} (orderShopId={})",
+                    shopId, subscriptionId, order.getShopId());
+            throw new SubscriptionException("This checkout session does not belong to your account.");
+        }
 
         // ── Idempotency guard ─────────────────────────────────────────────────
         String currentStatus = order.getStatus() != null ? order.getStatus().toUpperCase() : "";

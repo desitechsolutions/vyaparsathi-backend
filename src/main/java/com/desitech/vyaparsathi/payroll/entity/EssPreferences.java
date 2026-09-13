@@ -28,4 +28,17 @@ public class EssPreferences extends ShopAwareEntity {
 
     @Column(nullable = false)
     private boolean notificationOptIn = true;
+
+    // Convenience setters for notification preferences
+    public void setEmailNotifications(boolean value) {
+        this.payslipDispatchEmail = value;
+    }
+
+    public void setSmsNotifications(boolean value) {
+        this.payslipDispatchSms = value;
+    }
+
+    public void setWhatsappNotifications(boolean value) {
+        this.payslipDispatchWhatsapp = value;
+    }
 }

@@ -14,6 +14,7 @@ public class PaymentDto {
     private PaymentSourceType sourceType;
     private Long supplierId;
     private Long customerId;
+    private String customerName;
     private BigDecimal amount;
     private LocalDateTime paymentDate;
     private PaymentMethod paymentMethod;
@@ -37,6 +38,9 @@ public class PaymentDto {
 
     public Long getCustomerId() { return customerId; }
     public void setCustomerId(Long customerId) { this.customerId = customerId; }
+
+    public String getCustomerName() { return customerName; }
+    public void setCustomerName(String customerName) { this.customerName = customerName; }
 
     public BigDecimal getAmount() { return amount; }
     public void setAmount(BigDecimal amount) { this.amount = amount; }

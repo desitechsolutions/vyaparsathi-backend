@@ -1,7 +1,7 @@
 package com.desitech.vyaparsathi.accounting.entity;
 
 import com.desitech.vyaparsathi.accounting.enums.DebitNoteStatus;
-import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
+import com.desitech.vyaparsathi.common.entities.AuditableFinancialEntity;
 import com.desitech.vyaparsathi.purchasereturn.entity.PurchaseReturn;
 import com.desitech.vyaparsathi.purchases.entity.PurchaseInvoice;
 import com.desitech.vyaparsathi.supplier.entity.Supplier;
@@ -21,7 +21,7 @@ import java.util.List;
 @Getter
 @Setter
 @NoArgsConstructor
-public class DebitNote extends ShopAwareEntity {
+public class DebitNote extends AuditableFinancialEntity {
 
     @Column(name = "debit_note_no", nullable = false, length = 50)
     private String debitNoteNo;
@@ -70,6 +70,24 @@ public class DebitNote extends ShopAwareEntity {
 
     @Column(name = "notes", length = 500)
     private String notes;
+
+    // ─── V132 GST Phase 1 fields ──────────────────────────────────────────────
+
+    /**
+     * Free-text snapshot of the original purchase invoice number.
+     * Written to the purchase register and GSTR-2 equivalent for debit note tracking.
+     * Populated from {@code purchaseInvoice.getInvoiceNumber()} at creation.
+     * Must survive even if the {@code purchase_invoice_id} FK is nullified.
+     */
+    @Column(name = "reference_invoice_number", length = 50)
+    private String referenceInvoiceNumber;
+
+    /**
+     * Aggregated compensation cess on this debit note.
+     * Populated from the sum of {@link DebitNoteItem#getCessAmt()}.
+     */
+    @Column(name = "cess_amount", nullable = false, precision = 12, scale = 2)
+    private BigDecimal cessAmount = BigDecimal.ZERO;
 
     @OneToMany(mappedBy = "debitNote", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @JsonManagedReference
@@ -123,5 +141,22 @@ public class DebitNote extends ShopAwareEntity {
     public void addItem(DebitNoteItem item) {
         item.setDebitNote(this);
         this.items.add(item);
+    }
+
+    public String getReferenceInvoiceNumber() { return referenceInvoiceNumber; }
+    public void setReferenceInvoiceNumber(String referenceInvoiceNumber) {
+        this.referenceInvoiceNumber = referenceInvoiceNumber;
+    }
+
+    public BigDecimal getCessAmount() { return cessAmount; }
+    public void setCessAmount(BigDecimal cessAmount) {
+        this.cessAmount = cessAmount != null ? cessAmount : BigDecimal.ZERO;
+    }
+
+    /** Recomputes cessAmount from all line items. Call after modifying items collection. */
+    public void recomputeCessAmount() {
+        this.cessAmount = items.stream()
+                .map(item -> item.getCessAmt() != null ? item.getCessAmt() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 }

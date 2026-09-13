@@ -44,11 +44,10 @@ public class ReceivingTicketEscalationScheduler {
     @Scheduled(cron = "0 7 * * * *")
     public void escalateStaleTickets() {
         LocalDateTime cutoff = LocalDateTime.now().minusHours(escalateHours);
-        List<ReceivingTicket> all = ticketRepository.findAll();
+        // Eagerly fetches receiving + shop so no lazy proxy is handed to the @Async thread.
+        List<ReceivingTicket> stale = ticketRepository.findOpenTicketsOlderThan(cutoff);
         int fired = 0;
-        for (ReceivingTicket t : all) {
-            if (!t.getStatusEnum().isOpen()) continue;
-            if (t.getRaisedAt() == null || t.getRaisedAt().isAfter(cutoff)) continue;
+        for (ReceivingTicket t : stale) {
             try {
                 notificationService.onAgingTicket(t);
                 fired++;

@@ -63,7 +63,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
             "/api/auth/mfa/setup/init",
             "/api/auth/mfa/setup/confirm",
             "/api/auth/mfa/regenerate-codes",
-            "/api/auth/mfa/disable"
+            "/api/auth/mfa/disable",
+            // Offline sales queue — protect against spam/DoS
+            "/api/sales/offline-queue"
     );
 
     private static final Set<String> IDENTITY_BOUND_PATHS = Set.of(

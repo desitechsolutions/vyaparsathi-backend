@@ -43,19 +43,24 @@ public class PaymentController {
                 @RequestParam(required = false) Long sourceId,
                 @RequestParam(required = false) Long supplierId,
                 @RequestParam(required = false) Long customerId,
+                @RequestParam(required = false) String search,
                 @RequestParam(defaultValue = "0") int page,
                 @RequestParam(defaultValue = "20") int size) {
 
                 PageRequest pageable = PageRequest.of(page, size, Sort.by("paymentDate").descending());
 
+                // Priority: 1) specific source, 2) supplier, 3) customer, 4) search, 5) all
                 if (sourceType != null && sourceId != null) {
                         return ResponseEntity.ok(paymentService.getPaymentsBySource(sourceType, sourceId, pageable));
                 } else if (supplierId != null) {
                         return ResponseEntity.ok(paymentService.getPaymentsBySupplier(supplierId, pageable));
                 } else if (customerId != null) {
                         return ResponseEntity.ok(paymentService.getPaymentsByCustomer(customerId, pageable));
+                } else if (search != null && !search.trim().isEmpty()) {
+                        return ResponseEntity.ok(paymentService.searchPayments(search, pageable));
                 } else {
-                        return ResponseEntity.badRequest().build();
+                        // Get all payments for the shop (when no specific filter is provided)
+                        return ResponseEntity.ok(paymentService.getAllPayments(pageable));
                 }
         }
 

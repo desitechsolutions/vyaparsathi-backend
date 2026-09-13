@@ -4,6 +4,8 @@ import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.SubscriptionException;
+import com.desitech.vyaparsathi.inventory.repository.ItemRepository;
+import com.desitech.vyaparsathi.rbac.repository.UserShopMembershipRepository;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
@@ -41,6 +43,8 @@ public class SubscriptionService {
     private final UserRepository userRepository;
     private final PricingPlanService pricingPlanService;
     private final SaleRepository saleRepository;
+    private final ItemRepository itemRepository;
+    private final UserShopMembershipRepository membershipRepository;
 
     private static final int TRIAL_DAYS = 14;
 
@@ -354,6 +358,8 @@ public class SubscriptionService {
                 .with(TemporalAdjusters.firstDayOfMonth())
                 .withHour(0).withMinute(0).withSecond(0).withNano(0);
         long usedThisMonth = saleRepository.countMonthlySalesByShop(shopId, startOfMonth);
+        long itemsUsed = itemRepository.countByShopId(shopId);
+        long staffUsed = membershipRepository.countByShopIdAndActiveTrue(shopId);
 
         return subscriptionRepository.findByShopId(shopId)
                 .map(sub -> {
@@ -398,6 +404,10 @@ public class SubscriptionService {
                     dto.setCanStartTrial(canStartTrial);
                     dto.setMaxSalesPerMonth(config != null ? config.getMaxSalesPerMonth() : null);
                     dto.setSalesUsedThisMonth(usedThisMonth);
+                    dto.setMaxItems(config != null ? config.getMaxItems() : null);
+                    dto.setItemsUsed(itemsUsed);
+                    dto.setMaxStaffUsers(config != null ? config.getMaxStaffUsers() : null);
+                    dto.setStaffUsed(staffUsed);
                     return dto;
                 })
                 .orElseGet(() -> {
@@ -417,6 +427,10 @@ public class SubscriptionService {
                     dto.setCanStartTrial(true);
                     dto.setMaxSalesPerMonth(config != null ? config.getMaxSalesPerMonth() : null);
                     dto.setSalesUsedThisMonth(usedThisMonth);
+                    dto.setMaxItems(config != null ? config.getMaxItems() : null);
+                    dto.setItemsUsed(itemsUsed);
+                    dto.setMaxStaffUsers(config != null ? config.getMaxStaffUsers() : null);
+                    dto.setStaffUsed(staffUsed);
                     return dto;
                 });
     }

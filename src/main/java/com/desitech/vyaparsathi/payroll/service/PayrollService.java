@@ -871,9 +871,9 @@ public class PayrollService {
         }
         TaxDeclaration taxDecl = new TaxDeclaration();
         taxDecl.setEmployee(employeeRepository.findById(employeeId).orElseThrow(() -> new EntityNotFoundAppException("Employee", employeeId)));
-        taxDecl.setSection80C(declarationDto.getSection80C());
-        taxDecl.setSection80D(declarationDto.getSection80D());
-        taxDecl.setNPS(declarationDto.getNPS());
+        taxDecl.setLifeInsurancePremium(declarationDto.getSection80C());
+        taxDecl.setMedicalInsurancePremium(declarationDto.getSection80D());
+        taxDecl.setNpsContribution(declarationDto.getNPS());
         taxDecl.setTaxRegime(declarationDto.getTaxRegime());
         taxDecl.setFinancialYear(declarationDto.getFinancialYear());
         return essEngine.submitTaxDeclaration(employeeId, taxDecl);

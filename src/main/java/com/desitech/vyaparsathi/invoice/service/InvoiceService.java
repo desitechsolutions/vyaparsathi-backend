@@ -772,7 +772,7 @@ public class InvoiceService {
         if (!isComposition) {
             Map<BigDecimal, GstSummary> gstMap = new LinkedHashMap<>();
             for (SaleItem item : sale.getSaleItems()) {
-                BigDecimal rate = BigDecimal.valueOf(item.getGstType().getRate());
+                BigDecimal rate = item.getGstType().getRate();
                 GstSummary summary = gstMap.computeIfAbsent(rate, GstSummary::new);
                 summary.addCgst(item.getCgstAmt());
                 summary.addSgst(item.getSgstAmt());

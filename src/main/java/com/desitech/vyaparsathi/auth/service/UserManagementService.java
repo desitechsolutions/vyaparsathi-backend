@@ -6,6 +6,7 @@ import com.desitech.vyaparsathi.auth.dto.UserDto;
 import com.desitech.vyaparsathi.auth.entity.User;
 import com.desitech.vyaparsathi.auth.model.Role;
 import com.desitech.vyaparsathi.auth.repository.UserRepository;
+import com.desitech.vyaparsathi.auth.security.CustomUserDetailsService;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.shop.entity.Shop;
@@ -35,6 +36,9 @@ public class UserManagementService {
 
     @Autowired
     private PasswordHistoryService passwordHistoryService;
+
+    @Autowired
+    private CustomUserDetailsService customUserDetailsService;
 
     @Autowired
     private EmailVerificationService emailVerificationService;
@@ -132,6 +136,7 @@ public class UserManagementService {
 
         userToModify.setActive(active);
         User updatedUser = userRepository.save(userToModify);
+        customUserDetailsService.evictUserCache(updatedUser.getUsername());
         return toUserDto(updatedUser);
     }
 
@@ -154,6 +159,7 @@ public class UserManagementService {
 
         userToModify.setRole(newRole);
         User updatedUser = userRepository.save(userToModify);
+        customUserDetailsService.evictUserCache(updatedUser.getUsername());
         return toUserDto(updatedUser);
     }
 

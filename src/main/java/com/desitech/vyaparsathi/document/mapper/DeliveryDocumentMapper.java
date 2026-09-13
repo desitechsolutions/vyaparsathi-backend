@@ -53,8 +53,8 @@ public class DeliveryDocumentMapper {
         if (sale != null) {
             doc.setPlaceOfSupplyState(sale.getPlaceOfSupply());
             doc.setReverseCharge(Boolean.TRUE.equals(sale.getReverseCharge()));
-            SupplyType st = SupplyType.fromString(sale.getSupplyType());
-            if (st != null) doc.setSupplyType(st);
+            // getSupplyType() now returns SupplyType enum directly
+            if (sale.getSupplyType() != null) doc.setSupplyType(sale.getSupplyType());
             doc.setBillToAddress(sale.getBillToPartySnapshot());
             doc.setShipToAddress(sale.getShipToPartySnapshot());
             doc.setConsigneeAddress(sale.getConsigneePartySnapshot());

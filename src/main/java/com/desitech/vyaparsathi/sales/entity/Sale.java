@@ -1,7 +1,8 @@
 package com.desitech.vyaparsathi.sales.entity;
 
 import com.desitech.vyaparsathi.common.entities.BaseEntity;
-import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
+import com.desitech.vyaparsathi.common.entities.AuditableFinancialEntity;
+import com.desitech.vyaparsathi.common.enums.SupplyType;
 import com.desitech.vyaparsathi.common.util.LocalDateTimeAttributeConverter;
 import com.desitech.vyaparsathi.customer.entity.Customer;
 import com.desitech.vyaparsathi.delivery.entity.Delivery;
@@ -21,7 +22,7 @@ import java.util.List;
 @Entity
 @NoArgsConstructor
 @Table(name = "sale")
-public class Sale extends ShopAwareEntity {
+public class Sale extends AuditableFinancialEntity {
     @Column(name = "invoice_no", nullable = false, unique = true, length = 50)
     private String invoiceNo;
 
@@ -133,10 +134,20 @@ public class Sale extends ShopAwareEntity {
     @Column(name = "place_of_supply", length = 100)
     private String placeOfSupply;
 
-    /** V99 statutory columns. Nullable — the shared enterprise renderer
-     *  falls back to derived / party defaults when these are blank. */
+    /**
+     * Nature of the supply — intra-state, interstate, export, SEZ, etc.
+     * Stored as the {@link SupplyType} enum name ({@code EnumType.STRING}) so the
+     * column remains human-readable and the migration from the previous free-text
+     * {@code VARCHAR(30)} is lossless for valid enum values.
+     *
+     * <p>This field describes the <em>supply nature</em> and drives which GST
+     * components (CGST+SGST vs. IGST) are applicable. GSTR-1 table routing
+     * (B2B / B2CL / B2CS) is determined separately by {@code GstTaxService}
+     * based on the customer's GSTIN and invoice value.
+     */
+    @Enumerated(EnumType.STRING)
     @Column(name = "supply_type", length = 30)
-    private String supplyType;
+    private SupplyType supplyType;
 
     @Column(name = "bill_to_party_snapshot", columnDefinition = "TEXT")
     private String billToPartySnapshot;
@@ -158,6 +169,58 @@ public class Sale extends ShopAwareEntity {
 
     @Column(name = "other_charges", precision = 12, scale = 2)
     private BigDecimal otherCharges = BigDecimal.ZERO;
+
+    // ── Immutable financial snapshot (MT-2 fix) ───────────────────────────────
+    // Populated once when the invoice transitions to COMPLETED status.
+    // SaleService.cancelSale() MUST read these before zeroing totalAmount.
+    // These columns are never updated after first write — treat them as append-only.
+    // Pre-existing rows have NULL here; they must be read from SaleItem aggregates
+    // or recovered from AuditLog.previousValue.
+
+    /** Grand total at the moment of invoice completion. Never zeroed on cancellation. */
+    @Column(name = "original_total_amount", precision = 12, scale = 2)
+    private BigDecimal originalTotalAmount;
+
+    /** Sum of all SaleItem.taxableValue at completion. Used for GSTR-1 {@code val} field. */
+    @Column(name = "original_taxable_value", precision = 12, scale = 2)
+    private BigDecimal originalTaxableValue;
+
+    /** Sum of all SaleItem.cgstAmt at completion. */
+    @Column(name = "original_cgst", precision = 12, scale = 2)
+    private BigDecimal originalCgst;
+
+    /** Sum of all SaleItem.sgstAmt at completion. */
+    @Column(name = "original_sgst", precision = 12, scale = 2)
+    private BigDecimal originalSgst;
+
+    /** Sum of all SaleItem.igstAmt at completion. */
+    @Column(name = "original_igst", precision = 12, scale = 2)
+    private BigDecimal originalIgst;
+
+    /** Sum of all SaleItem.utgstAmt at completion (UT supplies only). */
+    @Column(name = "original_utgst", precision = 12, scale = 2)
+    private BigDecimal originalUtgst;
+
+    /** Sum of all SaleItem.cessAmt at completion. Zero for non-cess supplies. */
+    @Column(name = "original_cess", precision = 12, scale = 2)
+    private BigDecimal originalCess;
+
+    // ── Composite supply charge GST (CA-7) ───────────────────────────────────
+    // GST computed on shipping + other charges at the invoice's highest GST rate
+    // (Section 8(a) CGST Act: composite supply is taxed at the principal supply rate).
+    // Null / zero for pre-Phase-2 rows or when no charges are billed.
+
+    @Column(name = "composite_charge_cgst", precision = 12, scale = 2)
+    private BigDecimal compositeChargeCgst = BigDecimal.ZERO;
+
+    @Column(name = "composite_charge_sgst", precision = 12, scale = 2)
+    private BigDecimal compositeChargeSgst = BigDecimal.ZERO;
+
+    @Column(name = "composite_charge_igst", precision = 12, scale = 2)
+    private BigDecimal compositeChargeIgst = BigDecimal.ZERO;
+
+    @Column(name = "composite_charge_utgst", precision = 12, scale = 2)
+    private BigDecimal compositeChargeUtgst = BigDecimal.ZERO;
 
     public String getInvoiceNo() { return invoiceNo; }
     public void setInvoiceNo(String invoiceNo) { this.invoiceNo = invoiceNo; }
@@ -228,8 +291,8 @@ public class Sale extends ShopAwareEntity {
     public String getPlaceOfSupply() { return placeOfSupply; }
     public void setPlaceOfSupply(String placeOfSupply) { this.placeOfSupply = placeOfSupply; }
 
-    public String getSupplyType() { return supplyType; }
-    public void setSupplyType(String supplyType) { this.supplyType = supplyType; }
+    public SupplyType getSupplyType() { return supplyType; }
+    public void setSupplyType(SupplyType supplyType) { this.supplyType = supplyType; }
 
     public String getBillToPartySnapshot() { return billToPartySnapshot; }
     public void setBillToPartySnapshot(String billToPartySnapshot) { this.billToPartySnapshot = billToPartySnapshot; }
@@ -308,42 +371,152 @@ public class Sale extends ShopAwareEntity {
     public String getTransporterName() { return transporterName; }
     public void setTransporterName(String transporterName) { this.transporterName = transporterName; }
 
+    public BigDecimal getOriginalTotalAmount() { return originalTotalAmount; }
+    /** Called once at invoice completion. Throws if snapshot is already set (append-only guard). */
+    public void setOriginalTotalAmount(BigDecimal v) {
+        if (this.originalTotalAmount != null) {
+            throw new IllegalStateException(
+                "originalTotalAmount is immutable once set. Sale id=" + getId());
+        }
+        this.originalTotalAmount = v;
+    }
+
+    public BigDecimal getOriginalTaxableValue() { return originalTaxableValue; }
+    public void setOriginalTaxableValue(BigDecimal v) {
+        if (this.originalTaxableValue != null) {
+            throw new IllegalStateException(
+                "originalTaxableValue is immutable once set. Sale id=" + getId());
+        }
+        this.originalTaxableValue = v;
+    }
+
+    public BigDecimal getOriginalCgst() { return originalCgst; }
+    public void setOriginalCgst(BigDecimal v) {
+        if (this.originalCgst != null) {
+            throw new IllegalStateException(
+                "originalCgst is immutable once set. Sale id=" + getId());
+        }
+        this.originalCgst = v;
+    }
+
+    public BigDecimal getOriginalSgst() { return originalSgst; }
+    public void setOriginalSgst(BigDecimal v) {
+        if (this.originalSgst != null) {
+            throw new IllegalStateException(
+                "originalSgst is immutable once set. Sale id=" + getId());
+        }
+        this.originalSgst = v;
+    }
+
+    public BigDecimal getOriginalIgst() { return originalIgst; }
+    public void setOriginalIgst(BigDecimal v) {
+        if (this.originalIgst != null) {
+            throw new IllegalStateException(
+                "originalIgst is immutable once set. Sale id=" + getId());
+        }
+        this.originalIgst = v;
+    }
+
+    public BigDecimal getOriginalUtgst() { return originalUtgst; }
+    public void setOriginalUtgst(BigDecimal v) {
+        if (this.originalUtgst != null) {
+            throw new IllegalStateException(
+                "originalUtgst is immutable once set. Sale id=" + getId());
+        }
+        this.originalUtgst = v;
+    }
+
+    public BigDecimal getOriginalCess() { return originalCess; }
+    public void setOriginalCess(BigDecimal v) {
+        if (this.originalCess != null) {
+            throw new IllegalStateException(
+                "originalCess is immutable once set. Sale id=" + getId());
+        }
+        this.originalCess = v;
+    }
+
+    /**
+     * Returns the taxable value to use for GSTR-1 reporting.
+     * Prefers the immutable snapshot; falls back to the live SaleItem aggregate
+     * for pre-V132 rows where the snapshot was not taken.
+     */
+    public BigDecimal getReportingTaxableValue() {
+        return originalTaxableValue != null ? originalTaxableValue : getTaxableAmount();
+    }
+
+    /**
+     * Returns the grand total to use for GSTR-1 reporting.
+     * Prefers the immutable snapshot so that cancelled invoices still report correctly.
+     */
+    public BigDecimal getReportingTotalAmount() {
+        return originalTotalAmount != null ? originalTotalAmount : totalAmount;
+    }
+
     public BigDecimal getGrandTotal() { return totalAmount; }
 
+    /**
+     * Sum of all line-item taxable values plus composite supply charges (shipping +
+     * other charges when GST is applicable). The composite principal is already stored
+     * in {@code shippingCharges} / {@code otherCharges}; including them here ensures
+     * GSTR-1 Table 4/9/10 taxable-value columns are correctly populated.
+     */
     public BigDecimal getTaxableAmount() {
-        if (saleItems == null || saleItems.isEmpty()) return BigDecimal.ZERO;
-        return saleItems.stream()
+        BigDecimal items = (saleItems == null || saleItems.isEmpty()) ? BigDecimal.ZERO :
+            saleItems.stream()
                 .map(item -> item.getTaxableValue() != null ? item.getTaxableValue() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // Composite supply charges are taxable when GST was applied
+        BigDecimal chargeTaxable = BigDecimal.ZERO;
+        if (Boolean.TRUE.equals(isGstRequired)) {
+            chargeTaxable = (shippingCharges != null ? shippingCharges : BigDecimal.ZERO)
+                           .add(otherCharges != null ? otherCharges : BigDecimal.ZERO);
+        }
+        return items.add(chargeTaxable);
     }
 
     public BigDecimal getCgstAmount() {
-        if (saleItems == null || saleItems.isEmpty()) return BigDecimal.ZERO;
-        return saleItems.stream()
+        BigDecimal items = (saleItems == null || saleItems.isEmpty()) ? BigDecimal.ZERO :
+            saleItems.stream()
                 .map(item -> item.getCgstAmt() != null ? item.getCgstAmt() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return items.add(compositeChargeCgst != null ? compositeChargeCgst : BigDecimal.ZERO);
     }
 
     public BigDecimal getSgstAmount() {
-        if (saleItems == null || saleItems.isEmpty()) return BigDecimal.ZERO;
-        return saleItems.stream()
+        BigDecimal items = (saleItems == null || saleItems.isEmpty()) ? BigDecimal.ZERO :
+            saleItems.stream()
                 .map(item -> item.getSgstAmt() != null ? item.getSgstAmt() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return items.add(compositeChargeSgst != null ? compositeChargeSgst : BigDecimal.ZERO);
     }
 
     public BigDecimal getIgstAmount() {
-        if (saleItems == null || saleItems.isEmpty()) return BigDecimal.ZERO;
-        return saleItems.stream()
+        BigDecimal items = (saleItems == null || saleItems.isEmpty()) ? BigDecimal.ZERO :
+            saleItems.stream()
                 .map(item -> item.getIgstAmt() != null ? item.getIgstAmt() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return items.add(compositeChargeIgst != null ? compositeChargeIgst : BigDecimal.ZERO);
     }
 
     public BigDecimal getUtgstAmount() {
-        if (saleItems == null || saleItems.isEmpty()) return BigDecimal.ZERO;
-        return saleItems.stream()
+        BigDecimal items = (saleItems == null || saleItems.isEmpty()) ? BigDecimal.ZERO :
+            saleItems.stream()
                 .map(item -> item.getUtgstAmt() != null ? item.getUtgstAmt() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return items.add(compositeChargeUtgst != null ? compositeChargeUtgst : BigDecimal.ZERO);
     }
+
+    public BigDecimal getCompositeChargeCgst() { return compositeChargeCgst != null ? compositeChargeCgst : BigDecimal.ZERO; }
+    public void setCompositeChargeCgst(BigDecimal v) { this.compositeChargeCgst = v; }
+
+    public BigDecimal getCompositeChargeSgst() { return compositeChargeSgst != null ? compositeChargeSgst : BigDecimal.ZERO; }
+    public void setCompositeChargeSgst(BigDecimal v) { this.compositeChargeSgst = v; }
+
+    public BigDecimal getCompositeChargeIgst() { return compositeChargeIgst != null ? compositeChargeIgst : BigDecimal.ZERO; }
+    public void setCompositeChargeIgst(BigDecimal v) { this.compositeChargeIgst = v; }
+
+    public BigDecimal getCompositeChargeUtgst() { return compositeChargeUtgst != null ? compositeChargeUtgst : BigDecimal.ZERO; }
+    public void setCompositeChargeUtgst(BigDecimal v) { this.compositeChargeUtgst = v; }
 
     @PrePersist
     @Override

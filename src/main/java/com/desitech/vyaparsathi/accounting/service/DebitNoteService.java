@@ -7,7 +7,10 @@ import com.desitech.vyaparsathi.accounting.entity.DebitNoteItem;
 import com.desitech.vyaparsathi.accounting.enums.DebitNoteStatus;
 import com.desitech.vyaparsathi.accounting.repository.DebitNoteRepository;
 import com.desitech.vyaparsathi.common.annotations.LogAudit;
+import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.util.TenantUtils;
+import com.desitech.vyaparsathi.compliance.exception.LockedPeriodException;
+import com.desitech.vyaparsathi.compliance.service.PeriodLockService;
 import com.desitech.vyaparsathi.purchasereturn.entity.PurchaseReturn;
 import com.desitech.vyaparsathi.purchasereturn.entity.PurchaseReturnItem;
 import com.desitech.vyaparsathi.purchases.entity.PurchaseInvoice;
@@ -33,23 +36,31 @@ public class DebitNoteService {
     private final SupplierRepository supplierRepo;
     private final SupplierLedgerService ledgerService;
     private final DebitNoteNumberService debitNoteNumberService;
+    private final PeriodLockService periodLockService;
 
     public DebitNoteService(DebitNoteRepository debitRepo,
                             PurchaseInvoiceRepository purchaseRepo,
                             SupplierRepository supplierRepo,
                             SupplierLedgerService ledgerService,
-                            DebitNoteNumberService debitNoteNumberService) {
+                            DebitNoteNumberService debitNoteNumberService,
+                            PeriodLockService periodLockService) {
         this.debitRepo = debitRepo;
         this.purchaseRepo = purchaseRepo;
         this.supplierRepo = supplierRepo;
         this.ledgerService = ledgerService;
         this.debitNoteNumberService = debitNoteNumberService;
+        this.periodLockService = periodLockService;
     }
 
     @Transactional
     @LogAudit(action = "CREATE_DEBIT_NOTE", entity = "DEBIT_NOTE")
     public DebitNoteDto createDebitNote(DebitNoteCreateDto createDto) {
         Long shopId = TenantUtils.getCurrentShopId();
+        LocalDate noteDate = createDto.getDebitNoteDate() != null ? createDto.getDebitNoteDate() : LocalDate.now();
+        if (periodLockService.isPeriodLocked(TenantContext.getCurrentShopId(), noteDate)) {
+            throw new LockedPeriodException(
+                    String.format("%02d-%d", noteDate.getMonthValue(), noteDate.getYear()));
+        }
 
         PurchaseInvoice purchase = null;
         if (createDto.getPurchaseInvoiceId() != null) {
@@ -68,7 +79,6 @@ public class DebitNoteService {
         }
 
         DebitNote note = new DebitNote();
-        LocalDate noteDate = createDto.getDebitNoteDate() != null ? createDto.getDebitNoteDate() : LocalDate.now();
         note.setDebitNoteNo(debitNoteNumberService.nextDebitNoteNumber(shopId, noteDate));
         note.setPurchaseInvoice(purchase);
         note.setSupplier(supplier);
@@ -123,6 +133,12 @@ public class DebitNoteService {
         }
 
         Long shopId = purchaseReturn.getShop() != null ? purchaseReturn.getShop().getId() : TenantUtils.getCurrentShopId();
+        LocalDate returnDate = purchaseReturn.getReturnDate() != null
+                ? purchaseReturn.getReturnDate().toLocalDate() : LocalDate.now();
+        if (periodLockService.isPeriodLocked(shopId, returnDate)) {
+            throw new LockedPeriodException(
+                    String.format("%02d-%d", returnDate.getMonthValue(), returnDate.getYear()));
+        }
 
         DebitNote note = new DebitNote();
         note.setShop(purchaseReturn.getShop());

@@ -63,4 +63,13 @@ public class SalaryComponent {
 
     @Column(nullable = false)
     private Integer orderSequence = 0;
+
+    // Convenience getters for common field names
+    public String getName() {
+        return this.componentName;
+    }
+
+    public BigDecimal getAmount() {
+        return this.calculationValue;
+    }
 }

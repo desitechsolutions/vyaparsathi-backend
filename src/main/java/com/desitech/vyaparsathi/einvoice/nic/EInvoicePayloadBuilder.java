@@ -76,7 +76,7 @@ public class EInvoicePayloadBuilder {
             BigDecimal cgst = nz(line.getCgstAmt());
             BigDecimal sgst = nz(line.getSgstAmt()).add(nz(line.getUtgstAmt()));
             BigDecimal igst = nz(line.getIgstAmt());
-            double rate = line.getGstType() != null ? line.getGstType().getRate() : 0.0;
+            double rate = line.getGstType() != null ? line.getGstType().getRate().doubleValue() : 0.0;
 
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("SlNo", String.valueOf(slNo++));

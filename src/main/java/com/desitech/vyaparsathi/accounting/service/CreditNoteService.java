@@ -7,7 +7,10 @@ import com.desitech.vyaparsathi.accounting.entity.CreditNoteItem;
 import com.desitech.vyaparsathi.accounting.enums.CreditNoteStatus;
 import com.desitech.vyaparsathi.accounting.repository.CreditNoteRepository;
 import com.desitech.vyaparsathi.common.annotations.LogAudit;
+import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.util.TenantUtils;
+import com.desitech.vyaparsathi.compliance.exception.LockedPeriodException;
+import com.desitech.vyaparsathi.compliance.service.PeriodLockService;
 import com.desitech.vyaparsathi.customer.dto.CustomerDto;
 import com.desitech.vyaparsathi.customer.entity.Customer;
 import com.desitech.vyaparsathi.customer.repository.CustomerRepository;
@@ -33,21 +36,29 @@ public class CreditNoteService {
     private final SaleRepository saleRepo;
     private final CustomerRepository customerRepo;
     private final CreditNoteNumberService creditNoteNumberService;
+    private final PeriodLockService periodLockService;
 
     public CreditNoteService(CreditNoteRepository creditRepo,
                              SaleRepository saleRepo,
                              CustomerRepository customerRepo,
-                             CreditNoteNumberService creditNoteNumberService) {
+                             CreditNoteNumberService creditNoteNumberService,
+                             PeriodLockService periodLockService) {
         this.creditRepo = creditRepo;
         this.saleRepo = saleRepo;
         this.customerRepo = customerRepo;
         this.creditNoteNumberService = creditNoteNumberService;
+        this.periodLockService = periodLockService;
     }
 
     @Transactional
     @LogAudit(action = "CREATE_CREDIT_NOTE", entity = "CREDIT_NOTE")
     public CreditNoteDto createCreditNote(CreditNoteCreateDto createDto) {
         Long shopId = TenantUtils.getCurrentShopId();
+        LocalDate noteDate = createDto.getCreditNoteDate() != null ? createDto.getCreditNoteDate() : LocalDate.now();
+        if (periodLockService.isPeriodLocked(TenantContext.getCurrentShopId(), noteDate)) {
+            throw new LockedPeriodException(
+                    String.format("%02d-%d", noteDate.getMonthValue(), noteDate.getYear()));
+        }
 
         Sale sale = null;
         if (createDto.getSaleId() != null) {
@@ -62,7 +73,6 @@ public class CreditNoteService {
         }
 
         CreditNote note = new CreditNote();
-        LocalDate noteDate = createDto.getCreditNoteDate() != null ? createDto.getCreditNoteDate() : LocalDate.now();
         note.setCreditNoteNo(creditNoteNumberService.nextCreditNoteNumber(shopId, noteDate));
         note.setSale(sale);
         note.setCustomer(customer);
@@ -109,6 +119,11 @@ public class CreditNoteService {
         Objects.requireNonNull(sale, "sale");
         Objects.requireNonNull(returnedQtys, "returnedQtys");
         Long shopId = sale.getShop() != null ? sale.getShop().getId() : TenantUtils.getCurrentShopId();
+        LocalDate saleDate = sale.getDate() != null ? sale.getDate().toLocalDate() : LocalDate.now();
+        if (periodLockService.isPeriodLocked(shopId, saleDate)) {
+            throw new LockedPeriodException(
+                    String.format("%02d-%d", saleDate.getMonthValue(), saleDate.getYear()));
+        }
 
         CreditNote note = new CreditNote();
         note.setShop(sale.getShop());

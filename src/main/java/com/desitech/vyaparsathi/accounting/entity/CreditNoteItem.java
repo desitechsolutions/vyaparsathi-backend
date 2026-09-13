@@ -2,6 +2,7 @@ package com.desitech.vyaparsathi.accounting.entity;
 
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.sales.entity.SaleItem;
+import com.desitech.vyaparsathi.sales.enums.GSTType;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -64,4 +65,41 @@ public class CreditNoteItem extends ShopAwareEntity {
 
     @Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalAmount;
+
+    // ─── V132 GST Phase 1 additions ──────────────────────────────────────────
+
+    /**
+     * GST rate slab for this credit-note line.
+     * Previously absent, forcing {@code GstTaxService.buildTaxItemsFromNote()} to
+     * back-derive the rate from the amounts ratio — a computation that is lossy for
+     * nil-rated items and fails on divide-by-zero. Populated at credit-note creation
+     * from the originating {@link SaleItem#getGstType()}.
+     * Default {@link GSTType#GST_0} is safe for existing rows (nil/exempt lines).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "gst_type", nullable = false, length = 20)
+    private GSTType gstType = GSTType.GST_0;
+
+    /** Compensation cess rate (%) on this line. Zero for non-cess goods. */
+    @Column(name = "cess_rate", nullable = false, precision = 5, scale = 2)
+    private BigDecimal cessRate = BigDecimal.ZERO;
+
+    /** Cess amount = taxableValue × cessRate / 100. Feeds GSTR-1 CDNR {@code csamt}. */
+    @Column(name = "cess_amt", nullable = false, precision = 12, scale = 2)
+    private BigDecimal cessAmt = BigDecimal.ZERO;
+
+    public GSTType getGstType() { return gstType; }
+    public void setGstType(GSTType gstType) {
+        this.gstType = gstType != null ? gstType : GSTType.GST_0;
+    }
+
+    public BigDecimal getCessRate() { return cessRate; }
+    public void setCessRate(BigDecimal cessRate) {
+        this.cessRate = cessRate != null ? cessRate : BigDecimal.ZERO;
+    }
+
+    public BigDecimal getCessAmt() { return cessAmt; }
+    public void setCessAmt(BigDecimal cessAmt) {
+        this.cessAmt = cessAmt != null ? cessAmt : BigDecimal.ZERO;
+    }
 }

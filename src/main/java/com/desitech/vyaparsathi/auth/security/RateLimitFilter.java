@@ -46,26 +46,29 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
 
-    private static final Set<String> RATE_LIMITED_PATHS = Set.of(
+    // Auth endpoints that share the strict login/register IP bucket
+    private static final Set<String> AUTH_RATE_LIMITED_PATHS = Set.of(
             "/api/auth/login",
             "/api/auth/register",
-            "/api/auth/forget-password",
             "/api/auth/reset-password",
             "/api/auth/validate-reset-token",
             "/api/auth/refresh",
             "/api/auth/change-pin",
             "/api/auth/change-password",
             "/api/auth/verify-email",
-            "/api/auth/resend-verification",
-            // MFA — verify is the important one, but rate-limit the whole
-            // /mfa/* surface so an attacker can't hammer setup/confirm either.
             "/api/auth/mfa/verify",
             "/api/auth/mfa/setup/init",
             "/api/auth/mfa/setup/confirm",
             "/api/auth/mfa/regenerate-codes",
             "/api/auth/mfa/disable",
-            // Offline sales queue — protect against spam/DoS
             "/api/sales/offline-queue"
+    );
+
+    // Recovery endpoints get their own lenient IP bucket so that hammering
+    // login never blocks a legitimate user from resetting their password.
+    private static final Set<String> RECOVERY_PATHS = Set.of(
+            "/api/auth/forget-password",
+            "/api/auth/resend-verification"
     );
 
     private static final Set<String> IDENTITY_BOUND_PATHS = Set.of(
@@ -75,9 +78,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
             "/api/auth/resend-verification"
     );
 
+    // Strict: 20 attempts per 15 minutes per IP for login/register flows
     private static final Bandwidth IP_LIMIT = Bandwidth.builder()
             .capacity(20)
             .refillIntervally(20, Duration.ofMinutes(15))
+            .build();
+
+    // Lenient: 10 attempts per 10 minutes per IP for password-recovery flows
+    private static final Bandwidth RECOVERY_IP_LIMIT = Bandwidth.builder()
+            .capacity(10)
+            .refillIntervally(10, Duration.ofMinutes(10))
             .build();
 
     private static final Bandwidth IDENTITY_LIMIT = Bandwidth.builder()
@@ -86,6 +96,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             .build();
 
     private final ConcurrentMap<String, Bucket> ipBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Bucket> recoveryIpBuckets = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Bucket> identityBuckets = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -95,21 +106,40 @@ public class RateLimitFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
 
         String path = request.getRequestURI();
-        if (!RATE_LIMITED_PATHS.contains(path)) {
+        boolean isAuth     = AUTH_RATE_LIMITED_PATHS.contains(path);
+        boolean isRecovery = RECOVERY_PATHS.contains(path);
+
+        if (!isAuth && !isRecovery) {
             filterChain.doFilter(request, response);
             return;
         }
 
         String clientIp = getClientIp(request);
-        Bucket ipBucket = ipBuckets.computeIfAbsent(clientIp,
-                k -> Bucket.builder().addLimit(IP_LIMIT).build());
 
-        ConsumptionProbe ipProbe = ipBucket.tryConsumeAndReturnRemaining(1);
-        if (!ipProbe.isConsumed()) {
-            reject(response, ipProbe.getNanosToWaitForRefill(),
-                    "Too many requests from this network. Try again later.");
-            log.warn("Rate limit hit (IP) for {} on {}", clientIp, path);
-            return;
+        if (isAuth) {
+            Bucket ipBucket = ipBuckets.computeIfAbsent(clientIp,
+                    k -> Bucket.builder().addLimit(IP_LIMIT).build());
+            ConsumptionProbe ipProbe = ipBucket.tryConsumeAndReturnRemaining(1);
+            if (!ipProbe.isConsumed()) {
+                reject(response, ipProbe.getNanosToWaitForRefill(),
+                        "Too many requests from this network. Try again later.");
+                log.warn("Rate limit hit (IP/auth) for {} on {}", clientIp, path);
+                return;
+            }
+        }
+
+        if (isRecovery) {
+            // Recovery paths use a separate, more lenient IP bucket so that an
+            // exhausted login bucket never blocks a legitimate password-reset attempt.
+            Bucket recoveryBucket = recoveryIpBuckets.computeIfAbsent(clientIp,
+                    k -> Bucket.builder().addLimit(RECOVERY_IP_LIMIT).build());
+            ConsumptionProbe recoveryProbe = recoveryBucket.tryConsumeAndReturnRemaining(1);
+            if (!recoveryProbe.isConsumed()) {
+                reject(response, recoveryProbe.getNanosToWaitForRefill(),
+                        "Too many password reset requests from this network. Try again later.");
+                log.warn("Rate limit hit (IP/recovery) for {} on {}", clientIp, path);
+                return;
+            }
         }
 
         // For endpoints that carry a username/email, consume the identity bucket too.

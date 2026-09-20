@@ -41,6 +41,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.sessionDenylistService = sessionDenylistService;
     }
 
+    /**
+     * Skip JWT processing for OAuth2 authorization and callback URLs.
+     *
+     * <p>Spring Security's OAuth2 filter chain handles these paths internally.
+     * If the JWT filter runs on them it can commit the response (e.g. write a
+     * 401 JSON body) before the OAuth2 redirect is issued, causing a 500
+     * Whitelabel Error Page on the callback round-trip.
+     */
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return path.startsWith("/oauth2/") || path.startsWith("/login/oauth2/");
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
@@ -143,8 +157,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
 
-            // 3. Set Spring Security Authentication if we have a username and no existing auth
-            if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+            // 3. Set Spring Security Authentication if we have a valid JWT username and auth is missing or not a UserDetails principal
+            org.springframework.security.core.Authentication existingAuth = SecurityContextHolder.getContext().getAuthentication();
+            if (username != null && (existingAuth == null
+                    || existingAuth instanceof org.springframework.security.authentication.AnonymousAuthenticationToken
+                    || !(existingAuth.getPrincipal() instanceof UserDetails))) {
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
                 if (userDetails != null) {
@@ -161,11 +178,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
 
         } catch (Exception e) {
-            logger.error("Security Filter Error for URI {}: {}", request.getRequestURI(), e.getMessage());
+            // Log full detail server-side; return a generic message to the client
+            // so internal exception text is never disclosed.
+            logger.error("Security Filter Error for URI {}: {}", request.getRequestURI(), e.getMessage(), e);
             SecurityContextHolder.clearContext();
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json");
-            response.getWriter().write("{\"error\": \"Authentication failed\", \"message\": \"" + e.getMessage() + "\"}");
+            response.getWriter().write("{\"error\": \"AUTHENTICATION_FAILED\", \"message\": \"Authentication failed. Please sign in again.\"}");
         } finally {
             TenantContext.clear();
             ImpersonationContext.clear();

@@ -150,7 +150,8 @@ public class AuthService {
             long mins = Math.max(1, secs / 60);
             throw new UserInactiveException(
                     "Account is temporarily locked due to too many failed sign-in attempts. " +
-                    "Try again in " + mins + " minute" + (mins == 1 ? "" : "s") + ".");
+                    "Try again in " + mins + " minute" + (mins == 1 ? "" : "s") + ".",
+                    Math.max(1, secs));
         }
 
         if (!passwordEncoder.matches(pin, user.getPasswordHash())) {
@@ -241,9 +242,6 @@ public class AuthService {
         );
     }
 
-    private static final int MAX_FAILED_LOGIN_ATTEMPTS = 5;
-    private static final int LOCKOUT_DURATION_MINUTES = 15;
-
     private boolean isLocked(User user) {
         return user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now());
     }
@@ -251,15 +249,21 @@ public class AuthService {
     private void recordFailedLogin(User user) {
         int attempts = user.getFailedLoginAttempts() + 1;
         user.setFailedLoginAttempts(attempts);
-        if (attempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
-            // Exponential backoff on repeat lockouts: 15m, 30m, 60m, ...
-            int overflow = attempts - MAX_FAILED_LOGIN_ATTEMPTS;
-            long minutes = (long) LOCKOUT_DURATION_MINUTES * (1L << Math.min(overflow, 4));
-            user.setLockedUntil(LocalDateTime.now().plusMinutes(minutes));
+        long lockMinutes = lockoutMinutes(attempts);
+        if (lockMinutes > 0) {
+            user.setLockedUntil(LocalDateTime.now().plusMinutes(lockMinutes));
             logger.warn("Account {} locked for {} minutes after {} failed attempts",
-                    user.getUsername(), minutes, attempts);
+                    user.getUsername(), lockMinutes, attempts);
         }
         userRepository.save(user);
+    }
+
+    // Progressive lockout: short early, capped at 15 min for persistent attackers
+    private long lockoutMinutes(int attempts) {
+        if (attempts >= 7) return 15;
+        if (attempts >= 5) return 5;
+        if (attempts >= 3) return 1;
+        return 0;
     }
 
     /**

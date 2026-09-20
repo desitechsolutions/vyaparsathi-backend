@@ -35,6 +35,12 @@ public class AnalyticsCacheConfig {
     public static final String CACHE_TOP_ITEMS          = "analytics.topItems";
     public static final String CACHE_CHURN              = "analytics.churn";
 
+    // Report-service caches (5-min TTL, shop-scoped — same manager)
+    public static final String CACHE_SALES_SUMMARY      = "reports.salesSummary";
+    public static final String CACHE_ITEMS_SOLD         = "reports.itemsSold";
+    public static final String CACHE_CATEGORY_SALES     = "reports.categorySales";
+    public static final String CACHE_SALES_TIMESERIES   = "reports.salesTimeSeries";
+
     public static final String KEY_GEN_SHOP_SCOPED = "shopScopedAnalyticsKeyGen";
 
     @Bean
@@ -51,6 +57,10 @@ public class AnalyticsCacheConfig {
                 CACHE_SEASONAL_TRENDS,
                 CACHE_TOP_ITEMS,
                 CACHE_CHURN,
+                CACHE_SALES_SUMMARY,
+                CACHE_ITEMS_SOLD,
+                CACHE_CATEGORY_SALES,
+                CACHE_SALES_TIMESERIES,
                 "userDetails"
         ));
         return mgr;

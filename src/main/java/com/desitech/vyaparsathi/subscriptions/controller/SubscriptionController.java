@@ -33,14 +33,14 @@ public class SubscriptionController {
      * Helper to extract Shop ID safely from the authenticated principal.
      */
     private Long getValidatedShopId(CustomUserDetails userDetails) {
-        if (userDetails == null || userDetails.getUser() == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User session not found");
+        if (userDetails != null && userDetails.getUser() != null && userDetails.getUser().getShop() != null) {
+            return userDetails.getUser().getShop().getId();
         }
-        User user = userDetails.getUser();
-        if (user.getShop() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No shop associated with user: " + user.getUsername());
+        Long tenantShopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        if (tenantShopId != null) {
+            return tenantShopId;
         }
-        return user.getShop().getId();
+        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User session not found");
     }
 
     /**

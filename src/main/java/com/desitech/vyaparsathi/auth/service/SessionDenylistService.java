@@ -42,20 +42,24 @@ public class SessionDenylistService {
         this.repository = repository;
     }
 
+    /**
+     * Populates the in-memory denylist from the DB on startup.
+     *
+     * <p><strong>Intentionally no try/catch</strong>: a denylist that failed to
+     * load is worse than useless — revoked sessions would appear valid, defeating
+     * the purpose of the feature entirely. If the DB is unreachable at startup,
+     * let the exception propagate so Spring Boot aborts the context refresh and
+     * the operator is alerted immediately (rather than silently serving revoked
+     * sessions). This is the correct fail-fast posture for a security component.
+     */
     @PostConstruct
     public void hydrateFromDb() {
-        try {
-            LocalDateTime now = LocalDateTime.now();
-            List<RevokedSession> live = repository.findByExpiresAtAfter(now);
-            for (RevokedSession r : live) {
-                inMemory.add(r.getSessionId());
-            }
-            logger.info("Session denylist hydrated with {} live entries", inMemory.size());
-        } catch (Exception e) {
-            // Never let a hydration failure crash the app — fall back
-            // to an empty in-memory set and rely on DB reads later.
-            logger.warn("Session denylist hydration failed — starting empty ({})", e.getMessage());
+        LocalDateTime now = LocalDateTime.now();
+        List<RevokedSession> live = repository.findByExpiresAtAfter(now);
+        for (RevokedSession r : live) {
+            inMemory.add(r.getSessionId());
         }
+        logger.info("Session denylist hydrated with {} live entries", inMemory.size());
     }
 
     public boolean isRevoked(String sessionId) {

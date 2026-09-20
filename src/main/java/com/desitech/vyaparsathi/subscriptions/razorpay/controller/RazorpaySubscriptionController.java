@@ -169,12 +169,12 @@ public class RazorpaySubscriptionController {
 
     @GetMapping("/invoices")
     @Operation(summary = "Fetch Razorpay payment log / invoice history")
-    public ResponseEntity<List<RazorpayPaymentLog>> getInvoices(
+    public ResponseEntity<List<com.desitech.vyaparsathi.subscriptions.razorpay.dto.RazorpayInvoiceDto>> getInvoices(
             @RequestParam(required = false) Long shopId,
             @AuthenticationPrincipal CustomUserDetails userDetails) {
 
         Long effectiveShopId = resolveShopIdWithAdminOverride(shopId, userDetails);
-        return ResponseEntity.ok(subscriptionService.getPaymentLogs(effectiveShopId));
+        return ResponseEntity.ok(subscriptionService.getInvoices(effectiveShopId));
     }
 
     // ───────────────────────────────────────────────────────────────────────────
@@ -182,11 +182,16 @@ public class RazorpaySubscriptionController {
     // ───────────────────────────────────────────────────────────────────────────
 
     private Long resolveShopId(CustomUserDetails userDetails) {
-        var shop = userDetails.getUser().getShop();
-        if (shop == null || shop.getId() == null) {
-            throw new IllegalStateException("Shop context missing from JWT. Please re-login.");
+        if (userDetails != null && userDetails.getUser() != null && userDetails.getUser().getShop() != null) {
+            return userDetails.getUser().getShop().getId();
         }
-        return shop.getId();
+        Long tenantShopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        if (tenantShopId != null) {
+            return tenantShopId;
+        }
+        throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.UNAUTHORIZED,
+                "Shop context missing. Please re-login.");
     }
 
     /**
@@ -195,8 +200,18 @@ public class RazorpaySubscriptionController {
      * manage subscriptions for any shop.
      */
     private Long resolveShopIdWithAdminOverride(Long requestedShopId, CustomUserDetails userDetails) {
-        boolean isSuperAdmin = userDetails.getAuthorities().stream()
-                .anyMatch(a -> "ROLE_SUPER_ADMIN".equals(a.getAuthority()));
+        boolean isSuperAdmin = false;
+        if (userDetails != null) {
+            isSuperAdmin = userDetails.getAuthorities().stream()
+                    .anyMatch(a -> "ROLE_SUPER_ADMIN".equals(a.getAuthority()));
+        } else {
+            org.springframework.security.core.Authentication auth =
+                    org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getAuthorities() != null) {
+                isSuperAdmin = auth.getAuthorities().stream()
+                        .anyMatch(a -> "ROLE_SUPER_ADMIN".equals(a.getAuthority()));
+            }
+        }
         if (isSuperAdmin && requestedShopId != null) {
             return requestedShopId;
         }

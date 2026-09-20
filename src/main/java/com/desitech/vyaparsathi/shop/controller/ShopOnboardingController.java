@@ -13,19 +13,35 @@ import com.desitech.vyaparsathi.shop.service.ShopService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.Duration;
+
 @RestController
 @RequestMapping("/api/shop")
 public class ShopOnboardingController {
 
     private static final Logger logger = LoggerFactory.getLogger(ShopOnboardingController.class);
+    private static final String COOKIE_NAME = "refreshToken";
+    private static final Duration REFRESH_COOKIE_TTL = Duration.ofDays(7);
+
+    @Value("${app.auth.cookie.secure:true}")
+    private boolean cookieSecure;
+
+    @Value("${app.auth.cookie.same-site:None}")
+    private String cookieSameSite;
+
+    @Value("${app.auth.cookie.path:/}")
+    private String cookiePath;
 
     @Autowired
     private ShopService shopService;
@@ -40,7 +56,7 @@ public class ShopOnboardingController {
      * @return The created ShopDto.
      */
     @PostMapping(value = "/onboarding", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasRole('PENDING_OWNER')")
+    @PreAuthorize("hasRole('PENDING_OWNER') or hasRole('OWNER')")
     public ResponseEntity<ShopDto> completeOnboarding(
             @Valid @ModelAttribute ShopDto dto, // ModelAttribute for form-data
             @RequestParam(value = "logo", required = false) MultipartFile logo,
@@ -70,6 +86,24 @@ public class ShopOnboardingController {
 
         logger.info("Onboarding completed for user={}, shopId={}",
                 currentUser.getUsername(), createdShop.getId());
+
+        // The refresh token is set as an HttpOnly cookie (never in the JSON body)
+        // so that JavaScript cannot read it — this is the standard defence against
+        // XSS-based session hijacking. The cookie attributes mirror AuthController
+        // so the browser handles both the login and the onboarding cookie identically.
+        String refreshToken = createdShop.getRefreshToken();
+        if (refreshToken != null && !refreshToken.isBlank()) {
+            ResponseCookie refreshCookie = ResponseCookie.from(COOKIE_NAME, refreshToken)
+                    .httpOnly(true)
+                    .secure(cookieSecure)
+                    .path(cookiePath)
+                    .sameSite(cookieSameSite)
+                    .maxAge(REFRESH_COOKIE_TTL)
+                    .build();
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, refreshCookie.toString())
+                    .body(createdShop);
+        }
 
         return ResponseEntity.ok(createdShop);
     }

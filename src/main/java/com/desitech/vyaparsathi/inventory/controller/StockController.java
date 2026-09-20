@@ -124,11 +124,14 @@ public class StockController {
     @Operation(summary = "Get low stock alerts", 
                description = "Retrieve items that are below their configured stock thresholds")
     @ApiResponse(responseCode = "200", description = "Low stock alerts retrieved successfully")
+    @PreAuthorize("hasRole('OWNER') or hasRole('SUPER_ADMIN') or hasRole('STAFF') or hasRole('MANAGER')")
     public ResponseEntity<List<LowStockAlertDto>> getLowStockAlerts() {
         try {
             List<LowStockAlertDto> result = service.getLowStockAlerts();
             logger.info("Fetched low stock alerts");
             return ResponseEntity.ok(result);
+        } catch (org.springframework.security.access.AccessDeniedException e) {
+            throw e;
         } catch (Exception e) {
             logger.error("Error fetching low stock alerts: {}", e.getMessage(), e);
             throw new ApplicationException("Failed to fetch low stock alerts", e);

@@ -2,6 +2,10 @@ package com.desitech.vyaparsathi.auth.security.config;
 
 import com.desitech.vyaparsathi.auth.security.JwtAuthenticationFilter;
 import com.desitech.vyaparsathi.auth.security.RateLimitFilter;
+import com.desitech.vyaparsathi.auth.security.oauth2.OAuthUserService;
+import com.desitech.vyaparsathi.auth.security.oauth2.OidcOAuthUserService;
+import com.desitech.vyaparsathi.auth.security.oauth2.OAuth2AuthenticationSuccessHandler;
+import com.desitech.vyaparsathi.auth.security.oauth2.OAuth2AuthenticationFailureHandler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -10,8 +14,6 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -32,6 +34,18 @@ public class SecurityConfig {
     @Autowired
     private RateLimitFilter rateLimitFilter;
 
+    @Autowired
+    private OAuthUserService oAuthUserService;
+
+    @Autowired
+    private OidcOAuthUserService oidcOAuthUserService;
+
+    @Autowired
+    private OAuth2AuthenticationSuccessHandler oAuth2SuccessHandler;
+
+    @Autowired
+    private OAuth2AuthenticationFailureHandler oAuth2FailureHandler;
+
     @Value("${app.allowed-origins:http://localhost:3000}")
     private String allowedOrigins;
 
@@ -43,6 +57,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/api/auth/**",
+                                // OAuth2 provider redirect URIs — must be public
+                                "/oauth2/**",
+                                "/login/oauth2/**",
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",
@@ -83,7 +100,18 @@ public class SecurityConfig {
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
-                .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // OAuth2 login requires a session for the authorization request/state.
+                // We keep STATELESS for every other request so the existing JWT flow
+                // is unaffected; Spring Security creates a transient session only during
+                // the provider redirect → callback round-trip.
+                .sessionManagement(sess -> sess
+                        .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
+                .oauth2Login(oauth2 -> oauth2
+                        .userInfoEndpoint(ui -> ui
+                                .userService(oAuthUserService)          // non-OIDC OAuth2 providers
+                                .oidcUserService(oidcOAuthUserService)) // OIDC providers (Google with openid scope)
+                        .successHandler(oAuth2SuccessHandler)
+                        .failureHandler(oAuth2FailureHandler))
                 // Rate limit BEFORE the JWT filter — attackers hitting /api/auth/** are
                 // by definition unauthenticated, so the check must run at the door.
                 .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
@@ -92,16 +120,6 @@ public class SecurityConfig {
         return http.build();
     }
 
-    /**
-     * Password encoder — BCrypt at strength 12.
-     * Enterprise minimum recommended by OWASP is ≥ 10; we run at 12 which
-     * takes ~250ms on a modern CPU per hash. Adjust {@code BCRYPT_STRENGTH}
-     * via env only if you have profiled the auth path.
-     */
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(12);
-    }
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {

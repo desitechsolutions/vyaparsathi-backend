@@ -15,7 +15,9 @@ import com.desitech.vyaparsathi.sales.entity.SaleItem;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
 import com.desitech.vyaparsathi.expense.entity.Expense;
 import com.desitech.vyaparsathi.expense.repository.ExpenseRepository;
+import com.desitech.vyaparsathi.analytics.config.AnalyticsCacheConfig;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import org.slf4j.Logger;
@@ -72,6 +74,9 @@ public class ReportService {
         if (from != null && to != null && from.isAfter(to)) {
             throw new IllegalArgumentException("From date cannot be after to date");
         }
+        if (from != null && to != null && ChronoUnit.DAYS.between(from, to) > 366) {
+            throw new IllegalArgumentException("Date range cannot exceed 366 days");
+        }
     }
 
     private List<Sale> getSalesByDateRange(LocalDate from, LocalDate to) {
@@ -124,8 +129,25 @@ public class ReportService {
             throw new IllegalArgumentException("Date cannot be null");
         }
 
-        List<Sale> todaySales = getSalesByDateRange(date, date);
-        List<Expense> todayExpenses = getExpensesByDateRange(date, date);
+        LocalDate yesterday = date.minusDays(1);
+
+        // 2 DB trips instead of 4: load yesterday+today together, split in memory
+        List<Sale> twoDay = getSalesByDateRange(yesterday, date);
+        List<Expense> twoDayExpenses = getExpensesByDateRange(yesterday, date);
+
+        List<Sale> todaySales = twoDay.stream()
+                .filter(s -> s.getDate() != null && s.getDate().toLocalDate().equals(date))
+                .collect(Collectors.toList());
+        List<Sale> yesterdaySalesList = twoDay.stream()
+                .filter(s -> s.getDate() != null && s.getDate().toLocalDate().equals(yesterday))
+                .collect(Collectors.toList());
+
+        List<Expense> todayExpenses = twoDayExpenses.stream()
+                .filter(e -> e.getDate() != null && e.getDate().toLocalDate().equals(date))
+                .collect(Collectors.toList());
+        List<Expense> yesterdayExpenses = twoDayExpenses.stream()
+                .filter(e -> e.getDate() != null && e.getDate().toLocalDate().equals(yesterday))
+                .collect(Collectors.toList());
 
         BigDecimal totalSalesToday = todaySales.stream()
                 .map(Sale::getTotalAmount)
@@ -152,10 +174,6 @@ public class ReportService {
         BigDecimal netRevenue = totalSalesToday.subtract(totalRoundOffToday);
         BigDecimal outstanding = totalSalesToday.subtract(totalPaidToday);
         BigDecimal netProfitToday = totalSalesToday.subtract(totalCOGS).subtract(totalOperationalExpenses);
-
-        LocalDate yesterday = date.minusDays(1);
-        List<Sale> yesterdaySalesList = getSalesByDateRange(yesterday, yesterday);
-        List<Expense> yesterdayExpenses = getExpensesByDateRange(yesterday, yesterday);
 
         BigDecimal totalSalesYesterday = yesterdaySalesList.stream()
                 .map(Sale::getTotalAmount)
@@ -195,6 +213,9 @@ public class ReportService {
         return dto;
     }
 
+    @Cacheable(cacheNames = AnalyticsCacheConfig.CACHE_SALES_SUMMARY,
+            keyGenerator = AnalyticsCacheConfig.KEY_GEN_SHOP_SCOPED,
+            cacheManager = "analyticsCacheManager")
     public SalesSummaryDto getSalesSummary(LocalDate from, LocalDate to) {
         if (from == null || to == null) {
             throw new IllegalArgumentException("Date range cannot be null");
@@ -298,6 +319,29 @@ public class ReportService {
         return dto;
     }
 
+    @Cacheable(cacheNames = AnalyticsCacheConfig.CACHE_SALES_TIMESERIES,
+            keyGenerator = AnalyticsCacheConfig.KEY_GEN_SHOP_SCOPED,
+            cacheManager = "analyticsCacheManager")
+    public List<SalesTimeSeriesPointDto> getSalesTimeSeries(LocalDate from, LocalDate to) {
+        validateDateRange(from, to);
+        List<Sale> sales = getSalesByDateRange(from, to);
+
+        Map<String, SalesTimeSeriesPointDto> byDate = new LinkedHashMap<>();
+        for (Sale sale : sales) {
+            if (sale.getDate() == null) continue;
+            String d = sale.getDate().toLocalDate().toString();
+            SalesTimeSeriesPointDto pt = byDate.computeIfAbsent(d,
+                    k -> new SalesTimeSeriesPointDto(k, ZERO, 0));
+            BigDecimal amount = sale.getTotalAmount() != null ? sale.getTotalAmount() : ZERO;
+            pt.setTotalSales(pt.getTotalSales().add(amount));
+            pt.setCount(pt.getCount() + 1);
+        }
+
+        List<SalesTimeSeriesPointDto> result = new ArrayList<>(byDate.values());
+        result.sort(Comparator.comparing(SalesTimeSeriesPointDto::getDate));
+        return result;
+    }
+
     public GstSummaryDto getGstSummary(LocalDate from, LocalDate to) {
         validateDateRange(from, to);
         List<Sale> sales = getSalesByDateRange(from, to);
@@ -375,6 +419,9 @@ public class ReportService {
                 .collect(Collectors.toList());
     }
 
+    @Cacheable(cacheNames = AnalyticsCacheConfig.CACHE_ITEMS_SOLD,
+            keyGenerator = AnalyticsCacheConfig.KEY_GEN_SHOP_SCOPED,
+            cacheManager = "analyticsCacheManager")
     public List<ItemsSoldDto> getAllItemsSold(LocalDate fromDate, LocalDate toDate) {
         validateDateRange(fromDate, toDate);
         List<Sale> sales = getSalesByDateRange(fromDate, toDate);
@@ -404,6 +451,9 @@ public class ReportService {
         return new ArrayList<>(itemMap.values());
     }
 
+    @Cacheable(cacheNames = AnalyticsCacheConfig.CACHE_CATEGORY_SALES,
+            keyGenerator = AnalyticsCacheConfig.KEY_GEN_SHOP_SCOPED,
+            cacheManager = "analyticsCacheManager")
     public List<CategorySalesDto> getCategorySales(LocalDate fromDate, LocalDate toDate) {
         validateDateRange(fromDate, toDate);
         List<Sale> sales = getSalesByDateRange(fromDate, toDate);

@@ -124,14 +124,20 @@ public class SaleController {
     @GetMapping
     @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("SALES_VIEW")
     public ResponseEntity<List<SaleDto>> listSales(
-            @RequestParam(required = false) LocalDateTime startDate,
-            @RequestParam(required = false) LocalDateTime endDate) {
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate from,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate to) {
+        LocalDateTime startDate = from != null ? from.atStartOfDay() : null;
+        LocalDateTime endDate   = to   != null ? to.atTime(23, 59, 59, 999_999_999) : null;
         try {
-            var result = service.listSales(startDate, endDate);
-            logger.info("Fetched sales list from {} to {}", startDate, endDate);
+            List<SaleDto> result = service.listSales(startDate, endDate);
+            // Cap at 200 rows to prevent accidental full-table loads
+            if (result.size() > 200) {
+                result = result.subList(0, 200);
+            }
+            logger.info("Fetched sales list from {} to {}, returned {} rows", from, to, result.size());
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error fetching sales list from {} to {}: {}", startDate, endDate, e.getMessage(), e);
+            logger.error("Error fetching sales list from {} to {}: {}", from, to, e.getMessage(), e);
             throw new ApplicationException("Failed to fetch sales list", e);
         }
     }

@@ -131,9 +131,11 @@ ALTER TABLE debit_notes
         COMMENT 'Original purchase invoice number snapshot. Immutable after creation.';
 
 -- Backfill from joined purchase invoice for existing rows.
+-- NOTE: The purchase_invoices table uses `purchase_invoice_no` (defined in V47),
+--       not `invoice_number`. Bug fix applied here.
 UPDATE debit_notes dn
     INNER JOIN purchase_invoices pi ON pi.id = dn.purchase_invoice_id
-SET dn.reference_invoice_number = pi.invoice_number
+SET dn.reference_invoice_number = pi.purchase_invoice_no
 WHERE dn.reference_invoice_number IS NULL
   AND dn.purchase_invoice_id IS NOT NULL;
 
@@ -220,4 +222,5 @@ SET  original_total_amount  = total_amount,
      ),
      original_cess = 0  -- cess columns being added in this same migration; always 0 for old data
 WHERE status != 'CANCELLED'
-  AND total_amount > 0;
+  AND total_amount > 0
+  AND original_total_amount IS NULL;  -- idempotent: skip rows already backfilled

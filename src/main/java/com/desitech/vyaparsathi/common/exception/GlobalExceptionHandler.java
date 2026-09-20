@@ -2,9 +2,15 @@ package com.desitech.vyaparsathi.common.exception;
 
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import jakarta.persistence.EntityNotFoundException;
+import org.hibernate.exception.JDBCConnectionException;
+import org.hibernate.exception.SQLGrammarException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -23,6 +29,8 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler(EntityNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleEntityNotFoundException(EntityNotFoundException ex) {
         Map<String, String> error = new HashMap<>();
@@ -37,9 +45,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
     }
     @ExceptionHandler(UserInactiveException.class)
-    public ResponseEntity<Map<String, String>> handleInactiveUser(UserInactiveException ex) {
-        Map<String, String> error = new HashMap<>();
+    public ResponseEntity<Map<String, Object>> handleInactiveUser(UserInactiveException ex) {
+        Map<String, Object> error = new HashMap<>();
         error.put("message", ex.getMessage());
+        if (ex.getRetryAfterSeconds() != null) {
+            error.put("retryAfterSeconds", ex.getRetryAfterSeconds());
+            // 423 Locked — account temporarily locked due to too many attempts.
+            // Using 423 (not 403) so the frontend can distinguish a timed lockout
+            // from a permanent permission denial, and CDN/WAF rules don't
+            // accidentally cache or block the path.
+            return ResponseEntity.status(423).body(error);
+        }
+        // 403 for permanently inactive/disabled accounts (no retry window).
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
     }
 
@@ -76,12 +93,76 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body("Invalid request format.");
     }
 
+    /**
+     * Catches Hibernate/JDBC-level database errors — most critically:
+     *   - Table or column does not exist (schema not migrated / wrong profile)
+     *   - DB connection refused / timed out
+     *   - SQLSyntaxErrorException bubbling up as SQLGrammarException
+     *
+     * These exceptions carry raw SQL, table names, and connection strings in
+     * their messages which MUST NOT be sent to the client. We return 503 with
+     * a safe, actionable message instead.
+     */
+    @ExceptionHandler({JDBCConnectionException.class, SQLGrammarException.class})
+    public ResponseEntity<Map<String, String>> handleDatabaseException(DataAccessException ex) {
+        // Log full exception for ops — do NOT surface it to the client.
+        log.error("[DB ERROR] JDBC/SQL exception intercepted: {}", ex.getMessage(), ex);
+        Map<String, String> error = new HashMap<>();
+        error.put("message", "Service temporarily unavailable. Please try again shortly.");
+        error.put("code", "DB_UNAVAILABLE");
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(error);
+    }
+
+    /**
+     * Handles Spring Security {@link AccessDeniedException} thrown by
+     * {@code @RequirePermission} / {@code @PreAuthorize} when the user
+     * lacks the required permission. Returns 403 Forbidden with a
+     * structured JSON body so the frontend can distinguish RBAC denials
+     * from server errors.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<Map<String, String>> handleAccessDeniedException(AccessDeniedException ex) {
+        log.warn("Access denied: {}", ex.getMessage());
+        Map<String, String> error = new HashMap<>();
+        error.put("message", ex.getMessage() != null ? ex.getMessage() : "Access denied");
+        error.put("code", "ACCESS_DENIED");
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
+
+    /**
+     * Last-resort handler for any exception not caught above.
+     *
+     * <p>Explicitly scrubs messages that look like raw JDBC / SQL errors before
+     * surfacing them — the JPA exception hierarchy is deep and not all SQL errors
+     * resolve to the typed handlers above before hitting this catch-all.
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleGenericException(Exception ex) {
         Map<String, String> error = new HashMap<>();
-        error.put("message", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(error);
+        String msg = ex.getMessage();
+
+        // Detect and sanitize SQL / JDBC messages that leaked past typed handlers.
+        // We check both the exception type hierarchy and common message patterns so
+        // nothing slips through even when Spring wraps the original exception.
+        boolean isSqlLeak = ex instanceof DataAccessException
+                || (msg != null && (
+                    msg.contains("JDBC exception") ||
+                    msg.contains("Table") && msg.contains("doesn't exist") ||
+                    msg.contains("Unknown column") ||
+                    msg.contains("select ") || msg.contains("SELECT ") ||
+                    msg.contains("[n/a]")
+                ));
+
+        if (isSqlLeak) {
+            // Log full exception for ops — never let raw SQL reach the client.
+            log.error("[DB ERROR] SQL leak intercepted in generic handler: {}", msg, ex);
+            error.put("message", "Service temporarily unavailable. Please try again shortly.");
+            error.put("code", "DB_UNAVAILABLE");
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(error);
+        }
+
+        error.put("message", msg != null ? msg : "An unexpected error occurred.");
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
     }
 
     @ExceptionHandler(ApplicationException.class)

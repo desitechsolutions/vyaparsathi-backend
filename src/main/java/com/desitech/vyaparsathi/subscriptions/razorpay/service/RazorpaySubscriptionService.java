@@ -32,6 +32,11 @@ import org.json.JSONObject;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.desitech.vyaparsathi.platform.dto.PlatformDetailsDto;
+import com.desitech.vyaparsathi.platform.service.PlatformDetailsService;
+import com.desitech.vyaparsathi.subscriptions.razorpay.dto.RazorpayInvoiceDto;
+import com.desitech.vyaparsathi.subscriptions.razorpay.dto.ShopInvoiceSnapshotDto;
+import java.util.ArrayList;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -56,6 +61,7 @@ public class RazorpaySubscriptionService {
     private final RazorpayPricingService pricingService;
     private final ShopRepository shopRepository;
     private final PricingPlanRepository pricingPlanRepository;
+    private final PlatformDetailsService platformDetailsService;
 
     private static final Set<String> ACTIVE_ORDER_STATUSES =
             Set.of("CREATED", "AUTHENTICATED", "ACTIVE", "PENDING", "PAUSED");
@@ -615,6 +621,75 @@ public class RazorpaySubscriptionService {
 
     public List<RazorpayPaymentLog> getPaymentLogs(Long shopId) {
         return paymentLogRepository.findByShopIdOrderByCreatedAtDesc(shopId);
+    }
+
+    public List<RazorpayInvoiceDto> getInvoices(Long shopId) {
+        List<RazorpayPaymentLog> logs = paymentLogRepository.findByShopIdOrderByCreatedAtDesc(shopId);
+        PlatformDetailsDto platformDto = platformDetailsService != null ? platformDetailsService.getPlatformDetails() : null;
+        Shop shop = shopRepository.findById(shopId).orElse(null);
+
+        ShopInvoiceSnapshotDto shopSnapshot = null;
+        if (shop != null) {
+            shopSnapshot = ShopInvoiceSnapshotDto.builder()
+                    .shopId(shop.getId())
+                    .shopName(shop.getName())
+                    .ownerName(shop.getOwnerName())
+                    .address(shop.getAddress())
+                    .state(shop.getState())
+                    .stateCode(shop.getStateCode())
+                    .gstin(shop.getGstin())
+                    .phone(shop.getPhone())
+                    .email(shop.getEmail())
+                    .build();
+        }
+
+        String prefix = (platformDto != null && platformDto.getInvoicePrefix() != null && !platformDto.getInvoicePrefix().isBlank())
+                ? platformDto.getInvoicePrefix() : "SUB-INV";
+
+        List<RazorpayInvoiceDto> dtoList = new ArrayList<>();
+        for (RazorpayPaymentLog log : logs) {
+            RazorpaySubscriptionOrder order = subscriptionOrderRepository
+                    .findByRazorpaySubscriptionId(log.getRazorpaySubscriptionId())
+                    .orElse(null);
+
+            String planCode = order != null ? order.getPlanCode() : "PRO";
+            String cycle = order != null ? order.getBillingCycle() : "MONTHLY";
+            LocalDateTime pStart = log.getCreatedAt() != null ? log.getCreatedAt() : LocalDateTime.now();
+            LocalDateTime pEnd = "YEARLY".equalsIgnoreCase(cycle) ? pStart.plusYears(1) : pStart.plusMonths(1);
+
+            int year = log.getCreatedAt() != null ? log.getCreatedAt().getYear() : LocalDateTime.now().getYear();
+            String invNum = String.format("%s-%d-%06d", prefix, year, log.getId() != null ? log.getId() : 1);
+
+            RazorpayInvoiceDto dto = RazorpayInvoiceDto.builder()
+                    .id(log.getId())
+                    .shopId(log.getShopId())
+                    .razorpaySubscriptionId(log.getRazorpaySubscriptionId())
+                    .razorpayPaymentId(log.getRazorpayPaymentId())
+                    .razorpayInvoiceId(log.getRazorpayInvoiceId())
+                    .razorpayOrderId(log.getRazorpayOrderId())
+                    .amount(log.getAmount())
+                    .currency(log.getCurrency())
+                    .status(log.getStatus())
+                    .invoiceStatus(log.getInvoiceStatus())
+                    .method(log.getMethod())
+                    .cardId(log.getCardId())
+                    .bank(log.getBank())
+                    .vpa(log.getVpa())
+                    .errorCode(log.getErrorCode())
+                    .errorDescription(log.getErrorDescription())
+                    .createdAt(log.getCreatedAt())
+                    .invoiceNumber(invNum)
+                    .planCode(planCode)
+                    .billingCycle(cycle)
+                    .periodStart(pStart)
+                    .periodEnd(pEnd)
+                    .platformDetails(platformDto)
+                    .shopDetails(shopSnapshot)
+                    .build();
+
+            dtoList.add(dto);
+        }
+        return dtoList;
     }
 
     // ═══════════════════════════════════════════════════════════════

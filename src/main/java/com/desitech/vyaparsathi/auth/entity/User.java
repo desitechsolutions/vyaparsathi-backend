@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.auth.entity;
 
+import com.desitech.vyaparsathi.auth.model.AuthProvider;
 import com.desitech.vyaparsathi.auth.model.Role;
 import com.desitech.vyaparsathi.common.entities.ShopAwareEntity;
 import com.desitech.vyaparsathi.shop.entity.Shop;
@@ -72,6 +73,15 @@ public class User extends ShopAwareEntity {
     @Column(name = "email_verification_expiry")
     private LocalDateTime emailVerificationExpiry;
 
+    /** Identity provider used to create this account. LOCAL for password-based accounts. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "auth_provider", nullable = false, length = 20)
+    private AuthProvider authProvider = AuthProvider.LOCAL;
+
+    /** Subject / OID from the OAuth2 provider. Null for LOCAL accounts. */
+    @Column(name = "auth_provider_id", length = 255)
+    private String authProviderId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "shop_id", nullable = true)
     private Shop shop;
@@ -124,6 +134,12 @@ public class User extends ShopAwareEntity {
     public void setEmailVerificationExpiry(LocalDateTime emailVerificationExpiry) {
         this.emailVerificationExpiry = emailVerificationExpiry;
     }
+
+    public AuthProvider getAuthProvider() { return authProvider; }
+    public void setAuthProvider(AuthProvider authProvider) { this.authProvider = authProvider; }
+
+    public String getAuthProviderId() { return authProviderId; }
+    public void setAuthProviderId(String authProviderId) { this.authProviderId = authProviderId; }
 
     public Shop getShop() { return shop; }
     public void setShop(Shop shop) { this.shop = shop; }

@@ -8,6 +8,8 @@ import com.desitech.vyaparsathi.auth.service.MfaService;
 import com.desitech.vyaparsathi.auth.service.RefreshTokenService;
 import com.desitech.vyaparsathi.rbac.entity.UserShopMembership;
 import com.desitech.vyaparsathi.rbac.repository.UserShopMembershipRepository;
+import com.desitech.vyaparsathi.rbac.service.MembershipService;
+import com.desitech.vyaparsathi.rbac.service.RoleSeedService;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.common.util.FileStorageService;
@@ -58,6 +60,12 @@ public class ShopService {
 
     @Autowired
     private UserShopMembershipRepository membershipRepository;
+
+    @Autowired
+    private RoleSeedService roleSeedService;
+
+    @Autowired
+    private MembershipService membershipService;
 
     @Transactional
     public ShopDto completeOnboarding(ShopDto dto, User currentUser, MultipartFile logo) {
@@ -125,7 +133,13 @@ public class ShopService {
             currentUser.setRole(Role.OWNER);
             userRepository.save(currentUser);
 
-            // Seed categories with Industry as Root
+            // 1. Seed system preset roles for the newly created shop
+            roleSeedService.seedPresetRolesForShop(shop.getId());
+
+            // 2. Create the owner's active membership record
+            membershipService.addOrReactivate(currentUser, shop.getId(), "OWNER", null, true);
+
+            // 3. Seed categories with Industry as Root
             seedDefaultCategories(shop, dto.getIndustryType());
         } finally {
             TenantContext.clear();
@@ -572,13 +586,18 @@ public class ShopService {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (currentShopId == null) {
             if (auth != null && auth.getAuthorities().stream()
-                    .anyMatch(a -> "ROLE_PENDING_OWNER".equals(a.getAuthority()))) {
-
-                logger.info("No shop context for PENDING_OWNER – returning null (onboarding flow)");
+                    .anyMatch(a -> "ROLE_PENDING_OWNER".equals(a.getAuthority())
+                                || "ROLE_OWNER".equals(a.getAuthority()))) {
+                // PENDING_OWNER: normal during onboarding (no shop yet)
+                // OWNER with null shopId: edge case — user was created before the
+                // PENDING_OWNER fix, or their shop was deleted. Return null so the
+                // frontend knows to redirect to setup, rather than crashing.
+                logger.info("No shop context for {} – returning null (no shop set up yet)",
+                        auth.getAuthorities());
                 return null;  // ← Return null instead of throwing
             }
 
-            // For all other users: strict enforcement
+            // For all other users (STAFF, MANAGER, SUPER_ADMIN with bad context): strict enforcement
             throw new IllegalStateException("No active shop context");
         }
 

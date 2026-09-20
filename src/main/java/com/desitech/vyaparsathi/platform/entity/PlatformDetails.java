@@ -26,6 +26,9 @@ public class PlatformDetails {
     @Column(name = "trade_name")
     private String tradeName;
 
+    @Column(name = "cin", length = 30)
+    private String cin;
+
     @Column(name = "gstin", length = 20)
     private String gstin;
 

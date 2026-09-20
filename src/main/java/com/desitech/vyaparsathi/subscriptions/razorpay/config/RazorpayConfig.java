@@ -27,13 +27,13 @@ public class RazorpayConfig {
     @Value("${subscription.provider:RAZORPAY}")
     private String provider;
 
-    @Value("${subscription.razorpay.key-id:rzp_test_placeholder}")
+    @Value("${subscription.razorpay.key-id:}")
     private String keyId;
 
-    @Value("${subscription.razorpay.key-secret:placeholder_secret}")
+    @Value("${subscription.razorpay.key-secret:}")
     private String keySecret;
 
-    @Value("${subscription.razorpay.webhook-secret:placeholder_webhook_secret}")
+    @Value("${subscription.razorpay.webhook-secret:}")
     private String webhookSecret;
 
     @Value("${subscription.razorpay.currency:INR}")
@@ -41,6 +41,10 @@ public class RazorpayConfig {
 
     @Bean
     public RazorpayClient razorpayClient() throws RazorpayException {
+        if (keyId == null || keyId.isBlank() || keySecret == null || keySecret.isBlank()) {
+            throw new IllegalStateException(
+                    "Razorpay credentials are not configured. Please supply RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET as environment variables or application properties.");
+        }
         log.info("[RAZORPAY] Initialising RazorpayClient bean with Key ID: {}", keyId);
         return new RazorpayClient(keyId, keySecret);
     }

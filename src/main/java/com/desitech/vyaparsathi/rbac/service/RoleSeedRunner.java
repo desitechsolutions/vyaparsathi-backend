@@ -1,9 +1,12 @@
 package com.desitech.vyaparsathi.rbac.service;
 
+import com.desitech.vyaparsathi.auth.entity.User;
+import com.desitech.vyaparsathi.auth.repository.UserRepository;
 import com.desitech.vyaparsathi.rbac.entity.Permission;
 import com.desitech.vyaparsathi.rbac.entity.Role;
 import com.desitech.vyaparsathi.rbac.repository.PermissionRepository;
 import com.desitech.vyaparsathi.rbac.repository.RoleRepository;
+import com.desitech.vyaparsathi.rbac.repository.UserShopMembershipRepository;
 import com.desitech.vyaparsathi.shop.entity.Shop;
 import com.desitech.vyaparsathi.shop.repository.ShopRepository;
 import lombok.RequiredArgsConstructor;
@@ -26,7 +29,7 @@ import java.util.Set;
  * shop's presets — no runtime admin action required.
  *
  * <p>Custom (non-system) roles are never touched. New shops created
- * post-boot are seeded lazily by {@link RoleService#ensureSystemRolesForShop}.
+ * post-boot are seeded via {@link RoleSeedService#seedPresetRolesForShop}.
  */
 @Component
 @RequiredArgsConstructor
@@ -37,6 +40,10 @@ public class RoleSeedRunner implements ApplicationRunner {
     private final ShopRepository shopRepository;
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
+    private final UserRepository userRepository;
+    private final UserShopMembershipRepository membershipRepository;
+    private final RoleSeedService roleSeedService;
+    private final MembershipService membershipService;
 
     @Override
     @Transactional
@@ -49,6 +56,27 @@ public class RoleSeedRunner implements ApplicationRunner {
             total += seedForShop(shop.getId());
         }
         log.info("RBAC seed complete — {} shops refreshed, {} role rows upserted.", shops.size(), total);
+
+        // Backfill missing memberships for OWNER users whose shops were created before membership hook
+        int backfilled = 0;
+        List<User> owners = userRepository.findByRole(com.desitech.vyaparsathi.auth.model.Role.OWNER);
+        for (User owner : owners) {
+            if (owner.getShop() != null) {
+                Long shopId = owner.getShop().getId();
+                if (membershipRepository.findByUserIdAndShopId(owner.getId(), shopId).isEmpty()) {
+                    try {
+                        membershipService.addOrReactivate(owner, shopId, "OWNER", null, true);
+                        backfilled++;
+                        log.info("Backfilled missing OWNER membership for user={} in shopId={}", owner.getUsername(), shopId);
+                    } catch (Exception e) {
+                        log.warn("Could not backfill membership for user={} in shopId={}: {}", owner.getUsername(), shopId, e.getMessage());
+                    }
+                }
+            }
+        }
+        if (backfilled > 0) {
+            log.info("Backfilled {} missing OWNER memberships.", backfilled);
+        }
     }
 
     /**
@@ -107,30 +135,11 @@ public class RoleSeedRunner implements ApplicationRunner {
 
     /**
      * Idempotent seeding for one shop. Returns the number of role rows
-     * created or updated. Called both on boot (all shops) and lazily via
-     * {@link RoleService#ensureSystemRolesForShop}.
+     * created or updated. Delegated to {@link RoleSeedService#seedPresetRolesForShop}.
      */
     @Transactional
     public int seedForShop(Long shopId) {
-        int touched = 0;
-        for (Map.Entry<String, SystemRoleDefinitions.RoleSpec> entry : SystemRoleDefinitions.PRESETS.entrySet()) {
-            String name = entry.getKey();
-            SystemRoleDefinitions.RoleSpec spec = entry.getValue();
-
-            Role role = roleRepository.findByShopIdAndName(shopId, name).orElseGet(() -> {
-                Role r = new Role();
-                r.setShopId(shopId);
-                r.setName(name);
-                return r;
-            });
-            role.setDisplayName(spec.displayName());
-            role.setDescription(spec.description());
-            role.setSystem(true);
-            role.setPermissions(new HashSet<>(spec.permissions()));
-            roleRepository.save(role);
-            touched++;
-        }
-        return touched;
+        return roleSeedService.seedPresetRolesForShop(shopId);
     }
 
     /**

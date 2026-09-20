@@ -1,5 +1,6 @@
 package com.desitech.vyaparsathi.subscriptions.repository;
 
+import com.desitech.vyaparsathi.common.annotations.SkipShopFilter;
 import com.desitech.vyaparsathi.subscriptions.entity.PricingPlanConfig;
 import com.desitech.vyaparsathi.subscriptions.enums.Tier;
 import jakarta.persistence.LockModeType;
@@ -12,6 +13,14 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Platform-level repository — intentionally excluded from the shop-filter aspect.
+ *
+ * <p>Pricing plans are public data (shown on the pricing page, during onboarding,
+ * and to unauthenticated visitors). They are NOT shop-scoped and must be
+ * readable without a tenant context.
+ */
+@SkipShopFilter
 @Repository
 public interface PricingPlanRepository extends JpaRepository<PricingPlanConfig, Tier> {
 

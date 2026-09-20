@@ -47,6 +47,7 @@ public class PermissionResolver {
     private final UserRepository userRepository;
     private final UserShopMembershipRepository membershipRepository;
     private final RoleRepository roleRepository;
+    private final RoleSeedService roleSeedService;
 
     /**
      * @return permission code set for the current SecurityContext user
@@ -92,6 +93,10 @@ public class PermissionResolver {
         if (maybeMem.isPresent()) {
             UserShopMembership mem = maybeMem.get();
             if (!mem.isActive()) return Collections.emptySet();
+            if ("OWNER".equalsIgnoreCase(mem.getRole())) {
+                selfHealIfMissingRoles(shopId);
+                return SystemRoleDefinitions.ALL_PERMISSIONS;
+            }
             if (mem.getRoleId() != null) {
                 return roleRepository.findById(mem.getRoleId())
                         .map(r -> r.getPermissions())
@@ -101,8 +106,24 @@ public class PermissionResolver {
             return permissionsFromLegacyRoleName(shopId, mem.getRole());
         }
 
-        // 2. No membership row (very old data) — bridge from users.role.
-        return permissionsFromLegacyRoleName(shopId, user.getRole() != null ? user.getRole().name() : null);
+        // 2. No membership row (legacy / desynced / fresh onboarding).
+        // Only grant access or self-heal if the user's primary shop matches the requested shopId.
+        if (user.getShop() != null && shopId.equals(user.getShop().getId())) {
+            if (user.getRole() == Role.OWNER) {
+                log.info("Primary OWNER fail-safe: granting ALL_PERMISSIONS to userId={} for primary shopId={}",
+                        user.getId(), shopId);
+                selfHealIfMissingRoles(shopId);
+                ensureOwnerMembership(user, shopId);
+                return SystemRoleDefinitions.ALL_PERMISSIONS;
+            }
+            log.debug("No membership for userId={} primary shopId={}, falling back to legacy role: {}",
+                    user.getId(), shopId, user.getRole());
+            return permissionsFromLegacyRoleName(shopId, user.getRole() != null ? user.getRole().name() : null);
+        }
+
+        // User does not belong to this shop — strictly deny access.
+        log.warn("Access denied: userId={} has no membership or ownership for shopId={}", user.getId(), shopId);
+        return Collections.emptySet();
     }
 
     /**
@@ -133,12 +154,60 @@ public class PermissionResolver {
 
     private Set<String> permissionsFromLegacyRoleName(Long shopId, String roleName) {
         if (roleName == null || roleName.isBlank()) return Collections.emptySet();
-        return roleRepository.findByShopIdAndName(shopId, roleName)
+        String normalized = roleName.toUpperCase();
+        return roleRepository.findByShopIdAndName(shopId, normalized)
                 .map(r -> r.getPermissions())
                 .orElseGet(() -> {
+                    // Fail-safe defense-in-depth: if it's a known system preset, return canonical definition
+                    // and self-heal the shop's roles in the database.
+                    SystemRoleDefinitions.RoleSpec preset = SystemRoleDefinitions.PRESETS.get(normalized);
+                    if (preset != null) {
+                        log.warn("No role '{}' in DB for shopId={} — using canonical preset and triggering self-heal seed.",
+                                normalized, shopId);
+                        selfHealIfMissingRoles(shopId);
+                        return preset.permissions();
+                    }
                     log.debug("No role '{}' seeded for shop {} — falling back to empty permission set.", roleName, shopId);
                     return Collections.emptySet();
                 });
+    }
+
+    private void selfHealIfMissingRoles(Long shopId) {
+        try {
+            if (roleRepository.findByShopIdAndName(shopId, "OWNER").isEmpty()) {
+                log.info("Self-healing: seeding missing preset roles for shopId={}", shopId);
+                roleSeedService.seedPresetRolesForShop(shopId);
+            }
+        } catch (Exception e) {
+            log.warn("Self-heal role seeding for shopId={} encountered error: {}", shopId, e.getMessage());
+        }
+    }
+
+    /**
+     * Lazily ensures that an OWNER user has a {@link UserShopMembership} row
+     * for the given shop. Without this row the normal membership resolution
+     * path returns an empty set on the first request after onboarding,
+     * locking the owner out of their own dashboard.
+     */
+    private void ensureOwnerMembership(User user, Long shopId) {
+        try {
+            if (user.getShop() != null && shopId.equals(user.getShop().getId())
+                    && membershipRepository.findByUserIdAndShopId(user.getId(), shopId).isEmpty()) {
+                log.info("Self-healing: creating missing OWNER membership for userId={} shopId={}", user.getId(), shopId);
+                UserShopMembership mem = new UserShopMembership();
+                mem.setUserId(user.getId());
+                mem.setShopId(shopId);
+                mem.setRole("OWNER");
+                roleRepository.findByShopIdAndName(shopId, "OWNER").ifPresent(r -> mem.setRoleId(r.getId()));
+                mem.setActive(true);
+                mem.setDefaultMembership(true);
+                membershipRepository.save(mem);
+            }
+        } catch (Exception e) {
+            // Don't let self-heal failures block the request — the OWNER
+            // fail-safe already grants ALL_PERMISSIONS above.
+            log.warn("Self-heal membership for userId={} shopId={} encountered error: {}", user.getId(), shopId, e.getMessage());
+        }
     }
 
     private boolean isPlatformAdmin(Role role) {

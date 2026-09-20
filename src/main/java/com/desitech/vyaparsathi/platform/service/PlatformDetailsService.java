@@ -21,19 +21,20 @@ public class PlatformDetailsService {
     @Transactional
     public PlatformDetails getPlatformDetailsEntity() {
         return platformDetailsRepository.findTopByOrderByIdAsc().orElseGet(() -> {
-            log.info("[PLATFORM] Seeding default PlatformDetails entity.");
+            log.info("[PLATFORM] Seeding default PlatformDetails entity with corporate identity.");
             PlatformDetails seed = PlatformDetails.builder()
-                    .companyName("DesiTech Solutions Pvt. Ltd.")
+                    .companyName("Biruma Technology Solutions Pvt. Ltd.")
                     .tradeName("VyaparSathi Enterprise SaaS")
-                    .gstin("27AAACD1234E1Z5")
-                    .pan("AAACD1234E")
-                    .addressLine1("101, Tech Hub Tower")
-                    .addressLine2("Senapati Bapat Marg, Lower Parel")
-                    .city("Mumbai")
-                    .state("Maharashtra")
-                    .stateCode("27")
-                    .pincode("400013")
-                    .supportEmail("support@desitechsolutions.in")
+                    .cin("U62010HR2025PTC139151")
+                    .gstin("06AAOCB1973G1ZJ")
+                    .pan("AAOCB1973G")
+                    .addressLine1("Arjun Nagar")
+                    .addressLine2("")
+                    .city("Gurgaon")
+                    .state("Haryana")
+                    .stateCode("06")
+                    .pincode("122001")
+                    .supportEmail("contact@desitechsolutions.com")
                     .supportPhone("+91 98765 43210")
                     .hsnSacCode("998313")
                     .invoicePrefix("SUB-INV")
@@ -61,6 +62,7 @@ public class PlatformDetailsService {
 
         entity.setCompanyName(dto.getCompanyName());
         entity.setTradeName(dto.getTradeName());
+        entity.setCin(dto.getCin() != null && !dto.getCin().isBlank() ? dto.getCin() : "U62010HR2025PTC139151");
         entity.setGstin(dto.getGstin());
         entity.setPan(dto.getPan());
         entity.setAddressLine1(dto.getAddressLine1());
@@ -88,6 +90,7 @@ public class PlatformDetailsService {
                 .id(entity.getId())
                 .companyName(entity.getCompanyName())
                 .tradeName(entity.getTradeName())
+                .cin(entity.getCin() != null && !entity.getCin().isBlank() ? entity.getCin() : "U62010HR2025PTC139151")
                 .gstin(entity.getGstin())
                 .pan(entity.getPan())
                 .addressLine1(entity.getAddressLine1())

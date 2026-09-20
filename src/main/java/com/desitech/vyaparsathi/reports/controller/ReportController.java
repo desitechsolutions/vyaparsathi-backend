@@ -51,7 +51,7 @@ public class ReportController {
             summary = "Get sales summary for date range",
             description = "Returns comprehensive sales summary with COGS calculation and correct profit calculation. Net Profit excludes inventory purchases from expenses."
     )
-    public ResponseEntity<SalesSummaryDto> getSalesSummary(
+    public ResponseEntity<?> getSalesSummary(
             @Parameter(description = "Start date in YYYY-MM-DD format", example = "2024-01-01")
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) String from,
             @Parameter(description = "End date in YYYY-MM-DD format", example = "2024-01-31")
@@ -65,10 +65,17 @@ public class ReportController {
                 ? null
                 : LocalDate.parse(to);
 
+        if (fromDate == null || toDate == null) {
+            return ResponseEntity.badRequest().body("Both 'from' and 'to' date parameters are required");
+        }
+
                 try {
                         var result = service.getSalesSummary(fromDate, toDate);
                         logger.info("Fetched sales summary from {} to {}", fromDate, toDate);
                         return ResponseEntity.ok(result);
+                } catch (IllegalArgumentException e) {
+                        logger.warn("Bad request for sales summary from {} to {}: {}", fromDate, toDate, e.getMessage());
+                        return ResponseEntity.badRequest().body(e.getMessage());
                 } catch (Exception e) {
                         logger.error("Error fetching sales summary from {} to {}: {}", fromDate, toDate, e.getMessage(), e);
                         throw new ApplicationException("Failed to fetch sales summary", e);
@@ -111,7 +118,7 @@ public class ReportController {
 
     @GetMapping("/items-sold")
     @Operation(summary = "Get all items sold", description = "Returns a list of all items sold with quantity, total sales, and last sold date.")
-    public ResponseEntity<List<ItemsSoldDto>> getAllItemsSold(
+    public ResponseEntity<?> getAllItemsSold(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) String from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) String to
     ) {
@@ -123,10 +130,17 @@ public class ReportController {
                 ? null
                 : LocalDate.parse(to);
 
+        if (fromDate == null || toDate == null) {
+            return ResponseEntity.badRequest().body("Both 'from' and 'to' date parameters are required");
+        }
+
                 try {
                         var result = service.getAllItemsSold(fromDate, toDate);
                         logger.info("Fetched all items sold from {} to {}", fromDate, toDate);
                         return ResponseEntity.ok(result);
+                } catch (IllegalArgumentException e) {
+                        logger.warn("Bad request for items-sold from {} to {}: {}", fromDate, toDate, e.getMessage());
+                        return ResponseEntity.badRequest().body(e.getMessage());
                 } catch (Exception e) {
                         logger.error("Error fetching all items sold from {} to {}: {}", fromDate, toDate, e.getMessage(), e);
                         throw new ApplicationException("Failed to fetch all items sold", e);
@@ -135,7 +149,7 @@ public class ReportController {
 
     @GetMapping("/category-sales")
     @Operation(summary = "Get sales by category", description = "Returns sales totals grouped by item category.")
-    public ResponseEntity<List<CategorySalesDto>> getCategorySales(
+    public ResponseEntity<?> getCategorySales(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) String from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) String to
     ) {
@@ -147,14 +161,51 @@ public class ReportController {
                 ? null
                 : LocalDate.parse(to);
 
+        if (fromDate == null || toDate == null) {
+            return ResponseEntity.badRequest().body("Both 'from' and 'to' date parameters are required");
+        }
+
                 try {
                         var result = service.getCategorySales(fromDate, toDate);
                         logger.info("Fetched category sales from {} to {}", fromDate, toDate);
                         return ResponseEntity.ok(result);
+                } catch (IllegalArgumentException e) {
+                        logger.warn("Bad request for category-sales from {} to {}: {}", fromDate, toDate, e.getMessage());
+                        return ResponseEntity.badRequest().body(e.getMessage());
                 } catch (Exception e) {
                         logger.error("Error fetching category sales from {} to {}: {}", fromDate, toDate, e.getMessage(), e);
                         throw new ApplicationException("Failed to fetch category sales", e);
                 }
+    }
+
+    @GetMapping("/sales-time-series")
+    @Operation(summary = "Sales time-series for chart",
+            description = "Returns daily sales aggregates (date, totalSales, count) for the given range. " +
+                    "Used by the dashboard chart — much cheaper than loading all sale rows client-side. " +
+                    "Both from and to are required; max range 366 days.")
+    public ResponseEntity<?> getSalesTimeSeries(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) String from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) String to
+    ) {
+        LocalDate fromDate = (from == null || from.isBlank() || "undefined".equalsIgnoreCase(from))
+                ? null : LocalDate.parse(from);
+        LocalDate toDate = (to == null || to.isBlank() || "undefined".equalsIgnoreCase(to))
+                ? null : LocalDate.parse(to);
+
+        if (fromDate == null || toDate == null) {
+            return ResponseEntity.badRequest().body("Both 'from' and 'to' date parameters are required");
+        }
+        try {
+            var result = service.getSalesTimeSeries(fromDate, toDate);
+            logger.info("Fetched sales time-series from {} to {} — {} points", fromDate, toDate, result.size());
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            logger.warn("Bad request for sales-time-series from {} to {}: {}", fromDate, toDate, e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            logger.error("Error fetching sales time-series from {} to {}: {}", fromDate, toDate, e.getMessage(), e);
+            throw new ApplicationException("Failed to fetch sales time-series", e);
+        }
     }
 
     @GetMapping("/z-report")

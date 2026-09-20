@@ -64,6 +64,12 @@ public class ShopDto {
     private String supportContact;
     private Integer invoiceDueDays;
     private String accessToken;
+    // refreshToken is intentionally excluded from JSON serialization — it is
+    // set as an HttpOnly Set-Cookie header in ShopOnboardingController so it
+    // is never accessible to JavaScript. The field is kept here so ShopService
+    // can pass it to the controller via the DTO internally, but @JsonIgnore
+    // prevents it from leaking to the wire response.
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private String refreshToken;
 
     /** Notification preferences (V80). Both default to false server-side. */

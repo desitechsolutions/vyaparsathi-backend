@@ -18,6 +18,7 @@ import com.desitech.vyaparsathi.auth.service.SessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -35,14 +36,26 @@ public class AuthController {
     private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
 
     /**
-     * All refresh-token cookies use SameSite=None so cross-origin
-     * withCredentials calls from the SPA work in every browser. `Secure` is
-     * required by browsers when SameSite=None is set. When we introduce
-     * same-origin deployment (Phase 6+), switch to Lax and add a config flag.
+     * Cookie attributes are profile-specific (see application*.properties):
+     *   local/dev  → secure=false, sameSite=Lax  (HTTP, localhost)
+     *   prod       → secure=true,  sameSite=None (HTTPS, cross-origin)
+     *
+     * Both {@link #buildRefreshCookie} and {@link #clearRefreshCookie} use these
+     * injected values so the set-cookie and max-age=0 clear-cookie responses are
+     * always attribute-identical — browsers match cookies by name + path + domain,
+     * and a mismatch means the clear response leaves the original cookie alive.
      */
-    private static final String COOKIE_SAME_SITE = "None";
     private static final String COOKIE_NAME = "refreshToken";
     private static final Duration REFRESH_COOKIE_TTL = Duration.ofDays(7);
+
+    @Value("${app.auth.cookie.secure:true}")
+    private boolean cookieSecure;
+
+    @Value("${app.auth.cookie.same-site:None}")
+    private String cookieSameSite;
+
+    @Value("${app.auth.cookie.path:/}")
+    private String cookiePath;
 
     @Autowired
     private AuthService authService;
@@ -68,13 +81,19 @@ public class AuthController {
     private ResponseCookie buildRefreshCookie(String value, Duration maxAge) {
         return ResponseCookie.from(COOKIE_NAME, value == null ? "" : value)
                 .httpOnly(true)
-                .secure(true)
-                .path("/")
-                .sameSite(COOKIE_SAME_SITE)
+                .secure(cookieSecure)
+                .path(cookiePath)
+                .sameSite(cookieSameSite)
                 .maxAge(maxAge)
                 .build();
     }
 
+    /**
+     * Returns a cookie that instructs the browser to delete the refreshToken.
+     * Uses the SAME secure/sameSite/path attributes as {@link #buildRefreshCookie}
+     * so the browser can match and evict the original cookie. A mismatch in any
+     * attribute causes browsers to silently ignore the Max-Age=0 directive.
+     */
     private ResponseCookie clearRefreshCookie() {
         return buildRefreshCookie("", Duration.ZERO);
     }

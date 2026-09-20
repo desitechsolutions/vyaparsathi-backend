@@ -17,6 +17,7 @@ public class PlatformDetailsDto {
     private String companyName;
 
     private String tradeName;
+    private String cin;
     private String gstin;
     private String pan;
     private String addressLine1;

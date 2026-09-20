@@ -60,8 +60,6 @@ public class StockImportService {
     static final int COL_COST_PER_UNIT    = 10;
     static final int COL_SELLING_PRICE    = 11;
     static final int COL_MRP              = 12;
-    static final int COL_IS_LOOSE         = 13;
-    static final int COL_PACK_SIZE        = 14;
 
     /** Column headers used for both template generation and import validation. */
     static final String[] HEADERS = {
@@ -69,7 +67,7 @@ public class StockImportService {
             "HSN Code", "GST Rate (%)", "Batch Number",
             "Manufacturing Date (YYYY-MM-DD)", "Expiry Date (YYYY-MM-DD)",
             "Quantity*", "Cost Per Unit", "Selling Price*",
-            "MRP", "Is Loose Medicine (TRUE/FALSE)", "Pack Size"
+            "MRP"
     };
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -112,23 +110,21 @@ public class StockImportService {
                 sheet.setColumnWidth(i, 22 * 256);
             }
 
-            // Sample row
+            // Sample row — generic retail item so the template works for any industry type
             Row sample = sheet.createRow(1);
-            sample.createCell(COL_ITEM_NAME).setCellValue("Paracetamol 500mg");
-            sample.createCell(COL_SKU).setCellValue("SKU-PARA-500");
-            sample.createCell(COL_UNIT).setCellValue("strip");
-            sample.createCell(COL_CATEGORY).setCellValue("Analgesic");
-            sample.createCell(COL_HSN).setCellValue("30049099");
-            sample.createCell(COL_GST_RATE).setCellValue(12);
-            sample.createCell(COL_BATCH_NUMBER).setCellValue("BATCH-A");
+            sample.createCell(COL_ITEM_NAME).setCellValue("Sample Product");
+            sample.createCell(COL_SKU).setCellValue("SKU-SAMPLE-001");
+            sample.createCell(COL_UNIT).setCellValue("pcs");
+            sample.createCell(COL_CATEGORY).setCellValue("General");
+            sample.createCell(COL_HSN).setCellValue("84713010");
+            sample.createCell(COL_GST_RATE).setCellValue(18);
+            sample.createCell(COL_BATCH_NUMBER).setCellValue("BATCH-001");
             sample.createCell(COL_MFG_DATE).setCellValue("2024-01-01");
-            sample.createCell(COL_EXPIRY_DATE).setCellValue("2026-06-30");
-            sample.createCell(COL_QUANTITY).setCellValue(20);
-            sample.createCell(COL_COST_PER_UNIT).setCellValue(8.50);
-            sample.createCell(COL_SELLING_PRICE).setCellValue(10.00);
-            sample.createCell(COL_MRP).setCellValue(12.00);
-            sample.createCell(COL_IS_LOOSE).setCellValue("TRUE");
-            sample.createCell(COL_PACK_SIZE).setCellValue(15);
+            sample.createCell(COL_EXPIRY_DATE).setCellValue("");
+            sample.createCell(COL_QUANTITY).setCellValue(50);
+            sample.createCell(COL_COST_PER_UNIT).setCellValue(100.00);
+            sample.createCell(COL_SELLING_PRICE).setCellValue(150.00);
+            sample.createCell(COL_MRP).setCellValue(175.00);
 
             wb.write(out);
             return out.toByteArray();
@@ -224,8 +220,6 @@ public class StockImportService {
         LocalDate expiryDate = getDateCell(row, COL_EXPIRY_DATE);
         BigDecimal cost      = getBigDecimalCell(row, COL_COST_PER_UNIT);
         BigDecimal mrp       = getBigDecimalCell(row, COL_MRP);
-        Boolean isLoose      = getBooleanCell(row, COL_IS_LOOSE);
-        BigDecimal packSize  = getBigDecimalCell(row, COL_PACK_SIZE);
 
         // --- Find or create Item (uses cache to avoid N+1) ---
         Item item = findOrCreateItem(itemName, categoryName, itemCache);
@@ -314,7 +308,7 @@ public class StockImportService {
     // -------------------------------------------------------------------------
 
     private boolean isRowEmpty(Row row) {
-        for (int i = COL_ITEM_NAME; i <= COL_PACK_SIZE; i++) {
+        for (int i = COL_ITEM_NAME; i <= COL_MRP; i++) {
             Cell cell = row.getCell(i);
             if (cell != null && cell.getCellType() != CellType.BLANK) {
                 String val = getCellAsString(cell);
@@ -387,14 +381,4 @@ public class StockImportService {
         }
     }
 
-    private Boolean getBooleanCell(Row row, int colIdx) {
-        Cell cell = row.getCell(colIdx);
-        if (cell == null) return null;
-        if (cell.getCellType() == CellType.BOOLEAN) {
-            return cell.getBooleanCellValue();
-        }
-        String s = getCellAsString(cell);
-        if (s == null || s.isBlank()) return null;
-        return "TRUE".equalsIgnoreCase(s) || "YES".equalsIgnoreCase(s) || "1".equals(s);
-    }
 }

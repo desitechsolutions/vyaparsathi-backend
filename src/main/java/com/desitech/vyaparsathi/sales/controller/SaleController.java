@@ -298,7 +298,7 @@ public class SaleController {
         Sale sale = saleRepository.findById(saleId)
                 .orElseThrow(() -> new EntityNotFoundException("Sale not found"));
 
-        String token = jwtUtil.generateInvoiceToken(sale.getId(), sale.getInvoiceNo());
+        String token = jwtUtil.generateInvoiceToken(sale.getId(), sale.getInvoiceNo(), sale.getShop() != null ? sale.getShop().getId() : null);
         String url = "/api/invoices/signed?token=" + token;
 
         return ResponseEntity.ok(url);

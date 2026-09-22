@@ -243,22 +243,44 @@ public class StockController {
         }
     }
 
-    @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Bulk import stock from Excel",
-               description = "Accepts an .xlsx file in the import template format. " +
-                       "For each row the service finds or creates the Item and ItemVariant (matched by SKU), " +
-                       "then records an ADD stock movement. " +
-                       "Returns a summary with success/error counts and per-row error messages.")
-    @ApiResponse(responseCode = "200", description = "Import processed – check result for row-level errors")
-    public ResponseEntity<StockImportResultDto> importStock(
-            @Parameter(description = "Excel file (.xlsx) in the import template format")
+    @PostMapping(value = "/import/validate", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Validate stock import file",
+               description = "Parses the .xlsx file and returns validation status, row preview, and duplicate SKU detection without modifying database records.")
+    @ApiResponse(responseCode = "200", description = "File validated successfully")
+    public ResponseEntity<StockImportValidationDto> validateImport(
+            @Parameter(description = "Excel file (.xlsx) to validate")
             @RequestParam("file") MultipartFile file) {
         if (file.isEmpty()) {
             throw new ApplicationException("Uploaded file is empty", null);
         }
         try {
-            StockImportResultDto result = stockImportService.importFromExcel(file);
-            logger.info("Stock import completed – success={}, errors={}", result.getSuccessCount(), result.getErrorCount());
+            StockImportValidationDto validation = stockImportService.validateExcel(file);
+            return ResponseEntity.ok(validation);
+        } catch (Exception e) {
+            logger.error("Stock import validation failed: {}", e.getMessage(), e);
+            throw new ApplicationException("Stock import validation failed: " + e.getMessage(), e);
+        }
+    }
+
+    @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Bulk import stock from Excel",
+               description = "Accepts an .xlsx file in the import template format. " +
+                       "For each row the service finds or creates the Item and ItemVariant (matched by SKU), " +
+                       "then records an ADD stock movement. " +
+                       "Returns a summary with success/error/skipped counts and per-row error messages.")
+    @ApiResponse(responseCode = "200", description = "Import processed – check result for row-level errors")
+    public ResponseEntity<StockImportResultDto> importStock(
+            @Parameter(description = "Excel file (.xlsx) in the import template format")
+            @RequestParam("file") MultipartFile file,
+            @Parameter(description = "When true, skips rows where the SKU already exists in this shop")
+            @RequestParam(value = "skipDuplicates", defaultValue = "false") boolean skipDuplicates) {
+        if (file.isEmpty()) {
+            throw new ApplicationException("Uploaded file is empty", null);
+        }
+        try {
+            StockImportResultDto result = stockImportService.importFromExcel(file, skipDuplicates);
+            logger.info("Stock import completed – success={}, skipped={}, errors={}",
+                    result.getSuccessCount(), result.getSkippedCount(), result.getErrorCount());
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Stock import failed: {}", e.getMessage(), e);

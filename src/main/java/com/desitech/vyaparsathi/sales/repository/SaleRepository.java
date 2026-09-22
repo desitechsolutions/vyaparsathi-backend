@@ -25,6 +25,14 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     @EntityGraph(attributePaths = {"saleItems", "customer"}, type = EntityGraph.EntityGraphType.LOAD)
     Sale findByInvoiceNo(String invoiceNo);
 
+    @com.desitech.vyaparsathi.common.annotations.SkipShopFilter
+    @Query("SELECT s FROM Sale s LEFT JOIN FETCH s.shop WHERE s.id = :id")
+    Optional<Sale> findByIdUnfiltered(@Param("id") Long id);
+
+    @com.desitech.vyaparsathi.common.annotations.SkipShopFilter
+    @Query("SELECT s FROM Sale s LEFT JOIN FETCH s.shop WHERE s.invoiceNo = :invoiceNo")
+    Optional<Sale> findByInvoiceNoUnfiltered(@Param("invoiceNo") String invoiceNo);
+
     /**
      * NEW: Finds the most recent sale for a given customer.
      * This is used by the AnalyticsService to predict customer churn.

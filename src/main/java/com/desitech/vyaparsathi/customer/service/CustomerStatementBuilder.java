@@ -12,6 +12,8 @@ import com.desitech.vyaparsathi.payment.repository.PaymentRepository;
 import com.desitech.vyaparsathi.sales.entity.Sale;
 import com.desitech.vyaparsathi.sales.enums.SaleStatus;
 import com.desitech.vyaparsathi.sales.repository.SaleRepository;
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,6 +56,8 @@ public class CustomerStatementBuilder {
     }
 
     /** One row in the assembled statement. */
+    @Getter
+    @Setter
     public static class StatementLine {
         public LocalDate date;
         public String reference;      // Invoice no / Payment id / CN no
@@ -65,6 +69,8 @@ public class CustomerStatementBuilder {
     }
 
     /** Aging bucket totals derived from open (unpaid / partially paid) invoices. */
+    @Getter
+    @Setter
     public static class Aging {
         public BigDecimal current = BigDecimal.ZERO;   // 0-30 days
         public BigDecimal bucket31_60 = BigDecimal.ZERO;
@@ -75,7 +81,9 @@ public class CustomerStatementBuilder {
         }
     }
 
-    /** Bundle returned to the PDF renderer. */
+    /** Bundle returned to the PDF renderer and web clients. */
+    @Getter
+    @Setter
     public static class Statement {
         public List<StatementLine> lines = new ArrayList<>();
         public BigDecimal openingBalance = BigDecimal.ZERO;

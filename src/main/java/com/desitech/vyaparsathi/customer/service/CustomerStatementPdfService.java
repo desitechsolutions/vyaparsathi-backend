@@ -308,4 +308,9 @@ public class CustomerStatementPdfService {
     }
 
     private static boolean nonBlank(String s) { return s != null && !s.isBlank(); }
+
+    @Transactional(readOnly = true)
+    public CustomerStatementBuilder.Statement getStatementData(Long customerId, LocalDateTime startDate, LocalDateTime endDate) {
+        return builder.build(customerId, startDate, endDate);
+    }
 }

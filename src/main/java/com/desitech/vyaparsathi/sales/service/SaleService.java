@@ -147,7 +147,7 @@ public class SaleService {
                 logger.info("Idempotent replay of createSale — returning existing sale id={} inv={}",
                         s.getId(), s.getInvoiceNo());
                 SaleDto replay = mapper.toDto(s);
-                String signedToken = jwtUtil.generateInvoiceToken(s.getId(), s.getInvoiceNo());
+                String signedToken = jwtUtil.generateInvoiceToken(s.getId(), s.getInvoiceNo(), s.getShop() != null ? s.getShop().getId() : null);
                 replay.setSignedInvoiceUrl("/api/invoices/signed?token=" + signedToken);
                 return replay;
             }
@@ -447,7 +447,7 @@ public class SaleService {
         // 10. ChangeLog, JWT Token Generation and Response
         changeLogService.append("SALE", savedSale.getId(), com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.CREATE, mapper.toDto(savedSale), "LOCAL_DEVICE");
 
-        String signedToken = jwtUtil.generateInvoiceToken(savedSale.getId(), sale.getInvoiceNo());
+        String signedToken = jwtUtil.generateInvoiceToken(savedSale.getId(), sale.getInvoiceNo(), savedSale.getShop() != null ? savedSale.getShop().getId() : null);
         SaleDto resultDto = mapper.toDto(savedSale);
         resultDto.setSignedInvoiceUrl("/api/invoices/signed?token=" + signedToken);
 
@@ -1331,7 +1331,7 @@ public class SaleService {
         // Log Change and Generate Invoice
         changeLogService.append("SALE", saved.getId(), com.desitech.vyaparsathi.changelog.model.ChangeLogOperation.UPDATE, mapper.toDto(saved), "LOCAL_DEVICE");
 
-        String signedToken = jwtUtil.generateInvoiceToken(saved.getId(), saved.getInvoiceNo());
+        String signedToken = jwtUtil.generateInvoiceToken(saved.getId(), saved.getInvoiceNo(), saved.getShop() != null ? saved.getShop().getId() : null);
         SaleDto result = mapper.toDto(saved);
         result.setSignedInvoiceUrl("/api/invoices/signed?token=" + signedToken);
 

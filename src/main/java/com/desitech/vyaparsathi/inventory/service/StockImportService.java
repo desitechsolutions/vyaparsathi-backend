@@ -2,6 +2,8 @@ package com.desitech.vyaparsathi.inventory.service;
 
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.inventory.dto.StockImportResultDto;
+import com.desitech.vyaparsathi.inventory.dto.StockImportRowPreviewDto;
+import com.desitech.vyaparsathi.inventory.dto.StockImportValidationDto;
 import com.desitech.vyaparsathi.inventory.entity.Category;
 import com.desitech.vyaparsathi.inventory.entity.Item;
 import com.desitech.vyaparsathi.inventory.entity.ItemVariant;
@@ -27,10 +29,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
 /**
  * Handles bulk stock import via Excel files (batch-tracking retail: FMCG, food, cosmetics).
@@ -83,6 +82,16 @@ public class StockImportService {
 
     @Autowired
     private StockMovementRepository stockMovementRepository;
+
+    @Autowired
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+    private org.springframework.transaction.support.TransactionTemplate transactionTemplate;
+
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        this.transactionTemplate = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+    }
 
     // -------------------------------------------------------------------------
     // Template download
@@ -149,8 +158,145 @@ public class StockImportService {
      * @param file the uploaded .xlsx workbook
      * @return summary with counts and per-row error messages
      */
-    @Transactional
+    /**
+     * Validates an uploaded Excel file without committing any database modifications.
+     * Evaluates required fields, checks for duplicate SKUs both within the uploaded file
+     * and against the current shop's existing inventory, and returns a detailed preview.
+     */
+    @Transactional(readOnly = true)
+    public StockImportValidationDto validateExcel(MultipartFile file) throws IOException {
+        Long shopId = TenantContext.getCurrentShopId();
+        StockImportValidationDto validation = new StockImportValidationDto();
+
+        List<StockImportRowPreviewDto> rows = new ArrayList<>();
+        Set<String> seenSkusInFile = new HashSet<>();
+        Set<String> duplicateSkusInFile = new HashSet<>();
+        List<String> allFileSkus = new ArrayList<>();
+
+        try (Workbook wb = WorkbookFactory.create(file.getInputStream())) {
+            Sheet sheet = wb.getSheetAt(0);
+            int lastRow = sheet.getLastRowNum();
+
+            // Pass 1: Collect non-empty SKUs and find duplicates within the file
+            for (int r = 1; r <= lastRow; r++) {
+                Row row = sheet.getRow(r);
+                if (row == null || isRowEmpty(row)) continue;
+                String rawSku = getStringCell(row, COL_SKU);
+                if (rawSku != null && !rawSku.trim().isBlank()) {
+                    String cleanSku = rawSku.trim();
+                    allFileSkus.add(cleanSku);
+                    if (!seenSkusInFile.add(cleanSku.toLowerCase())) {
+                        duplicateSkusInFile.add(cleanSku.toLowerCase());
+                    }
+                }
+            }
+
+            // Find existing SKUs in the current shop from DB in a single batch query
+            Set<String> existingDbSkus = new HashSet<>();
+            if (!allFileSkus.isEmpty()) {
+                List<String> dbMatches = itemVariantRepository.findExistingSkusInShop(shopId, allFileSkus);
+                if (dbMatches != null) {
+                    for (String s : dbMatches) {
+                        existingDbSkus.add(s.trim().toLowerCase());
+                    }
+                }
+            }
+
+            // Pass 2: Validate each row and construct preview
+            int total = 0;
+            int duplicates = 0;
+            int errors = 0;
+
+            for (int r = 1; r <= lastRow; r++) {
+                Row row = sheet.getRow(r);
+                if (row == null || isRowEmpty(row)) continue;
+                total++;
+
+                int userRow = r + 1;
+                String itemName = getStringCell(row, COL_ITEM_NAME);
+                String rawSku = getStringCell(row, COL_SKU);
+                String sku = rawSku != null ? rawSku.trim() : "";
+                String unit = getStringCell(row, COL_UNIT);
+                BigDecimal quantity = getBigDecimalCell(row, COL_QUANTITY);
+                BigDecimal sellingPrice = getBigDecimalCell(row, COL_SELLING_PRICE);
+                String batchNumber = getStringCell(row, COL_BATCH_NUMBER);
+                LocalDate expiryDate = getDateCell(row, COL_EXPIRY_DATE);
+
+                StringBuilder rowErr = new StringBuilder();
+                if (itemName == null || itemName.isBlank()) rowErr.append("'Item Name' is required. ");
+                if (unit == null || unit.isBlank()) rowErr.append("'Unit' is required. ");
+                if (quantity == null || quantity.compareTo(BigDecimal.ZERO) <= 0) rowErr.append("'Quantity' must be > 0. ");
+                if (sellingPrice == null || sellingPrice.compareTo(BigDecimal.ZERO) < 0) rowErr.append("'Selling Price' must be >= 0. ");
+
+                boolean isDbDup = !sku.isBlank() && existingDbSkus.contains(sku.toLowerCase());
+                boolean isFileDup = !sku.isBlank() && duplicateSkusInFile.contains(sku.toLowerCase());
+                boolean isDup = isDbDup || isFileDup;
+
+                String dupReason = null;
+                if (isDbDup && isFileDup) {
+                    dupReason = "SKU exists in shop inventory AND repeated in file";
+                } else if (isDbDup) {
+                    dupReason = "SKU already exists in your shop inventory";
+                } else if (isFileDup) {
+                    dupReason = "SKU repeated across multiple rows in file";
+                }
+
+                String status = "VALID";
+                if (rowErr.length() > 0) {
+                    status = "ERROR";
+                    errors++;
+                } else if (isDup) {
+                    status = "DUPLICATE";
+                    duplicates++;
+                }
+
+                StockImportRowPreviewDto rowPreview = StockImportRowPreviewDto.builder()
+                        .rowNumber(userRow)
+                        .itemName(itemName)
+                        .sku(sku)
+                        .unit(unit)
+                        .sellingPrice(sellingPrice)
+                        .quantity(quantity)
+                        .batchNumber(batchNumber)
+                        .expiryDate(expiryDate != null ? expiryDate.format(DATE_FMT) : null)
+                        .duplicate(isDup)
+                        .duplicateReason(dupReason)
+                        .status(status)
+                        .errorMessage(rowErr.length() > 0 ? rowErr.toString().trim() : null)
+                        .build();
+
+                rows.add(rowPreview);
+            }
+
+            validation.setTotalRows(total);
+            validation.setDuplicateCount(duplicates);
+            validation.setErrorCount(errors);
+            validation.setValidRows(total - errors);
+            validation.setHasDuplicates(duplicates > 0);
+            validation.setRows(rows);
+        }
+
+        return validation;
+    }
+
+    /**
+     * Parses the uploaded Excel file and creates/updates inventory records.
+     * Backwards-compatible overload defaulting to skipDuplicates = false.
+     */
     public StockImportResultDto importFromExcel(MultipartFile file) throws IOException {
+        return importFromExcel(file, false);
+    }
+
+    /**
+     * Parses the uploaded Excel file and creates/updates inventory records.
+     * Each row is processed in its own transaction via transactionTemplate so errors
+     * on one row do not abort the rest and do not cause UnexpectedRollbackException.
+     *
+     * @param file the uploaded .xlsx workbook
+     * @param skipDuplicates if true, rows matching an existing SKU in this shop are skipped
+     * @return summary with counts and per-row error/warning messages
+     */
+    public StockImportResultDto importFromExcel(MultipartFile file, boolean skipDuplicates) throws IOException {
         StockImportResultDto result = new StockImportResultDto();
 
         // Pre-load all existing items into a map (itemName -> Item) to avoid N+1 queries
@@ -168,19 +314,25 @@ public class StockImportService {
                     continue;
                 }
                 result.setTotalRows(result.getTotalRows() + 1);
+                final int userRowNumber = rowIdx + 1;
                 try {
-                    processRow(row, rowIdx + 1, itemCache); // 1-based for user-facing error messages
-                    result.setSuccessCount(result.getSuccessCount() + 1);
+                    Boolean processed = transactionTemplate.execute(status -> {
+                        return processRow(row, userRowNumber, itemCache, skipDuplicates, result);
+                    });
+
+                    if (Boolean.TRUE.equals(processed)) {
+                        result.setSuccessCount(result.getSuccessCount() + 1);
+                    }
                 } catch (Exception e) {
                     result.setErrorCount(result.getErrorCount() + 1);
-                    result.getErrors().add("Row " + (rowIdx + 1) + ": " + e.getMessage());
-                    logger.warn("Import error on row {}: {}", rowIdx + 1, e.getMessage());
+                    result.getErrors().add("Row " + userRowNumber + ": " + e.getMessage());
+                    logger.warn("Import error on row {}: {}", userRowNumber, e.getMessage());
                 }
             }
         }
 
-        logger.info("Stock import complete – total={}, success={}, errors={}",
-                result.getTotalRows(), result.getSuccessCount(), result.getErrorCount());
+        logger.info("Stock import complete – total={}, success={}, skipped={}, errors={}",
+                result.getTotalRows(), result.getSuccessCount(), result.getSkippedCount(), result.getErrorCount());
         return result;
     }
 
@@ -188,7 +340,8 @@ public class StockImportService {
     // Row processing
     // -------------------------------------------------------------------------
 
-    private void processRow(Row row, int userRowNumber, Map<String, Item> itemCache) {
+    private boolean processRow(Row row, int userRowNumber, Map<String, Item> itemCache,
+                               boolean skipDuplicates, StockImportResultDto result) {
         // --- Required fields ---
         String itemName = getStringCell(row, COL_ITEM_NAME);
         if (itemName == null || itemName.isBlank()) {
@@ -211,7 +364,8 @@ public class StockImportService {
         }
 
         // --- Optional fields ---
-        String sku           = getStringCell(row, COL_SKU);
+        String rawSku        = getStringCell(row, COL_SKU);
+        String sku           = rawSku != null ? rawSku.trim() : null;
         String categoryName  = getStringCell(row, COL_CATEGORY);
         String hsn           = getStringCell(row, COL_HSN);
         Integer gstRate      = getIntegerCell(row, COL_GST_RATE);
@@ -221,16 +375,27 @@ public class StockImportService {
         BigDecimal cost      = getBigDecimalCell(row, COL_COST_PER_UNIT);
         BigDecimal mrp       = getBigDecimalCell(row, COL_MRP);
 
+        Long shopId = TenantContext.getCurrentShopId();
+
+        // Check duplicate SKU behavior
+        if (sku != null && !sku.isBlank()) {
+            Optional<ItemVariant> existing = itemVariantRepository.findByShopIdAndSku(shopId, sku);
+            if (existing.isPresent()) {
+                if (skipDuplicates) {
+                    result.setSkippedCount(result.getSkippedCount() + 1);
+                    result.getWarnings().add("Row " + userRowNumber + ": SKU '" + sku + "' already exists in inventory — skipped.");
+                    return false; // row skipped
+                }
+            }
+        }
+
         // --- Find or create Item (uses cache to avoid N+1) ---
         Item item = findOrCreateItem(itemName, categoryName, itemCache);
 
         // --- Find or create ItemVariant ---
-        ItemVariant variant = findOrCreateVariant(item, sku, unit, sellingPrice, hsn, gstRate, mrp);
+        ItemVariant variant = findOrCreateVariant(item, sku, unit, sellingPrice, hsn, gstRate, mrp, shopId);
 
         // --- Add stock movement ---
-        // Batch-specific data (batch, mfgDate, expiryDate) is stored only in the movement.
-        // We do NOT overwrite ItemVariant.batchNumber/expiryDate here because a single import
-        // file may contain multiple batches for the same variant with different expiry dates.
         BigDecimal costPerUnit = (cost != null && cost.compareTo(BigDecimal.ZERO) > 0) ? cost : BigDecimal.ZERO;
 
         StockMovement movement = new StockMovement();
@@ -244,6 +409,7 @@ public class StockImportService {
         movement.setReference("Import");
         movement.setTimestamp(LocalDateTime.now());
         stockMovementRepository.save(movement);
+        return true;
     }
 
     private Item findOrCreateItem(String itemName, String categoryName, Map<String, Item> itemCache) {
@@ -270,10 +436,10 @@ public class StockImportService {
 
     private ItemVariant findOrCreateVariant(Item item, String sku, String unit,
                                              BigDecimal sellingPrice, String hsn, Integer gstRate,
-                                             BigDecimal mrp) {
-        // If SKU provided and variant already exists, update and return
+                                             BigDecimal mrp, Long shopId) {
+        // If SKU provided and variant already exists for this shop, update and return
         if (sku != null && !sku.isBlank()) {
-            Optional<ItemVariant> existing = itemVariantRepository.findBySku(sku);
+            Optional<ItemVariant> existing = itemVariantRepository.findByShopIdAndSku(shopId, sku);
             if (existing.isPresent()) {
                 ItemVariant v = existing.get();
                 v.setPricePerUnit(sellingPrice);

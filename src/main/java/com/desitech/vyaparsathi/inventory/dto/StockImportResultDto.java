@@ -9,8 +9,10 @@ import java.util.List;
 public class StockImportResultDto {
     private int totalRows;
     private int successCount;
+    private int skippedCount;
     private int errorCount;
     private List<String> errors = new ArrayList<>();
+    private List<String> warnings = new ArrayList<>();
 
     public int getTotalRows() { return totalRows; }
     public void setTotalRows(int totalRows) { this.totalRows = totalRows; }

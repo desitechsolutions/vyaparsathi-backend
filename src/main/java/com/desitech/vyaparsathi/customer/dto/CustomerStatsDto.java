@@ -74,11 +74,19 @@ public class CustomerStatsDto {
     public long getTotalSales() { return totalSales; }
     public void setTotalSales(long totalSales) { this.totalSales = totalSales; }
 
+    /** Alias for consumers expecting invoiceCount */
+    public long getInvoiceCount() { return totalSales; }
+    public void setInvoiceCount(long invoiceCount) { this.totalSales = invoiceCount; }
+
     public BigDecimal getTotalSalesValue() { return totalSalesValue; }
     public void setTotalSalesValue(BigDecimal v) { this.totalSalesValue = v == null ? BigDecimal.ZERO : v; }
 
     public BigDecimal getAverageOrderValue() { return averageOrderValue; }
     public void setAverageOrderValue(BigDecimal v) { this.averageOrderValue = v == null ? BigDecimal.ZERO : v; }
+
+    /** Alias for consumers expecting avgOrderValue */
+    public BigDecimal getAvgOrderValue() { return averageOrderValue; }
+    public void setAvgOrderValue(BigDecimal v) { this.averageOrderValue = v == null ? BigDecimal.ZERO : v; }
 
     public BigDecimal getOutstandingReceivable() { return outstandingReceivable; }
     public void setOutstandingReceivable(BigDecimal v) { this.outstandingReceivable = v == null ? BigDecimal.ZERO : v; }

@@ -166,11 +166,19 @@ public class JwtUtil {
      * @return signed JWT token (valid for ~30 minutes)
      */
     public String generateInvoiceToken(Long saleId, String invoiceNo) {
-        return Jwts.builder()
+        return generateInvoiceToken(saleId, invoiceNo, null);
+    }
+
+    public String generateInvoiceToken(Long saleId, String invoiceNo, Long shopId) {
+        var builder = Jwts.builder()
                 .setSubject("invoice-access")  // special subject to identify
                 .claim("saleId", saleId)
                 .claim("invoiceNo", invoiceNo)
-                .claim("scope", "invoice:read")  // optional: add scope for extra security
+                .claim("scope", "invoice:read");
+        if (shopId != null) {
+            builder.claim("shopId", shopId);
+        }
+        return builder
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + invoiceExpirationMs))
                 .signWith(secretKey, SignatureAlgorithm.HS512)
@@ -562,12 +570,13 @@ public class JwtUtil {
 
             Long saleId = claims.get("saleId", Long.class);
             String invoiceNo = claims.get("invoiceNo", String.class);
+            Long shopId = claims.get("shopId", Long.class);
 
             if (saleId == null && (invoiceNo == null || invoiceNo.isBlank())) {
                 throw new JwtException("Missing saleId or invoiceNo in token");
             }
 
-            return new InvoiceTokenData(saleId, invoiceNo);
+            return new InvoiceTokenData(saleId, invoiceNo, shopId);
         } catch (JwtException | IllegalArgumentException e) {
             logger.warning("Invalid invoice JWT: " + e.getMessage());
             throw e;

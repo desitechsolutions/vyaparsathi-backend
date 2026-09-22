@@ -90,13 +90,33 @@ public class InvoiceController {
                 )
                 .body(pdf);
     }
+    @Autowired
+    private com.desitech.vyaparsathi.sales.repository.SaleRepository saleRepository;
+
     @GetMapping(value = "/signed")
     public ResponseEntity<?> getSignedInvoice(
                                                @RequestParam String token,
                                                @RequestParam(defaultValue = "false") boolean download) {
 
+        Long previousShopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
         try {
             InvoiceTokenData data = jwtUtil.validateInvoiceToken(token);
+
+            // Establish shop scope for this signed invoice request so ShopFilterAspect allows access
+            if (data.getShopId() != null) {
+                com.desitech.vyaparsathi.common.configs.TenantContext.setCurrentShopId(data.getShopId());
+            } else {
+                com.desitech.vyaparsathi.sales.entity.Sale sale = null;
+                if (data.getSaleId() != null) {
+                    sale = saleRepository.findByIdUnfiltered(data.getSaleId()).orElse(null);
+                } else if (data.getInvoiceNo() != null) {
+                    sale = saleRepository.findByInvoiceNoUnfiltered(data.getInvoiceNo()).orElse(null);
+                }
+                if (sale != null && sale.getShop() != null && sale.getShop().getId() != null) {
+                    com.desitech.vyaparsathi.common.configs.TenantContext.setCurrentShopId(sale.getShop().getId());
+                }
+            }
+
             byte[] pdf = invoiceService.generatePdfBySaleIdOrInvoiceNo(data.saleId, data.invoiceNo);
 
             String filename = "invoice_" + (data.invoiceNo != null ? data.invoiceNo : data.saleId) + ".pdf";
@@ -113,10 +133,16 @@ public class InvoiceController {
             return new ResponseEntity<>(pdf, headers, HttpStatus.OK);
 
         } catch (Exception e) {
-            logger.error("Invalid or expired signed invoice token", e);
+            logger.error("Invalid or expired signed invoice token or PDF generation failure", e);
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .contentType(MediaType.TEXT_PLAIN)
                     .body("Invalid or expired access");
+        } finally {
+            if (previousShopId != null) {
+                com.desitech.vyaparsathi.common.configs.TenantContext.setCurrentShopId(previousShopId);
+            } else {
+                com.desitech.vyaparsathi.common.configs.TenantContext.clear();
+            }
         }
     }
 

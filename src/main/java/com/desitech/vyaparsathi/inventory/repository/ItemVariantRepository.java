@@ -18,6 +18,12 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
 
     Optional<ItemVariant> findBySku(String sku);
 
+    @Query("SELECT iv FROM ItemVariant iv WHERE iv.shop.id = :shopId AND iv.sku = :sku")
+    Optional<ItemVariant> findByShopIdAndSku(@Param("shopId") Long shopId, @Param("sku") String sku);
+
+    @Query("SELECT iv.sku FROM ItemVariant iv WHERE iv.shop.id = :shopId AND iv.sku IN :skus")
+    List<String> findExistingSkusInShop(@Param("shopId") Long shopId, @Param("skus") java.util.Collection<String> skus);
+
     /**
      * Acquires a pessimistic write lock (SELECT … FOR UPDATE) on the ItemVariant row.
      * Used by StockService.deductStock() to serialise concurrent stock operations:

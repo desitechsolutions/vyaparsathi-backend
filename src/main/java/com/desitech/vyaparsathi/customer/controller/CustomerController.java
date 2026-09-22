@@ -249,7 +249,7 @@ public class CustomerController {
         }
     }
 
-    @GetMapping("/{id}/stats")
+    @GetMapping(value = {"/{id}/stats", "/{id}/kpis"})
     @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
     public ResponseEntity<CustomerStatsDto> getCustomerStats(@PathVariable Long id) {
         try {
@@ -335,7 +335,19 @@ public class CustomerController {
         }
     }
 
-    // ─── Statement PDF & Email ──────────────────────────────────────────
+    // ─── Statement JSON, PDF & Email ───────────────────────────────────
+    @GetMapping("/{id}/statement")
+    @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")
+    public ResponseEntity<com.desitech.vyaparsathi.customer.service.CustomerStatementBuilder.Statement> getStatement(
+            @PathVariable Long id,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+
+        LocalDateTime startDt = from != null ? from.atStartOfDay() : null;
+        LocalDateTime endDt = to != null ? to.atTime(23, 59, 59) : null;
+        com.desitech.vyaparsathi.customer.service.CustomerStatementBuilder.Statement statement = statementPdfService.getStatementData(id, startDt, endDt);
+        return ResponseEntity.ok(statement);
+    }
 
     @GetMapping("/{id}/statement/pdf")
     @com.desitech.vyaparsathi.rbac.annotation.RequirePermission("CUSTOMER_VIEW")

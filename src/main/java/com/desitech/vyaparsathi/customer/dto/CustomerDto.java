@@ -78,8 +78,33 @@ public class CustomerDto {
     @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
     private LocalDateTime updatedAt;
 
-    // Manual getters/setters were previously duplicated for every field
-    // alongside Lombok's @Data. All pass-throughs removed — Lombok now
-    // generates them (which was already the effective behaviour anyway,
-    // since Lombok skipped fields with a matching hand-written accessor).
+    public void setPhone(String phone) {
+        if (phone != null) {
+            String digits = phone.replaceAll("\\D", "");
+            if (digits.length() == 12 && digits.startsWith("91")) {
+                digits = digits.substring(2);
+            } else if (digits.length() == 11 && digits.startsWith("0")) {
+                digits = digits.substring(1);
+            }
+            this.phone = digits.isEmpty() ? null : digits;
+        } else {
+            this.phone = null;
+        }
+    }
+
+    public void setEmail(String email) {
+        this.email = (email != null && !email.isBlank()) ? email.trim() : null;
+    }
+
+    public void setStateCode(String stateCode) {
+        this.stateCode = (stateCode != null && !stateCode.isBlank()) ? stateCode.trim() : null;
+    }
+
+    public void setGstNumber(String gstNumber) {
+        this.gstNumber = (gstNumber != null && !gstNumber.isBlank()) ? gstNumber.trim().toUpperCase() : null;
+    }
+
+    public void setPanNumber(String panNumber) {
+        this.panNumber = (panNumber != null && !panNumber.isBlank()) ? panNumber.trim().toUpperCase() : null;
+    }
 }

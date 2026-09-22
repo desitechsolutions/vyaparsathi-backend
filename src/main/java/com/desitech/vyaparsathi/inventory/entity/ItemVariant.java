@@ -14,13 +14,15 @@ import java.time.LocalDate;
 import java.util.Map;
 
 @Entity
-@Table(name = "item_variant")
+@Table(name = "item_variant", uniqueConstraints = {
+    @UniqueConstraint(name = "uk_item_variant_shop_sku", columnNames = {"shop_id", "sku"})
+})
 @Getter
 @Setter
 @NoArgsConstructor
 public class ItemVariant extends ShopAwareEntity {
 
-    @Column(nullable = false, unique = true)
+    @Column(name = "sku", nullable = false)
     private String sku;
 
     @Column(name = "unit", nullable = false)

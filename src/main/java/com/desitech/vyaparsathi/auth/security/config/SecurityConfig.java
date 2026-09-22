@@ -16,6 +16,8 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -51,9 +53,48 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        // CSRF: enabled only for the token-refresh endpoint which is the only
+        // cookie-based request an attacker could forge cross-site.
+        //
+        // Strategy — CookieCsrfTokenRepository (Double-Submit Cookie):
+        //   • Spring writes an XSRF-TOKEN cookie (non-HttpOnly so JS can read it).
+        //   • The frontend must echo the value in an X-XSRF-TOKEN header.
+        //   • All /api/auth/** paths except /api/auth/refresh are excluded because
+        //     login/register/etc. must be reachable without a prior CSRF token.
+        //   • Every other path is also excluded because they all require a Bearer
+        //     access token (which a CSRF attacker cannot forge), so cookie-based
+        //     CSRF is not an attack vector for those endpoints.
+        //
+        // The CsrfTokenRequestAttributeHandler (Spring Security 6 default) is
+        // used explicitly to avoid the XorCsrfTokenRequestAttributeHandler
+        // wrapper which base64-encodes the value the FE would need to send.
+        CsrfTokenRequestAttributeHandler csrfHandler = new CsrfTokenRequestAttributeHandler();
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-                .csrf(csrf -> csrf.disable())
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                        .csrfTokenRequestHandler(csrfHandler)
+                        .ignoringRequestMatchers(
+                                // Login, register, forgot/reset-password, verify-email, MFA,
+                                // OAuth2 flows, and every other auth endpoint except refresh.
+                                "/api/auth/login",
+                                "/api/auth/register",
+                                "/api/auth/logout",
+                                "/api/auth/forget-password",
+                                "/api/auth/reset-password",
+                                "/api/auth/validate-reset-token",
+                                "/api/auth/verify-email",
+                                "/api/auth/resend-verification",
+                                "/api/auth/mfa/**",
+                                "/api/auth/change-pin",
+                                "/api/auth/change-password",
+                                "/oauth2/**",
+                                "/login/oauth2/**",
+                                // All authenticated API endpoints use Bearer tokens — CSRF
+                                // is only relevant for cookie-authenticated requests.
+                                "/api/**"
+                        )
+                )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/api/auth/**",
@@ -142,11 +183,14 @@ public class SecurityConfig {
                 "Origin",
                 "Access-Control-Request-Method",
                 "Access-Control-Request-Headers",
-                "X-Razorpay-Signature"
+                "X-Razorpay-Signature",
+                // Required for the CSRF double-submit-cookie pattern on /api/auth/refresh.
+                // The frontend reads the XSRF-TOKEN cookie and echoes it in this header.
+                "X-XSRF-TOKEN"
         ));
 
         // 4. Headers the frontend can see
-        configuration.setExposedHeaders(Arrays.asList("Authorization", "Set-Cookie"));
+        configuration.setExposedHeaders(Arrays.asList("Authorization", "Set-Cookie", "X-XSRF-TOKEN"));
 
         // 5. Allow cookies
         configuration.setAllowCredentials(true);

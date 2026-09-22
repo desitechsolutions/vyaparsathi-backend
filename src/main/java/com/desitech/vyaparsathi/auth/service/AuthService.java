@@ -350,12 +350,19 @@ public class AuthService {
             throw new UserInactiveException("User account is not active");
         }
 
+        // Preserve session_id so the new access token can be per-session revoked
+        // via the denylist. Tokens minted without a sid claim bypass the denylist
+        // check in JwtAuthenticationFilter — they remain valid until TTL expiry
+        // even after the session is explicitly revoked.
+        String sessionId = token.getSessionId();
+
         refreshTokenService.delete(token);
         refreshTokenService.createRefreshToken(user.getUsername());
 
         String newAccessToken = jwtUtil.generateAccessToken(
                 user,
-                user.getShop() != null ? user.getShop().getId() : null
+                user.getShop() != null ? user.getShop().getId() : null,
+                sessionId
         );
 
         return new AuthResponse(

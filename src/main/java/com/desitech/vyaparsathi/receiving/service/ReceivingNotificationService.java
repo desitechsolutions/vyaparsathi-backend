@@ -43,7 +43,7 @@ public class ReceivingNotificationService {
         this.logRepository = logRepository;
     }
 
-    @Async
+    @Async("notificationExecutor")
     @Transactional
     public void onGrnCreated(Receiving r) {
         String subject = "GRN " + r.getGrNumber() + " created";
@@ -54,7 +54,7 @@ public class ReceivingNotificationService {
         record(r, null, "GRN_CREATED", "EMAIL", defaultManagerEmail, subject, body);
     }
 
-    @Async
+    @Async("notificationExecutor")
     @Transactional
     public void onApprovalRequested(Receiving r, String approverEmail) {
         String recipient = approverEmail != null && !approverEmail.isBlank() ? approverEmail : defaultManagerEmail;
@@ -63,7 +63,7 @@ public class ReceivingNotificationService {
         record(r, null, "APPROVAL_REQUESTED", "EMAIL", recipient, subject, body);
     }
 
-    @Async
+    @Async("notificationExecutor")
     @Transactional
     public void onTicketOpened(ReceivingTicket t) {
         String subject = "New dispute ticket #" + t.getId()
@@ -73,7 +73,7 @@ public class ReceivingNotificationService {
     }
 
     /** Scheduled job hook: escalate any ticket that has been OPEN for > 24 h. */
-    @Async
+    @Async("notificationExecutor")
     @Transactional
     public void onAgingTicket(ReceivingTicket t) {
         String subject = "AGING: Ticket #" + t.getId() + " has been OPEN > 24h";

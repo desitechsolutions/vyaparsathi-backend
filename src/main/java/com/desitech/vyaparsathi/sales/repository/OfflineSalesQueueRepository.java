@@ -111,6 +111,14 @@ public interface OfflineSalesQueueRepository extends JpaRepository<OfflineSalesQ
     Optional<OfflineSalesQueue> findByClientTxnId(String clientTxnId);
 
     /**
+     * OFF-3 fix: shop-scoped clientTxnId lookup for the getSaleStatus endpoint.
+     * Ensures the tenant check and the data fetch happen atomically in a single query,
+     * eliminating the TOCTOU race and cross-tenant existence oracle in the original
+     * two-query pattern.
+     */
+    Optional<OfflineSalesQueue> findByClientTxnIdAndShopId(String clientTxnId, Long shopId);
+
+    /**
      * Count all queued sales by status across all shops
      * Used for monitoring/alerting
      */

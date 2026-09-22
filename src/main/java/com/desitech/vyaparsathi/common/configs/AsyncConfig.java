@@ -16,6 +16,29 @@ import java.util.concurrent.Executor;
 @EnableAsync
 public class AsyncConfig {
 
+    /**
+     * Default Spring @Async executor. By registering it here with the
+     * TenantContextTaskDecorator we ensure that any @Async method that does
+     * not specify an explicit executor name (bare @Async annotation) still gets
+     * proper TenantContext propagation and cleanup. Without this, pooled threads
+     * could carry a stale InheritableThreadLocal value from a previous tenant
+     * request — a cross-tenant data-leak risk.
+     *
+     * Named "taskExecutor" because that is the bean name Spring's @Async
+     * infrastructure looks up when no executor is specified in the annotation.
+     */
+    @Bean(name = "taskExecutor")
+    public Executor taskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("AsyncTask-");
+        executor.setTaskDecorator(new TenantContextTaskDecorator());
+        executor.initialize();
+        return executor;
+    }
+
     @Bean(name = "notificationExecutor")
     public Executor notificationExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

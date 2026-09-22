@@ -122,7 +122,6 @@ public class OfflineSalesQueueController {
     @PostMapping
     public ResponseEntity<OfflineSalesQueueResponse> enqueueSale(
         @RequestHeader(value = "X-Shop-Id", required = false) Long headerShopId,
-        @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
         @RequestParam(value = "shopId", required = false) Long paramShopId,
         @RequestBody OfflineSalesQueueRequest request
     ) {
@@ -141,14 +140,14 @@ public class OfflineSalesQueueController {
         }
         Long shopId = jwtShopId;
 
+        // OFF-9 fix: derive userId exclusively from the authenticated principal.
+        // The X-User-Id header is a client-supplied value and must not be trusted —
+        // an attacker could attribute sales to any other user within the same tenant.
         org.springframework.security.core.Authentication auth =
             org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
-        String userId = headerUserId;
-        if (userId == null || userId.isBlank()) {
-            userId = (auth != null && auth.isAuthenticated() && auth.getName() != null
-                       && !auth.getName().equals("anonymousUser"))
-                     ? auth.getName() : null;
-        }
+        String userId = (auth != null && auth.isAuthenticated() && auth.getName() != null
+                         && !auth.getName().equals("anonymousUser"))
+                        ? auth.getName() : null;
         if (userId == null) {
             log.warn("[Controller] Unauthenticated offline sale enqueue attempt for shop={}", shopId);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
@@ -183,23 +182,21 @@ public class OfflineSalesQueueController {
     ) {
         log.info("[Controller] Get status for clientTxnId: {}", clientTxnId);
 
+        // OFF-3 fix: use the tenant-scoped single-query overload so tenant verification
+        // and data fetch are atomic — eliminates the TOCTOU race and cross-tenant
+        // existence oracle in the original two-query pattern.
+        Long jwtShopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        if (jwtShopId == null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         try {
-            OfflineSalesQueueResponse response = offlineSalesQueueService.getSaleStatus(clientTxnId);
-            // Tenant scope check: the returned record must belong to the calling user's shop
-            Long jwtShopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
-            if (jwtShopId != null && response.getId() != null) {
-                offlineSalesQueueRepository.findById(response.getId()).ifPresent(q -> {
-                    if (!jwtShopId.equals(q.getShopId())) {
-                        throw new org.springframework.web.server.ResponseStatusException(
-                            HttpStatus.FORBIDDEN, "Access denied");
-                    }
-                });
-            }
+            OfflineSalesQueueResponse response = offlineSalesQueueService.getSaleStatus(clientTxnId, jwtShopId);
             return ResponseEntity.ok(response);
         } catch (org.springframework.web.server.ResponseStatusException e) {
             return ResponseEntity.status(e.getStatusCode()).build();
         } catch (RuntimeException e) {
-            log.warn("[Controller] Sale not found: {}", clientTxnId);
+            log.warn("[Controller] Sale not found or access denied: {}", clientTxnId);
             return ResponseEntity.notFound().build();
         }
     }
@@ -359,7 +356,8 @@ public class OfflineSalesQueueController {
             offlineSalesQueueService.resetToRetryable(queueId);
             offlineSalesProcessorService.processQueuedSales(queuedSale.getShopId());
 
-            OfflineSalesQueueResponse response = offlineSalesQueueService.getSaleStatus(queuedSale.getClientTxnId());
+            // Ownership already verified by validateShopOwnership above; use unchecked overload.
+            OfflineSalesQueueResponse response = offlineSalesQueueService.getSaleStatusUnchecked(queuedSale.getClientTxnId());
             return ResponseEntity.accepted().body(response);
         } catch (org.springframework.web.server.ResponseStatusException e) {
             return ResponseEntity.status(e.getStatusCode()).build();
@@ -392,7 +390,8 @@ public class OfflineSalesQueueController {
             Long saleId = Long.parseLong(request.get("saleId").toString());
             offlineSalesQueueService.markCompleted(queueId, saleId);
 
-            OfflineSalesQueueResponse response = offlineSalesQueueService.getSaleStatus(queuedSale.getClientTxnId());
+            // Ownership already verified by validateShopOwnership above; use unchecked overload.
+            OfflineSalesQueueResponse response = offlineSalesQueueService.getSaleStatusUnchecked(queuedSale.getClientTxnId());
             return ResponseEntity.ok(response);
         } catch (org.springframework.web.server.ResponseStatusException e) {
             return ResponseEntity.status(e.getStatusCode()).build();

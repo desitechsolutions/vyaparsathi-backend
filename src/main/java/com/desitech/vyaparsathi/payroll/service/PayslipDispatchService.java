@@ -47,7 +47,7 @@ public class PayslipDispatchService {
     // Bulk dispatch (async — called after payroll disbursal)
     // ─────────────────────────────────────────────────────────────────────────
 
-    @Async
+    @Async("taskExecutor")
     @Transactional
     public void dispatchPayslipsForRun(Long runId) {
         List<PayrollSlip> slips = payrollSlipRepository

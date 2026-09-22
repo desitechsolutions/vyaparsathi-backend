@@ -25,7 +25,7 @@ public class PayrollEventPublisher {
     /**
      * Called when payroll run status changes to DISBURSED
      */
-    @Async
+    @Async("taskExecutor")
     public void onPayrollDisbursed(PayrollRun payrollRun, Long shopId) {
         log.info("Payroll run {} disbursed, triggering post-disbursal events", payrollRun.getId());
 
@@ -66,7 +66,7 @@ public class PayrollEventPublisher {
     /**
      * Called when advance request is approved
      */
-    @Async
+    @Async("taskExecutor")
     public void onAdvanceRequestApproved(AdvanceRequest request) {
         log.info("Advance request {} approved", request.getId());
         // Schedule automatic deduction in upcoming payrolls
@@ -76,7 +76,7 @@ public class PayrollEventPublisher {
     /**
      * Called when payslip is generated
      */
-    @Async
+    @Async("taskExecutor")
     public void onPayslipGenerated(PayrollSlip slip) {
         log.info("Payslip {} generated for employee {}", slip.getId(), slip.getEmployee().getId());
         // Trigger optional auto-dispatch if configured

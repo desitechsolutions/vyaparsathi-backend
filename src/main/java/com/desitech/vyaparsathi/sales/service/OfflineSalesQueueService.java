@@ -8,6 +8,7 @@ import com.desitech.vyaparsathi.sales.repository.OfflineSalesQueueRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +32,12 @@ public class OfflineSalesQueueService {
 
     private final OfflineSalesQueueRepository offlineSalesQueueRepository;
     private final ObjectMapper objectMapper;
+
+    // OFF-2 fix: read the same config key used by OfflineSalesProcessorService so
+    // cleanupExhaustedFailedRecords() honours operator-configured retry limits
+    // instead of a hard-coded magic number.
+    @Value("${offline.queue.max-retries:5}")
+    private int maxRetries;
 
     /**
      * Enqueue an offline sale from the frontend
@@ -83,14 +90,31 @@ public class OfflineSalesQueueService {
     }
 
     /**
-     * Get status of a specific queued sale
+     * Get status of a specific queued sale.
+     *
+     * OFF-3 fix: takes shopId so the lookup is tenant-scoped in a single query,
+     * replacing the original two-query TOCTOU pattern (fetch-by-clientTxnId then
+     * re-fetch-by-id for the tenant check).
      */
     @Transactional(readOnly = true)
-    public OfflineSalesQueueResponse getSaleStatus(String clientTxnId) {
+    public OfflineSalesQueueResponse getSaleStatus(String clientTxnId, Long shopId) {
+        OfflineSalesQueue sale = offlineSalesQueueRepository
+            .findByClientTxnIdAndShopId(clientTxnId, shopId)
+            .orElseThrow(() -> new RuntimeException("Sale not found: " + clientTxnId));
+
+        return toPublicResponse(sale);
+    }
+
+    /**
+     * Overload kept for internal callers (e.g. retry/override endpoints that have
+     * already verified ownership before calling here).
+     * @deprecated Prefer {@link #getSaleStatus(String, Long)} for tenant-safe lookups.
+     */
+    @Transactional(readOnly = true)
+    public OfflineSalesQueueResponse getSaleStatusUnchecked(String clientTxnId) {
         OfflineSalesQueue sale = offlineSalesQueueRepository
             .findByClientTxnId(clientTxnId)
             .orElseThrow(() -> new RuntimeException("Sale not found: " + clientTxnId));
-
         return toPublicResponse(sale);
     }
 
@@ -180,7 +204,7 @@ public class OfflineSalesQueueService {
     public int cleanupExhaustedFailedRecords(int daysRetention) {
         LocalDateTime cutoffDate = LocalDateTime.now().minusDays(daysRetention);
         List<OfflineSalesQueue> exhausted = offlineSalesQueueRepository
-            .findExhaustedFailedRecords(5, cutoffDate); // 5 = default max-retries
+            .findExhaustedFailedRecords(maxRetries, cutoffDate);
         if (!exhausted.isEmpty()) {
             offlineSalesQueueRepository.deleteAll(exhausted);
             log.info("[OfflineQueue] Cleaned up {} exhausted FAILED records", exhausted.size());

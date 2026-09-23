@@ -40,13 +40,15 @@ public class ExpenseService {
     @Autowired
     private ChangeLogService changeLogService;
 
-    @Autowired(required = false)
+    // EXP-14 fix: required=true (default) — if either service fails to wire, the
+    // application should fail fast rather than silently skipping policy/approval logic.
+    @Autowired
     private ExpensePolicyService policyService;
 
-    @Autowired(required = false)
+    @Autowired
     private ExpenseApprovalService approvalService;
 
-    @Autowired(required = false)
+    @Autowired
     private ObjectMapper objectMapper;
 
     @Transactional
@@ -68,14 +70,20 @@ public class ExpenseService {
         return repository.findByShopIdAndNotDeleted(currentShopId, pageable).map(mapper::toDto);
     }
     public ExpenseDto get(Long id) {
+        // EXP-2 fix: verify the expense belongs to the calling user's shop
+        Long shopId = TenantContext.getCurrentShopId();
         Expense expense = repository.findByIdAndIsDeletedFalse(id)
+                .filter(e -> e.getShop().getId().equals(shopId))
                 .orElseThrow(() -> new EntityNotFoundException("Expense with id " + id + " not found or is deleted"));
         return mapper.toDto(expense);
     }
 
     @Transactional
     public ExpenseDto update(Long id, @Valid UpdateExpenseDto dto) {
+        // EXP-11 fix: verify the expense belongs to the calling user's shop
+        Long shopId = TenantContext.getCurrentShopId();
         Expense expense = repository.findByIdAndIsDeletedFalse(id)
+                .filter(e -> e.getShop().getId().equals(shopId))
                 .orElseThrow(() -> new EntityNotFoundException("Expense with id " + id + " not found or is deleted"));
         
         // Validate expense type if it's being changed
@@ -91,12 +99,11 @@ public class ExpenseService {
 
     @Transactional
     public void delete(Long id) {
-        Expense expense = repository.findById(id)
+        // EXP-11 fix: verify the expense belongs to the calling user's shop
+        Long shopId = TenantContext.getCurrentShopId();
+        Expense expense = repository.findByIdAndIsDeletedFalse(id)
+                .filter(e -> e.getShop().getId().equals(shopId))
                 .orElseThrow(() -> new EntityNotFoundException("Expense with id " + id + " not found"));
-        // Check if already deleted
-        if (Boolean.TRUE.equals(expense.getIsDeleted())) {
-            return;
-        }
         expense.setIsDeleted(true);
         repository.save(expense);
     changeLogService.append("EXPENSE", id, ChangeLogOperation.DELETE, null, "LOCAL_DEVICE");
@@ -106,10 +113,6 @@ public class ExpenseService {
 
     @Transactional
     public ExpenseDto createWithPolicyValidation(Long shopId, String userId, ExpenseDto request) {
-        if (policyService == null) {
-            return create(request); // Fallback to legacy
-        }
-
         validateExpenseRequest(request);
         Expense expense = mapper.toEntity(request);
         com.desitech.vyaparsathi.shop.entity.Shop shop = new com.desitech.vyaparsathi.shop.entity.Shop();
@@ -119,19 +122,19 @@ public class ExpenseService {
         expense.setStatus(Expense.ExpenseStatus.DRAFT);
         if (expense.getCurrency() == null) expense.setCurrency("INR");
 
-        repository.save(expense);
-
-        // Validate against policies
+        // EXP-4 fix: validate against policies BEFORE persisting to DB, so an
+        // AUTO_REJECT violation doesn't save a DRAFT record and then immediately
+        // overwrite it as REJECTED in a second save. Run validation in-memory first.
         List<ExpensePolicyService.PolicyViolation> violations = policyService.validateExpense(shopId, expense);
         if (!violations.isEmpty()) {
             storeViolations(expense, violations);
             boolean autoRejected = policyService.enforcePolicy(expense, violations);
             if (autoRejected) {
-                repository.save(expense);
-                log.warn("[Expense] Expense {} auto-rejected due to policy violation", expense.getId());
+                log.warn("[Expense] Expense auto-rejected due to policy violation before save");
             }
         }
 
+        repository.save(expense);
         changeLogService.append("EXPENSE", expense.getId(), ChangeLogOperation.CREATE, expense, "POLICY_ENGINE");
         return mapper.toDto(expense);
     }
@@ -187,10 +190,11 @@ public class ExpenseService {
 
     @Transactional(readOnly = true)
     public List<Map<String, Object>> getAllCategorySpending(Long shopId, LocalDate startDate, LocalDate endDate) {
-        List<Expense> expenses = repository.findByShopIdAndNotDeleted(shopId, Pageable.unpaged()).getContent();
+        // EXP-7 fix: use date-range DB query instead of loading all expenses into memory
+        // with Pageable.unpaged() and filtering in Java. Also guards against null expenseDate.
+        List<Expense> expenses = repository.findByShopIdAndExpenseDateRange(shopId, startDate, endDate);
         return expenses.stream()
-                .filter(e -> e.getExpenseDate().isAfter(startDate.minusDays(1))
-                        && e.getExpenseDate().isBefore(endDate.plusDays(1)))
+                .filter(e -> e.getExpenseCategoryId() != null) // skip uncategorised
                 .collect(Collectors.groupingBy(
                         e -> e.getExpenseCategoryId(),
                         Collectors.reducing(

@@ -146,4 +146,31 @@ public interface ExpenseRepository extends BaseRepository<Expense, Long> {
         @Param("start") LocalDateTime start,
         @Param("end") LocalDateTime end
     );
+
+    /**
+     * EXP-7 fix: fetch expenses by shop + date range in SQL (replaces the unbounded
+     * Pageable.unpaged() query + in-memory date filtering in getAllCategorySpending).
+     * Only APPROVED expenses count toward spending analytics.
+     */
+    @Query("SELECT e FROM Expense e WHERE e.shop.id = :shopId " +
+           "AND e.expenseDate BETWEEN :startDate AND :endDate " +
+           "AND e.isDeleted = false " +
+           "ORDER BY e.expenseDate DESC")
+    List<Expense> findByShopIdAndExpenseDateRange(
+        @Param("shopId") Long shopId,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+
+    /**
+     * EXP-12 fix: count expenses by category in a single query (replaces the
+     * N+1 pattern in ExpenseCategoryService.deleteCategory that ran one paginated
+     * query per status enum value — 7 separate DB round-trips per delete call).
+     */
+    @Query("SELECT COUNT(e) FROM Expense e WHERE e.shop.id = :shopId " +
+           "AND e.expenseCategoryId = :categoryId AND e.isDeleted = false")
+    long countExpensesByShopAndCategory(
+        @Param("shopId") Long shopId,
+        @Param("categoryId") Long categoryId
+    );
 }

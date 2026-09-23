@@ -3,6 +3,7 @@ package com.desitech.vyaparsathi.expense.service;
 import com.desitech.vyaparsathi.expense.entity.Expense;
 import com.desitech.vyaparsathi.expense.entity.ExpenseApproval;
 import com.desitech.vyaparsathi.expense.repository.ExpenseApprovalRepository;
+import com.desitech.vyaparsathi.expense.repository.ExpenseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -29,6 +30,7 @@ import java.util.Optional;
 public class ExpenseApprovalService {
 
     private final ExpenseApprovalRepository approvalRepository;
+    private final ExpenseRepository expenseRepository;
 
     // ── Approval Workflow ────────────────────────────────────────────
 
@@ -60,7 +62,15 @@ public class ExpenseApprovalService {
     }
 
     /**
-     * Approve expense at current level
+     * Approve expense at current level.
+     *
+     * EXP-1 fix (a): pass the completed level number to moveToNextLevel directly
+     * instead of re-querying isCurrentLevel (which was already set to false and saved
+     * before the query runs, making the original implementation always return level 0
+     * and loop back to level 1 forever).
+     *
+     * EXP-1 fix (b): when all levels are done, update Expense.status → APPROVED and
+     * set approvedDate (previously the Expense was never updated after full approval).
      */
     @Transactional
     public void approveExpense(Long expenseId, String approverId, String comment) {
@@ -71,21 +81,37 @@ public class ExpenseApprovalService {
             throw new RuntimeException("Not authorized to approve: " + approverId);
         }
 
+        int completedLevel = current.getApprovalLevel();
         current.setStatus(ExpenseApproval.ApprovalStatus.APPROVED);
         current.setActionDate(LocalDateTime.now());
         current.setComment(comment);
         current.setIsCurrentLevel(false);
         approvalRepository.save(current);
 
-        // Move to next level if exists
-        moveToNextLevel(expenseId);
+        // EXP-1 fix (a): pass completedLevel so we don't re-query the already-cleared row
+        boolean moreRemain = moveToNextLevel(expenseId, completedLevel);
+
+        // EXP-1 fix (b): if no more levels, mark the expense itself as APPROVED
+        if (!moreRemain) {
+            expenseRepository.findById(expenseId).ifPresent(e -> {
+                e.setStatus(Expense.ExpenseStatus.APPROVED);
+                e.setApprovedDate(LocalDateTime.now());
+                expenseRepository.save(e);
+                log.info("[Approval] Expense {} fully approved", expenseId);
+            });
+        }
 
         log.info("[Approval] Expense {} approved at level {} by {}",
-            expenseId, current.getApprovalLevel(), approverId);
+            expenseId, completedLevel, approverId);
     }
 
     /**
-     * Reject expense at current level
+     * Reject expense at current level.
+     *
+     * EXP-3 fix: update Expense.status → REJECTED after persisting the rejection
+     * (previously only the ExpenseApproval row was marked REJECTED; the parent
+     * Expense remained in SUBMITTED/PENDING_APPROVAL, making it invisible in the
+     * REJECTED filter and leaving it stuck in the approval queue).
      */
     @Transactional
     public void rejectExpense(Long expenseId, String approverId, String reason) {
@@ -102,6 +128,13 @@ public class ExpenseApprovalService {
         current.setIsCurrentLevel(false);
         approvalRepository.save(current);
 
+        // EXP-3 fix: propagate rejection status to the parent Expense
+        expenseRepository.findById(expenseId).ifPresent(e -> {
+            e.setStatus(Expense.ExpenseStatus.REJECTED);
+            e.setRejectionReason(reason);
+            expenseRepository.save(e);
+        });
+
         log.info("[Approval] Expense {} rejected at level {} by {}",
             expenseId, current.getApprovalLevel(), approverId);
     }
@@ -114,32 +147,33 @@ public class ExpenseApprovalService {
         ExpenseApproval current = approvalRepository.findByExpenseIdAndIsCurrentLevelTrue(expenseId)
             .orElseThrow(() -> new RuntimeException("No current approval level for expense: " + expenseId));
 
+        int completedLevel = current.getApprovalLevel();
         current.setStatus(ExpenseApproval.ApprovalStatus.ESCALATED);
         current.setActionDate(LocalDateTime.now());
         current.setComment(reason);
         current.setIsCurrentLevel(false);
         approvalRepository.save(current);
 
-        moveToNextLevel(expenseId);
+        moveToNextLevel(expenseId, completedLevel);
 
         log.info("[Approval] Expense {} escalated from level {}",
-            expenseId, current.getApprovalLevel());
+            expenseId, completedLevel);
     }
 
     /**
-     * Move approval to next level
-     * Returns true if more levels exist, false if fully approved
+     * Move approval to next level.
+     *
+     * EXP-1 fix: accepts the completedLevel directly (passed by caller) instead of
+     * re-querying isCurrentLevel which was already cleared before this method runs.
+     * The original re-query always returned 0 (empty → orElse(0)), causing level 0+1=1
+     * to be activated on every approval regardless of actual position in the chain.
+     *
+     * @param completedLevel the level that was just approved/escalated
+     * @return true if a next level was found and activated, false if chain is complete
      */
-    private boolean moveToNextLevel(Long expenseId) {
-        int currentLevel = approvalRepository.findByExpenseIdAndIsCurrentLevelTrue(expenseId)
-            .map(ExpenseApproval::getApprovalLevel)
-            .orElse(0);
-
-        // Try to find next level
+    private boolean moveToNextLevel(Long expenseId, int completedLevel) {
         Optional<ExpenseApproval> nextLevel = approvalRepository.findByExpenseIdAndApprovalLevel(
-            expenseId,
-            currentLevel + 1
-        );
+            expenseId, completedLevel + 1);
 
         if (nextLevel.isPresent()) {
             ExpenseApproval next = nextLevel.get();
@@ -148,7 +182,7 @@ public class ExpenseApprovalService {
             return true;
         }
 
-        // No more levels - approval complete
+        // No more levels — approval chain complete
         return false;
     }
 

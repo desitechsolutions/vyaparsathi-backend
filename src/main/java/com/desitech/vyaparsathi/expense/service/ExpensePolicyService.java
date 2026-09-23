@@ -3,6 +3,8 @@ package com.desitech.vyaparsathi.expense.service;
 import com.desitech.vyaparsathi.expense.entity.Expense;
 import com.desitech.vyaparsathi.expense.entity.ExpensePolicy;
 import com.desitech.vyaparsathi.expense.repository.ExpensePolicyRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,7 @@ import java.util.*;
 public class ExpensePolicyService {
 
     private final ExpensePolicyRepository policyRepository;
+    private final ObjectMapper objectMapper;
 
     // ── Policy CRUD ──────────────────────────────────────────────────
 
@@ -115,13 +118,28 @@ public class ExpensePolicyService {
                 break;
 
             case CATEGORY_RESTRICTION:
-                // Category explicitly restricted for this policy
-                return new PolicyViolation(
-                    policy.getId(),
-                    policy.getName(),
-                    "This category is restricted",
-                    policy.getEnforcementAction()
-                );
+                // EXP-6 fix: check whether this expense's category is actually in the
+                // restricted list. Previously every CATEGORY_RESTRICTION policy fired a
+                // violation unconditionally — affectedCategoriesJson was never consulted.
+                if (policy.getAffectedCategoriesJson() != null && expense.getExpenseCategoryId() != null) {
+                    try {
+                        List<Long> restricted = objectMapper.readValue(
+                            policy.getAffectedCategoriesJson(),
+                            new TypeReference<List<Long>>() {});
+                        if (restricted.contains(expense.getExpenseCategoryId())) {
+                            return new PolicyViolation(
+                                policy.getId(),
+                                policy.getName(),
+                                "Category is restricted by policy: " + policy.getName(),
+                                policy.getEnforcementAction()
+                            );
+                        }
+                    } catch (Exception e) {
+                        log.warn("[Policy] Could not parse affectedCategoriesJson for policy {}: {}",
+                            policy.getId(), e.getMessage());
+                    }
+                }
+                break;
 
             case FREQUENCY_LIMIT:
                 // TODO: Check frequency violations (e.g., max 5 dinners/week)

@@ -5,7 +5,6 @@ import com.desitech.vyaparsathi.expense.repository.ExpenseCategoryRepository;
 import com.desitech.vyaparsathi.expense.repository.ExpenseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -82,13 +81,9 @@ public class ExpenseCategoryService {
                 .filter(c -> c.getShop().getId().equals(shopId))
                 .orElseThrow(() -> new RuntimeException("Category not found: " + categoryId));
 
-        // Check if category has expenses (check DRAFT status as sample - could extend to all statuses)
-        long expenseCount = 0;
-        for (com.desitech.vyaparsathi.expense.entity.Expense.ExpenseStatus status : com.desitech.vyaparsathi.expense.entity.Expense.ExpenseStatus.values()) {
-            expenseCount += expenseRepository.findByShopIdAndCategoryAndStatus(
-                    shopId, categoryId, status, Pageable.unpaged()).getTotalElements();
-        }
-
+        // EXP-12 fix: use a single COUNT query instead of 7 paginated queries
+        // (one per ExpenseStatus value) that each loaded all matching rows unpaged.
+        long expenseCount = expenseRepository.countExpensesByShopAndCategory(shopId, categoryId);
         if (expenseCount > 0) {
             throw new RuntimeException("Cannot delete category with existing expenses");
         }

@@ -68,17 +68,11 @@ public class ShopInvitationController {
         Long shopId = TenantContext.getCurrentShopId();
         if (shopId == null) throw new IllegalStateException("No active shop context.");
         User inviter = currentUser(auth);
-
-        invitationService.createInvitation(
+        // createInvitation now returns the persisted entity so we skip the
+        // secondary list+filter round-trip (removes the RBAC-2 race window).
+        ShopInvitation created = invitationService.createInvitation(
                 shopId, req.getEmail(), req.getPhone(), req.getRoleName(), req.getMessage(), inviter);
-
-        // Re-fetch the invitation just created so the caller sees the fresh DTO (created_at, expires_at, etc.).
-        return invitationService.listForShop(shopId).stream()
-                .filter(inv -> req.getEmail().equalsIgnoreCase(inv.getEmail())
-                        && inv.getStatus() == ShopInvitation.Status.PENDING)
-                .findFirst()
-                .map(this::toDto)
-                .orElseThrow(() -> new IllegalStateException("Invitation created but could not be re-loaded."));
+        return toDto(created);
     }
 
     @GetMapping
@@ -92,8 +86,10 @@ public class ShopInvitationController {
     @DeleteMapping("/{id}")
     @RequirePermission("TEAM_INVITE")
     public ApiResponse<Void> revoke(@PathVariable Long id, Authentication auth) {
+        Long shopId = TenantContext.getCurrentShopId();
+        if (shopId == null) throw new IllegalStateException("No active shop context.");
         User actor = currentUser(auth);
-        invitationService.revoke(id, actor);
+        invitationService.revoke(id, shopId, actor);
         return new ApiResponse<>("success", "Invitation revoked.", null);
     }
 
@@ -130,15 +126,18 @@ public class ShopInvitationController {
     public ResponseEntity<?> accept(@org.springframework.web.bind.annotation.RequestBody AcceptRequest req,
                                     jakarta.servlet.http.HttpServletRequest httpRequest) {
         try {
-            User user = invitationService.acceptInvitation(
+            // acceptInvitation now returns both the user AND the shopId from the
+            // invitation (not user.getShop()) so the JWT is correct for existing
+            // users joining a second shop (RBAC-4 fix).
+            ShopInvitationService.AcceptResult result = invitationService.acceptInvitation(
                     req.getToken(), req.getFirstName(), req.getLastName(), req.getPassword());
+            User user = result.user();
+            Long acceptedShopId = result.shopId();
 
             // Auto-login: hand back an access token + refresh cookie so the FE
-            // can drop straight into the app once the invite is accepted. A
-            // brand-new session_id — this is their first login on this device.
+            // can drop straight into the app once the invite is accepted.
             var sessionMetadata = sessionService.newSessionMetadata(httpRequest);
-            String accessToken = jwtUtil.generateAccessToken(
-                    user, user.getShop() != null ? user.getShop().getId() : null,
+            String accessToken = jwtUtil.generateAccessToken(user, acceptedShopId,
                     sessionMetadata.getSessionId());
             String refreshToken = refreshTokenService.createRefreshToken(user.getUsername(), sessionMetadata).getToken();
 
@@ -151,8 +150,8 @@ public class ShopInvitationController {
             body.put("accessToken", accessToken);
             body.put("role", user.getRole() != null ? user.getRole().name() : null);
             body.put("username", user.getUsername());
-            body.put("shopId", user.getShop() != null ? user.getShop().getId() : null);
-            log.info("Shop invitation accepted by {}", user.getUsername());
+            body.put("shopId", acceptedShopId);
+            log.info("Shop invitation accepted by {} for shop {}", user.getUsername(), acceptedShopId);
             return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cookie.toString()).body(body);
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(new ApiResponse<>("error", e.getMessage(), null));

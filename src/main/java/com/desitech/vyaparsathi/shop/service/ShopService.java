@@ -72,6 +72,76 @@ public class ShopService {
         return completeOnboarding(dto, currentUser, logo, null);
     }
 
+    /**
+     * Create an additional shop for an already-onboarded user (MULTI-STORE-1).
+     *
+     * <p>The caller (existing authenticated OWNER) becomes the OWNER of the
+     * new shop. Their primary {@code users.shop_id} is intentionally NOT
+     * changed — the new shop exists as a second membership. A JWT scoped to
+     * the new shop is returned so the FE can switch to it immediately.
+     */
+    @Transactional
+    public ShopDto createAdditionalShop(ShopDto dto, User currentUser,
+                                        MultipartFile logo,
+                                        RefreshTokenService.SessionMetadata sessionMetadata) {
+        if (shopRepository.existsByCode(dto.getCode())) {
+            throw new IllegalArgumentException("Shop code '" + dto.getCode() + "' is already in use");
+        }
+
+        Shop shop = shopMapper.toEntity(dto);
+        shop.setActive(Boolean.TRUE);
+        shop.setDigitalSigningEnabled(Boolean.TRUE.equals(dto.getDigitalSigningEnabled()));
+        shop.setEInvoicingEnabled(Boolean.TRUE.equals(dto.getEInvoicingEnabled()));
+        shop.setEWayBillEnabled(Boolean.TRUE.equals(dto.getEWayBillEnabled()));
+        shop.setLowStockAlertsEnabled(Boolean.TRUE.equals(dto.getLowStockAlertsEnabled()));
+        shop.setLowStockSmsAlertsEnabled(Boolean.TRUE.equals(dto.getLowStockSmsAlertsEnabled()));
+        shop.setPoApprovalRequired(Boolean.TRUE.equals(dto.getPoApprovalRequired()));
+        shop.setIsCompositionScheme(Boolean.TRUE.equals(dto.getIsCompositionScheme()));
+        shop.setRequireMfaForAdmins(Boolean.TRUE.equals(dto.getRequireMfaForAdmins()));
+        shop.setPoApprovalThresholdAmount(
+                dto.getPoApprovalThresholdAmount() != null
+                        ? dto.getPoApprovalThresholdAmount()
+                        : java.math.BigDecimal.ZERO);
+
+        if (logo != null && !logo.isEmpty()) {
+            try {
+                UUID contextUuid = UUID.randomUUID();
+                String logoUrl = fileStorageService.storeFile(logo, "logos", contextUuid);
+                shop.setLogoPath(logoUrl);
+            } catch (Exception e) {
+                logger.error("Failed to save shop logo during additional shop creation", e);
+                throw new RuntimeException("Could not save logo file: " + e.getMessage(), e);
+            }
+        }
+
+        shop = shopRepository.saveAndFlush(shop);
+        final Long newShopId = shop.getId();
+
+        TenantContext.setCurrentShopId(newShopId);
+        try {
+            // Seed roles and create OWNER membership for the new shop.
+            roleSeedService.seedPresetRolesForShop(newShopId);
+            membershipService.addOrReactivate(currentUser, newShopId, "OWNER", null, false);
+            seedDefaultCategories(shop, dto.getIndustryType());
+        } finally {
+            TenantContext.clear();
+        }
+
+        String sid = sessionMetadata != null ? sessionMetadata.getSessionId()
+                : java.util.UUID.randomUUID().toString().replace("-", "");
+        RefreshTokenService.SessionMetadata effectiveMeta = sessionMetadata != null ? sessionMetadata
+                : new RefreshTokenService.SessionMetadata(sid, "Unknown device", null, null);
+        // JWT is scoped to the NEW shop so the FE can switch straight into it.
+        String newJwtToken = jwtUtil.generateAccessToken(currentUser, newShopId, sid);
+        String refreshToken = refreshTokenService.createRefreshToken(currentUser.getUsername(), effectiveMeta).getToken();
+        logger.info("Additional shop created: id={}, name={}, owner={}", newShopId, shop.getName(), currentUser.getUsername());
+
+        ShopDto shopDto = shopMapper.toDto(shop);
+        shopDto.setAccessToken(newJwtToken);
+        shopDto.setRefreshToken(refreshToken);
+        return shopDto;
+    }
+
     @Transactional
     public ShopDto completeOnboarding(ShopDto dto, User currentUser, MultipartFile logo,
                                       RefreshTokenService.SessionMetadata sessionMetadata) {

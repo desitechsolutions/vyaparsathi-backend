@@ -3,30 +3,34 @@ package com.desitech.vyaparsathi.auth.controller;
 import com.desitech.vyaparsathi.auth.dto.*;
 import com.desitech.vyaparsathi.auth.entity.RefreshToken;
 import com.desitech.vyaparsathi.auth.entity.User;
+import com.desitech.vyaparsathi.auth.repository.UserRepository;
 import com.desitech.vyaparsathi.auth.security.JwtUtil;
 import com.desitech.vyaparsathi.auth.service.PasswordResetTokenService;
 import com.desitech.vyaparsathi.auth.service.RefreshTokenService;
 import com.desitech.vyaparsathi.auth.service.UserManagementService;
 import com.desitech.vyaparsathi.common.exception.ApplicationException;
 import com.desitech.vyaparsathi.common.payload.ApiResponse;
+import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.desitech.vyaparsathi.auth.service.AuthService;
-import com.desitech.vyaparsathi.auth.service.RefreshTokenService;
 import com.desitech.vyaparsathi.auth.service.SessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Size;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @RestController
@@ -77,6 +81,9 @@ public class AuthController {
 
     @Autowired
     private SessionService sessionService;
+
+    @Autowired
+    private UserRepository userRepository;
 
     private ResponseCookie buildRefreshCookie(String value, Duration maxAge) {
         return ResponseCookie.from(COOKIE_NAME, value == null ? "" : value)
@@ -336,6 +343,62 @@ public class AuthController {
      * intentionally identical whether or not the email exists, to avoid
      * enumerating users.
      */
+    // ─── Current-user profile ────────────────────────────────────────────
+
+    /**
+     * Returns basic profile information for the signed-in user.
+     * Includes {@code authProvider} so the frontend can adapt the UI for
+     * OAuth-only accounts (hide "current password" field, etc.).
+     */
+    @GetMapping("/me")
+    public ResponseEntity<Map<String, Object>> me(Authentication auth) {
+        if (auth == null || auth.getName() == null) {
+            return ResponseEntity.status(401).build();
+        }
+        User user = userRepository.findByUsername(auth.getName())
+                .orElseThrow(() -> new ApplicationException("User not found"));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("username", user.getUsername());
+        body.put("email", user.getEmail());
+        body.put("firstName", user.getFirstName());
+        body.put("lastName", user.getLastName());
+        body.put("phone", user.getPhone());
+        body.put("role", user.getRole() != null ? user.getRole().name() : null);
+        body.put("authProvider", user.getAuthProvider() != null ? user.getAuthProvider().name() : "LOCAL");
+        body.put("emailVerified", user.isEmailVerified());
+        body.put("lastLoginAt", user.getLastLoginAt());
+        body.put("lastPasswordChangeAt", user.getLastPasswordChangeAt());
+        return ResponseEntity.ok(body);
+    }
+
+    /**
+     * Update the signed-in user's own profile (firstName, lastName, phone only).
+     * Email and username are immutable from this endpoint.
+     */
+    @PatchMapping("/me")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> updateMe(
+            @RequestBody UpdateMeRequest req, Authentication auth) {
+        if (auth == null || auth.getName() == null) {
+            return ResponseEntity.status(401).build();
+        }
+        User user = userRepository.findByUsername(auth.getName())
+                .orElseThrow(() -> new ApplicationException("User not found"));
+        if (req.getFirstName() != null) user.setFirstName(req.getFirstName().trim());
+        if (req.getLastName()  != null) user.setLastName(req.getLastName().trim());
+        if (req.getPhone()     != null) user.setPhone(req.getPhone().trim().isEmpty() ? null : req.getPhone().trim());
+        userRepository.save(user);
+        logger.info("Profile updated for user {}", user.getUsername());
+        return me(auth);
+    }
+
+    @Data
+    public static class UpdateMeRequest {
+        @Size(max = 100) private String firstName;
+        @Size(max = 100) private String lastName;
+        @Size(max = 30)  private String phone;
+    }
+
     @PostMapping("/resend-verification")
     public ResponseEntity<ApiResponse<String>> resendVerification(@RequestBody Map<String, String> body) {
         String email = body != null ? body.get("email") : null;

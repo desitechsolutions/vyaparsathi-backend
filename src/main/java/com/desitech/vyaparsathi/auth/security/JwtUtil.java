@@ -82,6 +82,10 @@ public class JwtUtil {
                 .claim("role", user.getRole().name())
                 .claim("firstName", user.getFirstName())
                 .claim("lastName", user.getLastName())
+                // authProvider lets the frontend adapt UI for OAuth vs LOCAL accounts
+                // (e.g. hide "current password" field for Google users).
+                .claim("authProvider", user.getAuthProvider() != null
+                        ? user.getAuthProvider().name() : "LOCAL")
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + jwtExpirationMs));
 

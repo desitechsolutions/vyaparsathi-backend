@@ -70,13 +70,14 @@ public class ShopInvitationService {
     // ─── Create ──────────────────────────────────────────────────────────
 
     /**
-     * Creates an invitation and emails it. Returns the raw token only
-     * (never persisted). Called by the shop-invitation controller.
+     * Creates an invitation and emails it. Returns the persisted
+     * {@link ShopInvitation} entity (RBAC-2 fix: caller no longer needs a
+     * secondary list+filter round-trip to build the response DTO).
      */
     @CheckSubscriptionLimit("STAFF")
     @Transactional
-    public String createInvitation(Long shopId, String email, String phone, String roleName,
-                                   String message, User inviter) {
+    public ShopInvitation createInvitation(Long shopId, String email, String phone, String roleName,
+                                           String message, User inviter) {
         if (shopId == null) throw new IllegalArgumentException("shopId is required.");
         if (email == null || email.isBlank()) throw new IllegalArgumentException("Email is required.");
         if (roleName == null || roleName.isBlank()) throw new IllegalArgumentException("Role is required.");
@@ -103,17 +104,26 @@ public class ShopInvitationService {
         invite.setStatus(ShopInvitation.Status.PENDING);
         invite.setMessage(message);
         invite.setExpiresAt(LocalDateTime.now().plusHours(TTL_HOURS));
-        repository.save(invite);
+        ShopInvitation saved = repository.save(invite);
 
         try {
-            sendInvitationEmail(invite, rawToken, shopId);
+            sendInvitationEmail(saved, rawToken, shopId);
         } catch (MessagingException e) {
             // Non-fatal: the token still stands, and the caller can trigger a resend.
             log.error("Failed to send shop invitation email to {}: {}", email, e.getMessage());
         }
 
-        return rawToken;
+        return saved;
     }
+
+    // ─── AcceptResult record ─────────────────────────────────────────────
+
+    /**
+     * Carries both the authenticated user and the shopId that was accepted
+     * (RBAC-4 fix: the shopId comes from the invitation, not from user.getShop(),
+     * so existing users joining a second shop get the correct JWT).
+     */
+    public record AcceptResult(User user, Long shopId) {}
 
     // ─── Lookup ──────────────────────────────────────────────────────────
 
@@ -146,21 +156,25 @@ public class ShopInvitationService {
      *     mark the email verified (proof-of-inbox came via clicking the
      *     invite link), and add the membership.
      *
-     * Returns the resulting user so the controller can hand back an
-     * access token for immediate sign-in.
+     * Returns an {@link AcceptResult} containing the user AND the shopId
+     * from the invitation (RBAC-4 fix: always use invite.getShopId() for
+     * the JWT — not user.getShop() which points to their primary shop).
      */
     @Transactional
-    public User acceptInvitation(String rawToken, String firstName, String lastName, String password) {
+    public AcceptResult acceptInvitation(String rawToken, String firstName, String lastName, String password) {
         ShopInvitation invite = findByRawToken(rawToken)
                 .orElseThrow(() -> new IllegalArgumentException("This invitation link is invalid."));
         assertAcceptable(invite);
+
+        // Capture the intended shop from the invitation before any user mutation.
+        Long acceptedShopId = invite.getShopId();
 
         // Existing user path — link an existing account to the new shop.
         Optional<User> existing = userRepository.findByEmail(invite.getEmail());
         User user;
         if (existing.isPresent()) {
             user = existing.get();
-            log.info("Shop invitation accept: linking existing user {} to shop {}", user.getUsername(), invite.getShopId());
+            log.info("Shop invitation accept: linking existing user {} to shop {}", user.getUsername(), acceptedShopId);
         } else {
             // New user path — email + password combo required.
             if (password == null || password.isBlank()) {
@@ -179,17 +193,17 @@ public class ShopInvitationService {
             user.setEmailVerified(true); // clicking the invite link proves ownership
             user = userRepository.save(user);
             passwordHistoryService.recordHash(user.getId(), user.getPasswordHash());
-            log.info("Shop invitation accept: created user {} and linked to shop {}", user.getUsername(), invite.getShopId());
+            log.info("Shop invitation accept: created user {} and linked to shop {}", user.getUsername(), acceptedShopId);
         }
 
         // Attach the membership. Not the default shop unless the user has no shop yet.
         boolean makeDefault = user.getShop() == null;
-        membershipService.addOrReactivate(user, invite.getShopId(), invite.getRoleName(), invite.getInvitedBy(), makeDefault);
+        membershipService.addOrReactivate(user, acceptedShopId, invite.getRoleName(), invite.getInvitedBy(), makeDefault);
 
         // If this became their default (no shop before), also point users.shop_id
         // at it so legacy code that reads user.getShop() picks it up.
         if (makeDefault) {
-            shopRepository.findById(invite.getShopId()).ifPresent(user::setShop);
+            shopRepository.findById(acceptedShopId).ifPresent(user::setShop);
             userRepository.save(user);
         }
 
@@ -198,15 +212,19 @@ public class ShopInvitationService {
         invite.setAcceptedByUserId(user.getId());
         repository.save(invite);
 
-        return user;
+        return new AcceptResult(user, acceptedShopId);
     }
 
     // ─── Revoke ──────────────────────────────────────────────────────────
 
     @Transactional
-    public void revoke(Long invitationId, User actor) {
+    public void revoke(Long invitationId, Long shopId, User actor) {
         ShopInvitation invite = repository.findById(invitationId)
                 .orElseThrow(() -> new IllegalArgumentException("Invitation not found."));
+        // Tenant ownership check — prevents cross-shop IDOR revocation.
+        if (!shopId.equals(invite.getShopId())) {
+            throw new IllegalArgumentException("Invitation not found.");
+        }
         if (invite.getStatus() != ShopInvitation.Status.PENDING) {
             throw new IllegalStateException("Only pending invitations can be revoked.");
         }

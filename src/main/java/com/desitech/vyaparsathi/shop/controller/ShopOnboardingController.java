@@ -109,6 +109,46 @@ public class ShopOnboardingController {
     }
 
     /**
+     * Create a second (or subsequent) shop for an already-onboarded user.
+     * MULTI-STORE-1 fix.
+     *
+     * <p>Requires OWNER role. The new shop is created with the caller as OWNER
+     * and a membership row is added without changing their primary shop.
+     * The response contains a JWT scoped to the new shop so the FE can
+     * immediately switch to it.
+     */
+    @PostMapping(value = "/additional", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('OWNER')")
+    public ResponseEntity<ShopDto> createAdditionalShop(
+            @Valid @ModelAttribute ShopDto dto,
+            @RequestParam(value = "logo", required = false) MultipartFile logo,
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            HttpServletRequest httpRequest) {
+        User currentUser = userDetails.getUser();
+        logger.info("Additional shop creation requested by user={}", currentUser.getUsername());
+
+        var sessionMetadata = sessionService.newSessionMetadata(httpRequest);
+        ShopDto createdShop = shopService.createAdditionalShop(dto, currentUser, logo, sessionMetadata);
+
+        logger.info("Additional shop created: shopId={} for user={}", createdShop.getId(), currentUser.getUsername());
+
+        String refreshToken = createdShop.getRefreshToken();
+        if (refreshToken != null && !refreshToken.isBlank()) {
+            ResponseCookie refreshCookie = ResponseCookie.from(COOKIE_NAME, refreshToken)
+                    .httpOnly(true)
+                    .secure(cookieSecure)
+                    .path(cookiePath)
+                    .sameSite(cookieSameSite)
+                    .maxAge(REFRESH_COOKIE_TTL)
+                    .build();
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, refreshCookie.toString())
+                    .body(createdShop);
+        }
+        return ResponseEntity.ok(createdShop);
+    }
+
+    /**
      * Endpoint to update an existing shop's details including branding.
      * Accessible only to the 'OWNER' role.
      * @param dto The DTO containing updated shop details.

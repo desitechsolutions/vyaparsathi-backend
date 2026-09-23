@@ -48,6 +48,16 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
     @Value("${app.auth.cookie.same-site:Lax}")
     private String cookieSameSite;
 
+    /**
+     * Must match {@code AuthController.cookiePath} so that the clear-cookie
+     * response on logout (which uses the same property) actually matches and
+     * evicts this cookie. A path mismatch causes the browser to silently keep
+     * the OAuth2 refresh cookie alive after logout, leading to a revoked token
+     * being replayed on the next refresh and triggering a 401 auto-logout.
+     */
+    @Value("${app.auth.cookie.path:/}")
+    private String cookiePath;
+
     public OAuth2AuthenticationSuccessHandler(JwtUtil jwtUtil,
                                               RefreshTokenService refreshTokenService) {
         this.jwtUtil = jwtUtil;
@@ -78,7 +88,7 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
         ResponseCookie refreshCookie = ResponseCookie.from(REFRESH_COOKIE_NAME, rawRefresh)
                 .httpOnly(true)
                 .secure(cookieSecure)
-                .path("/api/auth")
+                .path(cookiePath)
                 .sameSite(cookieSameSite)
                 .maxAge(REFRESH_COOKIE_TTL)
                 .build();

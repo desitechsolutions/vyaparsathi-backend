@@ -217,8 +217,10 @@ public class ExpenseService {
 
     @Transactional(readOnly = true)
     public long getTotalExpensesCount(Long shopId) {
-        return repository.findByShopIdAndNotDeleted(shopId, Pageable.unpaged())
-                .getTotalElements();
+        // EXP-DASH fix: use a COUNT query instead of loading ALL expenses into
+        // memory with Pageable.unpaged() just to call getTotalElements().
+        // The previous approach caused a 500 timeout on shops with many records.
+        return repository.countByShopIdAndNotDeleted(shopId);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────

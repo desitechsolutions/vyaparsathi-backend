@@ -23,6 +23,11 @@ public interface ExpenseRepository extends BaseRepository<Expense, Long> {
     @Query("SELECT e FROM Expense e WHERE e.isDeleted = false AND e.shop.id = :shopId")
     Page<Expense> findByShopIdAndNotDeleted(@Param("shopId") Long shopId, Pageable pageable);
 
+    /** EXP-DASH fix: COUNT-only query — avoids the full table scan of Pageable.unpaged(). */
+    @Query("SELECT COUNT(e) FROM Expense e WHERE e.shop.id = :shopId AND e.isDeleted = false")
+    long countByShopIdAndNotDeleted(@Param("shopId") Long shopId);
+
+
     Optional<Expense> findByIdAndIsDeletedFalse(Long id);
 
     List<Expense> findByDateBetweenAndIsDeletedFalse(LocalDateTime start, LocalDateTime end);

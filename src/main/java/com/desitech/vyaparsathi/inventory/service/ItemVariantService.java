@@ -176,8 +176,9 @@ public class ItemVariantService {
             String sku, String attribute1, String attribute2, String fit, String specifications) {
 
         // 1. Call the corrected repository method with all parameters
+        Long shopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
         List<ItemVariant> variants = itemVariantRepository.searchVariants(
-                name, categoryName, color, size, design, sku, attribute1, attribute2, fit, specifications);
+                shopId, name, categoryName, color, size, design, sku, attribute1, attribute2, fit, specifications);
 
         if (variants.isEmpty()) {
             return List.of();

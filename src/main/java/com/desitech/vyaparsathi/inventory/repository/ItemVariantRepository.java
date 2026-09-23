@@ -50,7 +50,15 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
      * are kept for caller-source compatibility but the underlying JPQL now
      * targets the canonical attribute columns.
      */
+    /**
+     * STK-6: shop scope added explicitly as defense-in-depth.
+     * The Hibernate shopFilter is also active at the session level via ShopFilterAspect,
+     * but an explicit predicate ensures correctness even if the aspect is bypassed
+     * (e.g. in tests, scheduled tasks, or direct service-to-service calls).
+     * Callers must supply shopId = TenantContext.getCurrentShopId().
+     */
     @Query("SELECT iv FROM ItemVariant iv JOIN iv.item i LEFT JOIN i.category c WHERE " +
+            "iv.shop.id = :shopId AND " +
             "iv.active = true AND i.active = true AND " +
             "(:name IS NULL OR i.name LIKE %:name%) AND " +
             "(:categoryName IS NULL OR c.name LIKE %:categoryName%) AND " +
@@ -63,6 +71,7 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
             "(:fit IS NULL OR iv.fit LIKE %:fit%) AND " +
             "(:specifications IS NULL OR i.specifications LIKE %:specifications%)")
     List<ItemVariant> searchVariants(
+            @Param("shopId") Long shopId,
             @Param("name") String name,
             @Param("categoryName") String categoryName,
             @Param("color") String color,
@@ -88,12 +97,18 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
      * rules can leave {@code lowStockThreshold} null and only configure the
      * new fields — this query keeps those variants in the alerts pool.
      */
+    /**
+     * STK-7: shop scope added explicitly. The scheduler iterates shops and sets
+     * TenantContext per shop, but an explicit predicate makes intent clear and
+     * protects against future scheduler refactors that might omit TenantContext.
+     * The Hibernate shopFilter is still active via ShopFilterAspect as a second layer.
+     */
     @Query("SELECT iv FROM ItemVariant iv " +
             "JOIN FETCH iv.item i " +
             "LEFT JOIN FETCH iv.preferredSupplier ps " +
-            "WHERE iv.active = true AND " +
+            "WHERE iv.shop.id = :shopId AND iv.active = true AND " +
             "(iv.lowStockThreshold IS NOT NULL OR iv.reorderPoint IS NOT NULL)")
-    List<ItemVariant> findAllForLowStockAlerting();
+    List<ItemVariant> findAllForLowStockAlerting(@Param("shopId") Long shopId);
 
     /**
      * Finds all ItemVariants belonging to a specific shop.
@@ -123,7 +138,10 @@ public interface ItemVariantRepository extends BaseRepository<ItemVariant, Long>
      * @param cutoffDate the date up to which items are considered near-expiry or expired
      * @return list of item variants expiring at or before cutoffDate
      */
-    @Query("SELECT iv FROM ItemVariant iv WHERE iv.expiryDate IS NOT NULL AND iv.expiryDate <= :cutoffDate")
-    List<ItemVariant> findByExpiryDateOnOrBefore(@Param("cutoffDate") LocalDate cutoffDate);
+    /**
+     * STK-7: explicit shop scope for defense-in-depth. Callers supply shopId from TenantContext.
+     */
+    @Query("SELECT iv FROM ItemVariant iv WHERE iv.shop.id = :shopId AND iv.expiryDate IS NOT NULL AND iv.expiryDate <= :cutoffDate")
+    List<ItemVariant> findByExpiryDateOnOrBefore(@Param("shopId") Long shopId, @Param("cutoffDate") LocalDate cutoffDate);
 
 }

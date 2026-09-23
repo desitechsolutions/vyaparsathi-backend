@@ -61,9 +61,21 @@ public class StockTransferService {
     /**
      * Creates a new PENDING stock transfer. No stock is moved at this point.
      * Call {@link #executeTransfer(Long)} to actually move the stock.
+     *
+     * <p>STK-9: fromShopId is always taken from TenantContext (the authenticated
+     * user's current shop) and must not be supplied by the caller. The request
+     * DTO's fromShopId field is therefore ignored here. toShopId must not equal
+     * the current shop to prevent same-shop self-transfers.
      */
     @Transactional
     public StockTransferDto createTransfer(StockTransferCreateDto request) {
+        // STK-9: always use the authenticated tenant's shop as source — ignore
+        // any fromShopId in the request body to prevent IDOR/cross-tenant stock theft.
+        Long currentShopId = TenantContext.getCurrentShopId();
+        if (currentShopId == null) {
+            throw new com.desitech.vyaparsathi.common.exception.BusinessValidationException("No shop context — cannot create transfer");
+        }
+        request.setFromShopId(currentShopId);
         validateCreateRequest(request);
 
         Shop fromShop = shopRepository.findById(request.getFromShopId())
@@ -102,13 +114,17 @@ public class StockTransferService {
     // -------------------------------------------------------------------------
 
     /**
-     * Executes a PENDING transfer:
+     * Executes a PENDING transfer (immediate path — no in-transit phase):
      * <ol>
      *   <li>Validates source shop has sufficient stock for every line item.</li>
      *   <li>Records TRANSFER_OUT movements in the source shop.</li>
      *   <li>Records TRANSFER_IN movements in the destination shop.</li>
      *   <li>Marks the transfer as COMPLETED.</li>
      * </ol>
+     *
+     * <p>TenantContext is temporarily switched per movement and always
+     * restored to the original value in a finally block so that subsequent
+     * repository calls in the same request thread are not affected (STK-4).
      */
     @Transactional
     public StockTransferDto executeTransfer(Long transferId) {
@@ -122,6 +138,7 @@ public class StockTransferService {
 
         Long fromShopId = transfer.getFromShop().getId();
         Long toShopId   = transfer.getToShop().getId();
+        Long originalShopId = TenantContext.getCurrentShopId();
 
         // --- Phase 1: Validate all lines have sufficient stock in source shop ---
         for (StockTransferItem line : transfer.getItems()) {
@@ -133,26 +150,32 @@ public class StockTransferService {
             }
         }
 
-        // --- Phase 2: Record movements ---
+        // --- Phase 2: Record movements (switch TenantContext per direction) ---
         String note = "Transfer " + transfer.getTransferNumber();
         String reference = "Stock Transfer";
 
-        for (StockTransferItem line : transfer.getItems()) {
-            ItemVariant variant = line.getItemVariant();
-            BigDecimal qty = line.getQuantity();
+        try {
+            for (StockTransferItem line : transfer.getItems()) {
+                ItemVariant variant = line.getItemVariant();
+                BigDecimal qty = line.getQuantity();
 
-            // TRANSFER_OUT: deduct from source shop (TenantContext is already set to fromShopId by the filter)
-            TenantContext.setCurrentShopId(fromShopId);
-            stockService.deductStock(variant.getId(), qty, note, reference);
+                // TRANSFER_OUT: deduct from source shop
+                TenantContext.setCurrentShopId(fromShopId);
+                stockService.deductStock(variant.getId(), qty, note, reference);
 
-            // TRANSFER_IN: add to destination shop
-            TenantContext.setCurrentShopId(toShopId);
-            StockAddDto addDto = new StockAddDto();
-            addDto.setItemVariantId(variant.getId());
-            addDto.setQuantity(qty);
-            addDto.setBatch(line.getBatchNumber());
-            addDto.setCostPerUnit(BigDecimal.ZERO); // cost stays in source; zero-cost receipt at destination
-            stockService.addStockFromDto(addDto);
+                // TRANSFER_IN: add to destination shop
+                TenantContext.setCurrentShopId(toShopId);
+                StockAddDto addDto = new StockAddDto();
+                addDto.setItemVariantId(variant.getId());
+                addDto.setQuantity(qty);
+                addDto.setBatch(line.getBatchNumber());
+                addDto.setCostPerUnit(BigDecimal.ZERO); // cost stays in source; zero-cost receipt at destination
+                stockService.addStockFromDto(addDto);
+            }
+        } finally {
+            // STK-4: Always restore original TenantContext so subsequent calls in
+            // the same request thread are scoped to the correct shop.
+            TenantContext.setCurrentShopId(originalShopId);
         }
 
         // --- Phase 3: Mark completed ---
@@ -244,7 +267,13 @@ public class StockTransferService {
         return toDto(transferRepository.save(transfer));
     }
 
-    /** Marks an approved transfer as dispatched — stock leaves origin but not yet arrived. */
+    /**
+     * Marks an approved transfer as dispatched — deducts stock from origin and
+     * sets status to IN_TRANSIT. Stock is credited to the destination shop only
+     * when the receiving shop calls {@link #confirmArrival(Long)} (STK-1 fix).
+     *
+     * <p>TenantContext is always restored to its original value (STK-4 fix).
+     */
     @Transactional
     public StockTransferDto dispatch(Long transferId) {
         StockTransfer transfer = transferRepository.findById(transferId)
@@ -252,16 +281,44 @@ public class StockTransferService {
         if (transfer.getStatus() != StockTransferStatus.PENDING) {
             throw new BusinessValidationException("Only PENDING transfers can be dispatched.");
         }
-        // Delegates to executeTransfer to emit the DEDUCT movements at origin,
-        // then flips status to IN_TRANSIT (executeTransfer sets COMPLETED, so
-        // we override afterwards). The corresponding ADD movements land at the
-        // destination when the receiving shop calls confirmArrival.
-        executeTransfer(transferId);
+
+        Long fromShopId = transfer.getFromShop().getId();
+        Long originalShopId = TenantContext.getCurrentShopId();
+        String note = "Dispatch " + transfer.getTransferNumber();
+        String reference = "Stock Transfer";
+
+        // Validate sufficient stock at origin before touching any state
+        for (StockTransferItem line : transfer.getItems()) {
+            BigDecimal available = stockService.getCurrentStock(line.getItemVariant().getId());
+            if (available.compareTo(line.getQuantity()) < 0) {
+                throw new InsufficientStockException(
+                        "Insufficient stock for variant " + line.getItemVariant().getSku()
+                        + ". Available: " + available + ", requested: " + line.getQuantity());
+            }
+        }
+
+        try {
+            // TRANSFER_OUT only — credit happens at confirmArrival
+            TenantContext.setCurrentShopId(fromShopId);
+            for (StockTransferItem line : transfer.getItems()) {
+                stockService.deductStock(line.getItemVariant().getId(), line.getQuantity(), note, reference);
+            }
+        } finally {
+            TenantContext.setCurrentShopId(originalShopId);
+        }
+
         transfer.setStatus(StockTransferStatus.IN_TRANSIT);
         transfer.setInTransitAt(LocalDateTime.now());
-        return toDto(transferRepository.save(transfer));
+        StockTransfer saved = transferRepository.save(transfer);
+        log.info("Dispatched stock transfer {} – stock deducted from shop {}", saved.getTransferNumber(), fromShopId);
+        return toDto(saved);
     }
 
+    /**
+     * Confirms receipt at the destination — credits stock into the destination
+     * shop and marks the transfer COMPLETED (STK-1 fix: stock arrives here,
+     * not at dispatch time).
+     */
     @Transactional
     public StockTransferDto confirmArrival(Long transferId) {
         StockTransfer transfer = transferRepository.findById(transferId)
@@ -269,9 +326,30 @@ public class StockTransferService {
         if (transfer.getStatus() != StockTransferStatus.IN_TRANSIT) {
             throw new BusinessValidationException("Only IN_TRANSIT transfers can be received.");
         }
+
+        Long toShopId = transfer.getToShop().getId();
+        Long originalShopId = TenantContext.getCurrentShopId();
+        String note = "Receipt " + transfer.getTransferNumber();
+
+        try {
+            TenantContext.setCurrentShopId(toShopId);
+            for (StockTransferItem line : transfer.getItems()) {
+                StockAddDto addDto = new StockAddDto();
+                addDto.setItemVariantId(line.getItemVariant().getId());
+                addDto.setQuantity(line.getQuantity());
+                addDto.setBatch(line.getBatchNumber());
+                addDto.setCostPerUnit(BigDecimal.ZERO);
+                stockService.addStockFromDto(addDto);
+            }
+        } finally {
+            TenantContext.setCurrentShopId(originalShopId);
+        }
+
         transfer.setStatus(StockTransferStatus.COMPLETED);
         transfer.setReceivedAt(LocalDateTime.now());
-        return toDto(transferRepository.save(transfer));
+        StockTransfer saved = transferRepository.save(transfer);
+        log.info("Confirmed arrival for stock transfer {} – stock credited to shop {}", saved.getTransferNumber(), toShopId);
+        return toDto(saved);
     }
 
     // -------------------------------------------------------------------------

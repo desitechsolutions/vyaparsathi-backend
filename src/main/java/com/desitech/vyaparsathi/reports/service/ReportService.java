@@ -803,7 +803,8 @@ public class ReportService {
      */
     public List<ExpiryReportItemDto> getExpiryReport(int days) {
         LocalDate cutoffDate = LocalDate.now().plusDays(days);
-        List<ItemVariant> expiringVariants = itemVariantRepository.findByExpiryDateOnOrBefore(cutoffDate);
+        Long shopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        List<ItemVariant> expiringVariants = itemVariantRepository.findByExpiryDateOnOrBefore(shopId, cutoffDate);
 
         if (expiringVariants.isEmpty()) {
             return Collections.emptyList();

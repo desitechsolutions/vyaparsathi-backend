@@ -477,7 +477,8 @@ public class StockService {
     public List<LowStockAlertDto> getLowStockAlerts() {
         // V79: also include variants that only set reorderPoint (no legacy
         // lowStockThreshold). See ItemVariantRepository.findAllForLowStockAlerting.
-        List<ItemVariant> variantsWithThreshold = itemVariantRepository.findAllForLowStockAlerting();
+        Long shopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        List<ItemVariant> variantsWithThreshold = itemVariantRepository.findAllForLowStockAlerting(shopId);
         if (variantsWithThreshold.isEmpty()) {
             return List.of();
         }
@@ -764,7 +765,8 @@ public class StockService {
      */
     public List<ExpiryAlertDto> getExpiryAlerts(int daysBeforeExpiry) {
         LocalDate cutoffDate = LocalDate.now().plusDays(daysBeforeExpiry);
-        List<ItemVariant> expiringVariants = itemVariantRepository.findByExpiryDateOnOrBefore(cutoffDate);
+        Long shopId = com.desitech.vyaparsathi.common.configs.TenantContext.getCurrentShopId();
+        List<ItemVariant> expiringVariants = itemVariantRepository.findByExpiryDateOnOrBefore(shopId, cutoffDate);
 
         if (expiringVariants.isEmpty()) {
             return Collections.emptyList();

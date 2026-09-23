@@ -21,9 +21,17 @@ import java.util.List;
 
 @Entity
 @NoArgsConstructor
-@Table(name = "sale")
+@Table(
+    name = "sale",
+    uniqueConstraints = {
+        // invoice_no must be unique within a shop, not globally.
+        // A global unique constraint blocks Shop B from using INV/26-27/00001
+        // when Shop A already has it. Fixed by V144 migration.
+        @UniqueConstraint(name = "uq_sale_shop_invoice_no", columnNames = {"shop_id", "invoice_no"})
+    }
+)
 public class Sale extends AuditableFinancialEntity {
-    @Column(name = "invoice_no", nullable = false, unique = true, length = 50)
+    @Column(name = "invoice_no", nullable = false, length = 50)
     private String invoiceNo;
 
     @Convert(converter = LocalDateTimeAttributeConverter.class)

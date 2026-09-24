@@ -7,6 +7,7 @@ import com.desitech.vyaparsathi.customer.entity.CustomerLedger;
 import com.desitech.vyaparsathi.customer.entity.CustomerLedgerType;
 import com.desitech.vyaparsathi.customer.repository.CustomerLedgerRepository;
 import com.desitech.vyaparsathi.payment.entity.Payment;
+import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
 import com.desitech.vyaparsathi.payment.repository.PaymentRepository;
 import com.desitech.vyaparsathi.sales.entity.Sale;
@@ -24,7 +25,11 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Assembles a unified statement of account from real transactional
@@ -278,18 +283,37 @@ public class CustomerStatementBuilder {
         s.closingBalance = running;
 
         // ─── Aging on OPEN invoices (regardless of the statement date
-        // range — aging is always current-as-of-today). ────────────────
+        // range — aging is always current-as-of-today). ─────────────────
+        // Use due = totalAmount - paid so PARTIALLY_PAID invoices contribute
+        // only their remaining balance, not the full invoice total.
         LocalDate today = LocalDate.now();
+        Set<Long> agingOpenIds = sales.stream()
+                .filter(sale -> sale.getStatus() != SaleStatus.CANCELLED
+                        && (sale.getPaymentStatus() == PaymentStatus.PENDING
+                            || sale.getPaymentStatus() == PaymentStatus.PARTIALLY_PAID))
+                .map(Sale::getId)
+                .collect(Collectors.toSet());
+        Map<Long, BigDecimal> agingPaidById = new HashMap<>();
+        if (!agingOpenIds.isEmpty()) {
+            List<Object[]> rows = paymentRepo.sumPaymentsBySaleIds(agingOpenIds, PaymentSourceType.SALE);
+            for (Object[] row : rows) {
+                Long sid = ((Number) row[0]).longValue();
+                BigDecimal paid = row[1] instanceof BigDecimal ? (BigDecimal) row[1]
+                        : BigDecimal.valueOf(((Number) row[1]).doubleValue());
+                agingPaidById.put(sid, paid);
+            }
+        }
         for (Sale sale : sales) {
             if (sale.getStatus() == SaleStatus.CANCELLED) continue;
             if (sale.getPaymentStatus() != PaymentStatus.PENDING && sale.getPaymentStatus() != PaymentStatus.PARTIALLY_PAID) continue;
             LocalDate invDate = sale.getDate() != null ? sale.getDate().toLocalDate() : today;
             long days = ChronoUnit.DAYS.between(invDate, today);
-            BigDecimal amt = nz(sale.getTotalAmount());
-            if (days <= 30)      s.aging.current = s.aging.current.add(amt);
-            else if (days <= 60) s.aging.bucket31_60 = s.aging.bucket31_60.add(amt);
-            else if (days <= 90) s.aging.bucket61_90 = s.aging.bucket61_90.add(amt);
-            else                 s.aging.bucket90Plus = s.aging.bucket90Plus.add(amt);
+            BigDecimal paid = agingPaidById.getOrDefault(sale.getId(), BigDecimal.ZERO);
+            BigDecimal due = nz(sale.getTotalAmount()).subtract(paid).max(BigDecimal.ZERO);
+            if (days <= 30)      s.aging.current = s.aging.current.add(due);
+            else if (days <= 60) s.aging.bucket31_60 = s.aging.bucket31_60.add(due);
+            else if (days <= 90) s.aging.bucket61_90 = s.aging.bucket61_90.add(due);
+            else                 s.aging.bucket90Plus = s.aging.bucket90Plus.add(due);
         }
 
         return s;

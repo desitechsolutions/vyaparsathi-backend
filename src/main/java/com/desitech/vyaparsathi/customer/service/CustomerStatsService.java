@@ -5,6 +5,7 @@ import com.desitech.vyaparsathi.accounting.repository.CreditNoteRepository;
 import com.desitech.vyaparsathi.common.configs.TenantContext;
 import com.desitech.vyaparsathi.customer.dto.CustomerStatsDto;
 import com.desitech.vyaparsathi.payment.entity.Payment;
+import com.desitech.vyaparsathi.payment.enums.PaymentSourceType;
 import com.desitech.vyaparsathi.payment.enums.PaymentStatus;
 import com.desitech.vyaparsathi.payment.repository.PaymentRepository;
 import com.desitech.vyaparsathi.quotation.entity.Quotation;
@@ -22,7 +23,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Aggregated per-customer analytics for the enterprise Customer detail
@@ -81,20 +86,44 @@ public class CustomerStatsService {
         LocalDate first = null, last = null;
         LocalDate today = LocalDate.now();
 
+        // Bulk-fetch paid amounts for all open sales in one query so we can
+        // compute due = totalAmount - paid, rather than using the full invoice
+        // total for PARTIALLY_PAID invoices (which inflated outstanding).
+        Set<Long> openSaleIds = sales.stream()
+                .filter(s -> s.getStatus() != SaleStatus.CANCELLED
+                        && (s.getPaymentStatus() == PaymentStatus.PENDING
+                            || s.getPaymentStatus() == PaymentStatus.PARTIALLY_PAID))
+                .map(Sale::getId)
+                .collect(Collectors.toSet());
+        Map<Long, BigDecimal> paidBySaleId = new HashMap<>();
+        if (!openSaleIds.isEmpty()) {
+            List<Object[]> rows = paymentRepo.sumPaymentsBySaleIds(openSaleIds, PaymentSourceType.SALE);
+            for (Object[] row : rows) {
+                Long saleId = ((Number) row[0]).longValue();
+                BigDecimal paid = row[1] instanceof BigDecimal ? (BigDecimal) row[1]
+                        : BigDecimal.valueOf(((Number) row[1]).doubleValue());
+                paidBySaleId.put(saleId, paid);
+            }
+        }
+
         for (Sale s : sales) {
             BigDecimal total = s.getTotalAmount() == null ? BigDecimal.ZERO : s.getTotalAmount();
             totalValue = totalValue.add(total);
 
-            // Outstanding based on payment status
+            // Outstanding = invoice total minus payments already received.
+            // Using total directly for PARTIALLY_PAID invoices previously
+            // overstated outstanding — now we subtract what has been paid.
             if (s.getStatus() != SaleStatus.CANCELLED) {
                 if (s.getPaymentStatus() == PaymentStatus.PENDING || s.getPaymentStatus() == PaymentStatus.PARTIALLY_PAID) {
-                    outstanding = outstanding.add(total);
+                    BigDecimal paid = paidBySaleId.getOrDefault(s.getId(), BigDecimal.ZERO);
+                    BigDecimal due = total.subtract(paid).max(BigDecimal.ZERO);
+                    outstanding = outstanding.add(due);
                     LocalDate invoiceDate = s.getDate() != null ? s.getDate().toLocalDate() : today;
                     long days = java.time.temporal.ChronoUnit.DAYS.between(invoiceDate, today);
-                    if (days <= 30)       bucketCurrent = bucketCurrent.add(total);
-                    else if (days <= 60)  bucket31_60   = bucket31_60.add(total);
-                    else if (days <= 90)  bucket61_90   = bucket61_90.add(total);
-                    else                  bucket90Plus  = bucket90Plus.add(total);
+                    if (days <= 30)       bucketCurrent = bucketCurrent.add(due);
+                    else if (days <= 60)  bucket31_60   = bucket31_60.add(due);
+                    else if (days <= 90)  bucket61_90   = bucket61_90.add(due);
+                    else                  bucket90Plus  = bucket90Plus.add(due);
                 }
             }
 

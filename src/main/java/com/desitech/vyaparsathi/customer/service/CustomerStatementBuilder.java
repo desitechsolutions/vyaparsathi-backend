@@ -143,7 +143,8 @@ public class CustomerStatementBuilder {
                 }
             }
             for (Payment pay : payments) {
-                if (pay.getStatus() != null && pay.getStatus() != PaymentStatus.PAID) continue;
+                // Same rule as in-period: accept PAID and PARTIALLY_PAID, skip PENDING
+                if (pay.getStatus() == null || pay.getStatus() == PaymentStatus.PENDING) continue;
                 LocalDateTime payDate = pay.getPaymentDate() != null ? pay.getPaymentDate() : pay.getCreatedAt();
                 if (payDate != null && payDate.isBefore(startDate)) {
                     s.openingBalance = s.openingBalance.subtract(nz(pay.getAmount()));
@@ -188,7 +189,13 @@ public class CustomerStatementBuilder {
             s.totalInvoiced = s.totalInvoiced.add(line.debit);
         }
         for (Payment pay : payments) {
-            if (pay.getStatus() != null && pay.getStatus() != PaymentStatus.PAID) continue;
+            // Accept both PAID and PARTIALLY_PAID.
+            // PARTIALLY_PAID is the status set on the Payment record when the customer
+            // has paid less than the invoice total (e.g. ₹1000 on a ₹1500 invoice).
+            // determinePaymentStatus() correctly assigns PARTIALLY_PAID in that case,
+            // so excluding it would make totalPaid=0 for any partial receipt.
+            // PENDING payments are skipped — they are unconfirmed/future commitments.
+            if (pay.getStatus() == null || pay.getStatus() == PaymentStatus.PENDING) continue;
             LocalDateTime payDate = pay.getPaymentDate() != null ? pay.getPaymentDate() : pay.getCreatedAt();
             if (payDate == null) continue;
             if (startDate != null && payDate.isBefore(startDate)) continue;
